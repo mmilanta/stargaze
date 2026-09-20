@@ -1,0 +1,82 @@
+//! The telescope: an observer anchored to a point on a planet's surface.
+
+use glam::DVec3;
+
+use crate::sim::Scene;
+
+pub struct Observer {
+    /// Index of the body we stand on.
+    pub body: usize,
+    /// Latitude / longitude on that body (rad).
+    pub lat: f64,
+    pub lon: f64,
+    /// Alt-azimuth mount angles (rad). Azimuth is measured from local north,
+    /// increasing towards local east.
+    pub az: f64,
+    pub alt: f64,
+    /// Vertical field of view (rad).
+    pub fov_y: f64,
+}
+
+impl Observer {
+    pub fn new(body: usize) -> Self {
+        Self {
+            body,
+            lat: 35.0_f64.to_radians(),
+            lon: 0.0,
+            az: 0.0,
+            alt: 45.0_f64.to_radians(),
+            fov_y: 10.0_f64.to_radians(),
+        }
+    }
+}
+
+#[derive(Clone, Copy)]
+pub struct ViewFrame {
+    pub position: DVec3,
+    pub forward: DVec3,
+    pub right: DVec3,
+    pub up: DVec3,
+    pub zenith: DVec3,
+    pub north: DVec3,
+    pub east: DVec3,
+    /// Sine of the primary star's altitude above the local horizon.
+    pub sun_altitude: f64,
+}
+
+impl Observer {
+    pub fn frame(&self, scene: &Scene, t: f64, positions: &[DVec3]) -> ViewFrame {
+        let host = scene.body(self.body);
+        let center = positions[self.body];
+        let q = host.spin_quat(t);
+
+        let (slat, clat) = self.lat.sin_cos();
+        let (slon, clon) = self.lon.sin_cos();
+
+        // Surface frame expressed in the body's rotating frame (Z = spin axis).
+        let up_local = DVec3::new(clat * clon, clat * slon, slat);
+        let north_local = DVec3::new(-slat * clon, -slat * slon, clat);
+        let east_local = DVec3::new(-slon, clon, 0.0);
+
+        let zenith = (q * up_local).normalize();
+        let north = q * north_local;
+        let east = q * east_local;
+
+        let position = center + zenith * host.radius;
+
+        let (salt, calt) = self.alt.sin_cos();
+        let (saz, caz) = self.az.sin_cos();
+        let forward = (calt * (caz * north + saz * east) + salt * zenith).normalize();
+        let right = forward.cross(zenith).normalize();
+        let up = right.cross(forward);
+
+        // `sun_altitude` refers to the primary (first) star; used only for "is
+        // it day" heuristics in the aiming and event searches.
+        let sun_altitude = match scene.star_indices().first() {
+            Some(&si) => zenith.dot((positions[si] - position).normalize()),
+            None => 0.0,
+        };
+
+        ViewFrame { position, forward, right, up, zenith, north, east, sun_altitude }
+    }
+}
