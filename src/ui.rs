@@ -42,6 +42,8 @@ pub struct Label {
     /// On-screen radius of the body, in pixels.
     pub radius: f32,
     pub text: String,
+    /// Scene index of the labelled body, for lock highlighting.
+    pub body: usize,
 }
 
 #[derive(Clone, Copy, Debug)]
@@ -65,6 +67,13 @@ impl Rect {
     fn right(&self) -> f32 {
         self.x + self.w
     }
+}
+
+#[derive(Clone, Copy, Debug, Default)]
+pub struct LabelOptions {
+    pub show: bool,
+    /// Scene index of the body the view is locked onto, if any.
+    pub locked: Option<usize>,
 }
 
 pub struct Layout {
@@ -252,20 +261,62 @@ pub fn build(
     layout: &Layout,
     w: f32,
     h: f32,
-    show_labels: bool,
+    labels: LabelOptions,
     sim_time: f64,
-    labels: &[Label],
+    body_labels: &[Label],
 ) {
     let s = layout.scale;
-    if show_labels {
-        build_labels(verts, labels, s, w, h);
+    if labels.show {
+        build_labels(verts, body_labels, labels.locked, s, w, h);
     }
-    build_bar(verts, layout, w, h, show_labels, sim_time);
+    build_bar(verts, layout, w, h, labels.show, sim_time);
 }
 
-fn build_labels(verts: &mut Vec<UiVertex>, labels: &[Label], s: f32, w: f32, h: f32) {
+fn build_labels(
+    verts: &mut Vec<UiVertex>,
+    labels: &[Label],
+    locked: Option<usize>,
+    s: f32,
+    w: f32,
+    h: f32,
+) {
     let text_scale = TEXT_SCALE * s * 0.85;
     for label in labels {
+        let is_locked = locked == Some(label.body);
+        if is_locked {
+            // Corner brackets around the tracked body.
+            let r = (label.radius + 5.0 * s).max(8.0 * s);
+            let len = (r * 0.45).max(4.0 * s);
+            let t = (1.5 * s).max(1.0);
+            let c = [0.55, 0.85, 1.0, 0.95];
+            for (x, y, dx, dy) in [
+                (label.x - r, label.y - r, 1.0, 1.0),
+                (label.x + r, label.y - r, -1.0, 1.0),
+                (label.x - r, label.y + r, 1.0, -1.0),
+                (label.x + r, label.y + r, -1.0, -1.0),
+            ] {
+                // Horizontal arm, then vertical arm, each tucked inside the
+                // corner so the two overlap into a clean bracket.
+                push_rect(
+                    verts,
+                    if dx > 0.0 { x } else { x - len },
+                    if dy > 0.0 { y } else { y - t },
+                    len,
+                    t,
+                    c,
+                    [w, h],
+                );
+                push_rect(
+                    verts,
+                    if dx > 0.0 { x } else { x - t },
+                    if dy > 0.0 { y } else { y - len },
+                    t,
+                    len,
+                    c,
+                    [w, h],
+                );
+            }
+        }
         let tw = text_width(&label.text, text_scale);
         let th = 8.0 * text_scale;
         let mut x = label.x + label.radius + 7.0 * s;
@@ -290,7 +341,11 @@ fn build_labels(verts: &mut Vec<UiVertex>, labels: &[Label], s: f32, w: f32, h: 
             label.y - 0.5 * s,
             4.0 * s,
             1.0 * s,
-            [0.75, 0.85, 1.0, 0.9],
+            if is_locked {
+                [0.55, 0.85, 1.0, 0.95]
+            } else {
+                [0.75, 0.85, 1.0, 0.9]
+            },
             [w, h],
         );
         push_text(
@@ -299,7 +354,11 @@ fn build_labels(verts: &mut Vec<UiVertex>, labels: &[Label], s: f32, w: f32, h: 
             y,
             text_scale,
             &label.text,
-            [0.92, 0.95, 1.0, 1.0],
+            if is_locked {
+                [0.72, 0.92, 1.0, 1.0]
+            } else {
+                [0.92, 0.95, 1.0, 1.0]
+            },
             [w, h],
         );
     }

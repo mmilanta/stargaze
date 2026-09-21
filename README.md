@@ -18,7 +18,11 @@ All scene visibility and illumination are traced in a WGSL compute shader:
   hit, the integrator samples a direction uniformly over each star's apparent
   solid-angle disc, then traces a visibility ray. Blocked samples contribute
   nothing. **Umbras, penumbras and annular eclipses emerge from these samples**,
-  not from a smoothed shadow-cylinder approximation.
+  not from a smoothed shadow-cylinder approximation. The system's own stars are
+  real geometry: zooming in resolves their true physical discs, which also
+  govern occlusion, shadowing and light sampling. The two binary suns use
+  inflated radii with unchanged `luminosity`, keeping total light output the
+  same while thickening their discs.
 - **Indirect illumination:** cosine-weighted Lambertian bounces, power-heuristic
   multiple importance sampling (MIS), and Russian roulette. MIS combines disc
   samples and bounce rays that hit stars without double-counting sunlight.
@@ -31,7 +35,9 @@ All scene visibility and illumination are traced in a WGSL compute shader:
 - **Background stars:** fixed angular emissive discs at infinity, intersected
   by miss-ray directions. A conservative spherical grid accelerates catalogue
   lookup. They do not fade with the Sun's altitude or grow to a minimum pixel
-  size. Background light can also be received by indirect paths.
+  size, and are capped to a small screen-space dot so deep zooms show points of
+  light rather than filling the view with discs. Background light can also be
+  received by indirect paths.
 - **No atmosphere:** no scattering, refraction, haze, stellar halo, artificial
   ambient lighting, or red lunar-eclipse glow. Space is black; a fully eclipsed
   Moon receives only indirect light. Surfaces retain the procedural albedo
@@ -99,6 +105,7 @@ sequence is deterministic for a given pixel and sample index.
 | Input | Action |
 | --- | --- |
 | left-drag (sky) | look around |
+| left-click (body) | lock the telescope onto that body; click empty sky or start a drag to release |
 | scroll / `=` / `-` | zoom, down to 0.001° |
 | `-1d` `-1h` `-1m` `+1m` `+1h` `+1d` (bar) | step simulation time |
 | Labels toggle (bar) | show / hide names |
@@ -111,6 +118,11 @@ sequence is deterministic for a given pixel and sample index.
 | `H` | show / hide HUD |
 | `L` | toggle labels |
 | esc | quit |
+
+Clicking a body locks the view to it: as simulation time advances the
+telescope keeps pointing at that body, so it stays framed while its phase and
+position change. The locked body's label is bracketed in the sky. Clicking
+empty sky, dragging, aiming with a number key, or resetting releases the lock.
 
 Startup helpers (body indices depend on the selected system):
 

@@ -30,6 +30,11 @@ struct CatalogueStar {
 const PI: f32 = 3.141592653589793;
 const TAU: f32 = 6.283185307179586;
 const MISS: u32 = 0xffffffffu;
+// A *background* catalogue star never covers more than this many pixels in
+// radius, so a deep zoom resolves points of light rather than filling the view
+// with discs. Simulated bodies (including the system's real stars) are not
+// capped: they grow to their true physical size when zoomed in.
+const STAR_DOT_PIXELS: f32 = 3.0;
 
 struct Ray {
     // Origin = bodies[anchor].center + offset; MISS means camera origin.
@@ -74,6 +79,12 @@ fn relative_center(ray: Ray, index: u32) -> vec3<f32> {
     }
     return (bodies[index].center.xyz - bodies[ray.anchor].center.xyz)
         + ((bodies[index].low.xyz - bodies[ray.anchor].low.xyz) - ray.offset);
+}
+
+// Half-angle of one pixel under the tangent projection, scaled to the dot cap.
+// This is the largest angular radius a background catalogue star may have.
+fn star_dot_sin() -> f32 {
+    return STAR_DOT_PIXELS * 2.0 * settings.g.cam_forward.w / max(settings.g.viewport.y, 1.0);
 }
 
 fn sphere_hit(ray: Ray, index: u32) -> Hit {
@@ -157,10 +168,15 @@ fn environment(view_direction: vec3<f32>) -> vec3<f32> {
     let y = min(u32(theta * (128.0 / PI)), 127u);
     let cell = y * 256u + x;
     var light = vec3<f32>(0.0);
+    // Catalogue stars are capped to the same screen-space dot radius, so a
+    // deep zoom shows points of light instead of filling the view with discs.
+    let dot_sin = star_dot_sin();
+    let dot_sin2 = dot_sin * dot_sin;
     for (var j = sky_cells[cell]; j < sky_cells[cell + 1u]; j += 1u) {
         let star = catalogue[sky_cells[32769u + j]];
         let perpendicular = cross(direction, star.direction.xyz);
-        if (dot(direction, star.direction.xyz) > 0.0 && dot(perpendicular, perpendicular) <= star.direction.w) {
+        if (dot(direction, star.direction.xyz) > 0.0
+            && dot(perpendicular, perpendicular) <= min(star.direction.w, dot_sin2)) {
             light += star.radiance.rgb;
         }
     }

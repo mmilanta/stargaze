@@ -208,7 +208,9 @@ pub fn default_scene() -> Scene {
                 epoch: 0.0,
             },
             period_days: terra_period,
-            radius: 6_371.0 / AU_KM,
+            // Three times the real diameter, as requested. The Moon's orbit is
+            // still well outside.
+            radius: 3.0 * 6_371.0 / AU_KM,
             kind: BodyKind::Planet,
             albedo: [0.28, 0.36, 0.55],
             emission: [0.0; 3],
@@ -253,7 +255,9 @@ pub fn default_scene() -> Scene {
                 epoch: 0.0,
             },
             period_days: mars_period,
-            radius: 3_389.5 / AU_KM,
+            // Three times the real diameter. Phobos's orbit below is scaled by
+            // the same factor so it does not end up inside the larger planet.
+            radius: 3.0 * 3_389.5 / AU_KM,
             kind: BodyKind::Planet,
             albedo: [0.55, 0.30, 0.18],
             emission: [0.0; 3],
@@ -266,7 +270,8 @@ pub fn default_scene() -> Scene {
             name: "Phobos".into(),
             parent: Some(3),
             elements: Elements {
-                a: 9_376.0 / AU_KM,
+                // Scaled with Mars's enlarged radius (still ~2.8 Mars radii out).
+                a: 3.0 * 9_376.0 / AU_KM,
                 e: 0.015_1,
                 inc: 1.075 * deg,
                 node: 0.0,
@@ -350,14 +355,17 @@ pub fn binary_scene() -> Scene {
             spin_period: 1.0,
             spin_phase: 0.0,
         },
-        // 1 — Aur: larger, yellow.
-        star("Aur", 0.30, 0.0, 0.0060, [1.0, 0.96, 0.86], 2.0, 22.0),
+        // 1 — Aur: larger, yellow. The radii are inflated for a thicker disc
+        // while `luminosity` (the total light output) is unchanged: emitted
+        // radiance scales as luminosity / radius^2, so a bigger sphere is
+        // dimmer per unit area and the surface illumination is identical.
+        star("Aur", 0.30, 0.0, 0.030, [1.0, 0.96, 0.86], 2.0, 22.0),
         // 2 — Igni: smaller and redder.
         star(
             "Igni",
             0.50,
             std::f64::consts::PI,
-            0.0035,
+            0.018,
             [1.0, 0.42, 0.20],
             0.7,
             30.0,

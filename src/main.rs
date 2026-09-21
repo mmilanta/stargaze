@@ -54,6 +54,13 @@ struct State {
     last: Instant,
     dragging: bool,
     last_cursor: Option<(f64, f64)>,
+    /// Body the view is locked onto, if any. While locked the telescope keeps
+    /// pointing at it even as simulation time advances.
+    tracked: Option<usize>,
+    /// Cursor position where the current left-button press began (sky only).
+    press: Option<(f64, f64)>,
+    /// Accumulated cursor travel since the press, in physical pixels.
+    drag_distance: f64,
 }
 
 impl State {
@@ -74,6 +81,9 @@ impl State {
             last: Instant::now(),
             dragging: false,
             last_cursor: None,
+            tracked: None,
+            press: None,
+            drag_distance: 0.0,
         };
         state.find_good_start();
         if let Ok(t) = std::env::var("STARGAZE_TIME")
@@ -142,6 +152,7 @@ impl State {
     /// above the horizon, a dark sky, and (for planets and moons) a well-lit
     /// phase. Zooms to fit the body together with its moons.
     fn aim_at(&mut self, target: usize) {
+        self.tracked = None;
         let is_star = self.scene.body(target).kind == BodyKind::Star;
 
         // Park exactly on the requested moment instead of searching.
@@ -204,6 +215,7 @@ impl State {
 
     /// Aim at a body with an explicit field of view.
     fn point_at_fov(&mut self, target: usize, fov: f64) {
+        self.tracked = None;
         let positions = self.scene.positions(self.sim_time);
         let vf = self.observer.frame(&self.scene, self.sim_time, &positions);
         let dir = (positions[target] - vf.position).normalize();
@@ -335,7 +347,65 @@ impl State {
     }
 
     fn reset_view(&mut self) {
-        self.aim_at(2);
+        self.aim_at(self.scene.default_target);
+    }
+
+    /// Keep the telescope pointed at the locked body as time advances.
+    fn track(&mut self) {
+        let Some(target) = self.tracked else {
+            return;
+        };
+        let positions = self.scene.positions(self.sim_time);
+        let vf = self.observer.frame(&self.scene, self.sim_time, &positions);
+        let dir = (positions[target] - vf.position).normalize();
+        self.observer.alt = dir.dot(vf.zenith).asin();
+        self.observer.az = dir.dot(vf.east).atan2(dir.dot(vf.north));
+    }
+
+    /// Return the nearest body under a physical-pixel cursor position, if any.
+    ///
+    /// Unlike the label pass this is a true ray/sphere test, so overlapping
+    /// bodies resolve to whichever is actually in front.
+    fn pick_body(&self, x: f64, y: f64, width: u32, height: u32) -> Option<usize> {
+        if width == 0 || height == 0 {
+            return None;
+        }
+        let positions = self.scene.positions(self.sim_time);
+        let vf = self.observer.frame(&self.scene, self.sim_time, &positions);
+        let aspect = width as f64 / height as f64;
+        let tan_half = (self.observer.fov_y * 0.5).tan();
+        let ndc_x = 2.0 * x / width as f64 - 1.0;
+        let ndc_y = 1.0 - 2.0 * y / height as f64;
+        // Ray in telescope space (forward is -Z), then rotated to world space.
+        let view = DVec3::new(ndc_x * tan_half * aspect, ndc_y * tan_half, -1.0).normalize();
+        let dir = (vf.right * view.x + vf.up * view.y - vf.forward * view.z).normalize();
+        // The host body is kept as an occluder so a click on the ground cannot
+        // select a body hidden on the far side of the planet, but it is never
+        // itself selectable.
+        let mut best: Option<(f64, usize)> = None;
+        for (i, body) in self.scene.bodies.iter().enumerate() {
+            if body.kind == BodyKind::Anchor || body.radius <= 0.0 {
+                continue;
+            }
+            let oc = positions[i] - vf.position;
+            let along = oc.dot(dir);
+            if along <= 0.0 {
+                continue;
+            }
+            let perpendicular2 = oc.length_squared() - along * along;
+            let r2 = body.radius * body.radius;
+            if perpendicular2 > r2 {
+                continue;
+            }
+            let distance = along - (r2 - perpendicular2).sqrt();
+            if distance > 0.0 && best.is_none_or(|(bd, _)| distance < bd) {
+                best = Some((distance, i));
+            }
+        }
+        match best {
+            Some((_, i)) if i != self.scene.host => Some(i),
+            _ => None,
+        }
     }
 
     fn build_frame(&self, width: u32, height: u32) -> Frame {
@@ -422,6 +492,7 @@ impl State {
                     y: sy,
                     radius: px_r.max(4.0),
                     text: body.name.clone(),
+                    body: i,
                 });
             }
         }
@@ -497,6 +568,7 @@ impl ApplicationHandler for App {
             }
             WindowEvent::RedrawRequested => {
                 self.state.advance();
+                self.state.track();
                 if let (Some(r), Some(window)) = (self.renderer.as_mut(), self.window.as_ref()) {
                     let (w, h) = r.size();
                     if w > 0 && h > 0 {
@@ -508,7 +580,10 @@ impl ApplicationHandler for App {
                                 &layout,
                                 w as f32,
                                 h as f32,
-                                self.show_labels,
+                                ui::LabelOptions {
+                                    show: self.show_labels,
+                                    locked: self.state.tracked,
+                                },
                                 self.state.sim_time,
                                 &frame.labels,
                             );
@@ -520,8 +595,12 @@ impl ApplicationHandler for App {
                     } else {
                         format!("{:.3} day/s", WARPS[self.state.warp])
                     };
+                    let lock = match self.state.tracked {
+                        Some(i) => format!("  ·  locked: {}", self.state.scene.body(i).name),
+                        None => String::new(),
+                    };
                     let title = format!(
-                        "stargaze  ·  t = {:.2} d ({:.3} yr)  ·  {}  ·  {} spp  ·  drag=look  scroll=zoom  space=play/pause  [ ]=speed  R=reset  E=eclipse  T=phobos  H=hud  L=labels",
+                        "stargaze  ·  t = {:.2} d ({:.3} yr)  ·  {}  ·  {} spp{lock}  ·  click body=lock  drag=look  scroll=zoom  space=play/pause  [ ]=speed  R=reset  E=eclipse  T=phobos  H=hud  L=labels",
                         self.state.sim_time,
                         self.state.sim_time / 365.256,
                         rate,
@@ -562,7 +641,13 @@ impl ApplicationHandler for App {
                                 }
                             }
                         }
-                        if !consumed {
+                        if consumed {
+                            self.state.press = None;
+                            self.state.dragging = false;
+                            self.state.last_cursor = None;
+                        } else {
+                            self.state.press = Some((cx, cy));
+                            self.state.drag_distance = 0.0;
                             self.state.dragging = true;
                             self.state.last_cursor = Some((cx, cy));
                         }
@@ -570,6 +655,17 @@ impl ApplicationHandler for App {
                     ElementState::Released => {
                         self.state.dragging = false;
                         self.state.last_cursor = None;
+                        // A press that barely moved is a click: lock the body
+                        // under the cursor (or unlock when the sky was hit).
+                        if self.state.press.take().is_some()
+                            && self.state.drag_distance <= 4.0 * self.scale as f64
+                        {
+                            let picked = self.renderer.as_ref().and_then(|r| {
+                                let (w, h) = r.size();
+                                self.state.pick_body(self.cursor.0, self.cursor.1, w, h)
+                            });
+                            self.state.tracked = picked;
+                        }
                     }
                 }
             }
@@ -581,6 +677,12 @@ impl ApplicationHandler for App {
                 {
                     let dx = pos.0 - prev.0;
                     let dy = pos.1 - prev.1;
+                    self.state.drag_distance += (dx * dx + dy * dy).sqrt();
+                    if self.state.drag_distance > 4.0 * self.scale as f64 {
+                        // A real drag becomes free look, releasing any lock so
+                        // the tracking does not fight the cursor.
+                        self.state.tracked = None;
+                    }
                     // Grab-the-sky dragging: the content follows the cursor,
                     // at a rate set by the current field of view, so zooming
                     // also changes how fast looking feels.
@@ -762,6 +864,35 @@ mod app_tests {
         let y = (0.5 - center.y / (-center.z * tan_half) * 0.5) * 601.0;
         assert!((label.x as f64 - x).abs() < 0.01);
         assert!((label.y as f64 - y).abs() < 0.01);
+    }
+
+    #[test]
+    fn clicking_a_body_picks_it_and_tracking_keeps_it_centered() {
+        let mut state = State::with_scene(sim::default_scene());
+        // Aim at Luna (2), which `find_good_start` guarantees is above the
+        // horizon; a click at the exact centre must hit it.
+        state.point_at(2);
+        assert_eq!(
+            state.pick_body(400.0, 300.0, 800, 600),
+            Some(2),
+            "centre click should pick Luna"
+        );
+        // A far-off corner is empty sky (the host planet is never pickable).
+        assert_eq!(state.pick_body(1.0, 1.0, 800, 600), None);
+
+        // Lock it, advance time, and re-track: the body stays centred.
+        state.tracked = Some(2);
+        state.sim_time += 37.0;
+        state.track();
+        let positions = state.scene.positions(state.sim_time);
+        let vf = state
+            .observer
+            .frame(&state.scene, state.sim_time, &positions);
+        let dir = (positions[2] - vf.position).normalize();
+        assert!(
+            vf.forward.dot(dir) > 0.999_999,
+            "locked body should stay centred as time advances"
+        );
     }
 
     #[test]
