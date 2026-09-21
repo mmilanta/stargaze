@@ -1,10 +1,8 @@
 // Display only: linear HDR accumulation -> ACES -> sRGB swapchain.
 struct Globals {
-    view_proj: mat4x4<f32>,
     cam_right: vec4<f32>,
     cam_up: vec4<f32>,
     cam_forward: vec4<f32>,
-    cam_zenith: vec4<f32>,
     viewport: vec4<f32>,
 };
 struct Settings {

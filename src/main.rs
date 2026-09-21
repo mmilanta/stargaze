@@ -11,7 +11,7 @@ use std::sync::Arc;
 use std::time::Instant;
 
 use anyhow::Result;
-use glam::{DVec3, Mat4, Vec3};
+use glam::DVec3;
 use winit::application::ApplicationHandler;
 use winit::event::{ElementState, MouseButton, MouseScrollDelta, WindowEvent};
 use winit::event_loop::{ActiveEventLoop, ControlFlow, EventLoop};
@@ -19,9 +19,9 @@ use winit::keyboard::{KeyCode, PhysicalKey};
 use winit::window::{Window, WindowId};
 
 use camera::{Observer, ViewFrame};
-use renderer::{BodyInstance, Frame, Globals, Renderer};
+use renderer::{Frame, Globals, Renderer, Sphere};
 use sim::{BodyKind, Scene};
-use stars::StarInstance;
+use stars::CatalogueStar;
 use ui::Label;
 
 /// Simulation speeds in days per real second.
@@ -76,10 +76,10 @@ impl State {
             last_cursor: None,
         };
         state.find_good_start();
-        if let Ok(t) = std::env::var("STARGAZE_TIME") {
-            if let Ok(v) = t.parse::<f64>() {
-                state.sim_time = v;
-            }
+        if let Ok(t) = std::env::var("STARGAZE_TIME")
+            && let Ok(v) = t.parse::<f64>()
+        {
+            state.sim_time = v;
         }
         let aim_env = std::env::var("STARGAZE_AIM")
             .ok()
@@ -92,22 +92,22 @@ impl State {
                 state.point_at_fov(target, fov);
             }
         }
-        if let Ok(f) = std::env::var("STARGAZE_FOV") {
-            if let Ok(v) = f.parse::<f64>() {
-                state.observer.fov_y = v
-                    .to_radians()
-                    .clamp(MIN_FOV_DEG.to_radians(), MAX_FOV_DEG.to_radians());
-            }
+        if let Ok(f) = std::env::var("STARGAZE_FOV")
+            && let Ok(v) = f.parse::<f64>()
+        {
+            state.observer.fov_y = v
+                .to_radians()
+                .clamp(MIN_FOV_DEG.to_radians(), MAX_FOV_DEG.to_radians());
         }
-        if std::env::var("STARGAZE_FIND_ECLIPSE").is_ok() {
-            if let Some(what) = state.next_eclipse() {
-                log::info!("found {what} at t = {:.3} d", state.sim_time);
-            }
+        if std::env::var("STARGAZE_FIND_ECLIPSE").is_ok()
+            && let Some(what) = state.next_eclipse()
+        {
+            log::info!("found {what} at t = {:.3} d", state.sim_time);
         }
-        if std::env::var("STARGAZE_FIND_PHOBOS").is_ok() {
-            if let Some(what) = state.next_phobos_event() {
-                log::info!("found {what} at t = {:.3} d", state.sim_time);
-            }
+        if std::env::var("STARGAZE_FIND_PHOBOS").is_ok()
+            && let Some(what) = state.next_phobos_event()
+        {
+            log::info!("found {what} at t = {:.3} d", state.sim_time);
         }
         state
     }
@@ -344,31 +344,6 @@ impl State {
 
         let aspect = width as f64 / height.max(1) as f64;
         let tan_half = (self.observer.fov_y * 0.5).tan();
-        let f = 1.0 / tan_half;
-        let near = 2.0e-6; // AU — close enough for a moon skimming its planet
-
-        // Reverse-Z, infinite far plane: near -> 1.0, infinity -> 0.0.
-        let proj = Mat4::from_cols_array(&[
-            (f / aspect) as f32,
-            0.0,
-            0.0,
-            0.0,
-            0.0,
-            f as f32,
-            0.0,
-            0.0,
-            0.0,
-            0.0,
-            0.0,
-            -1.0,
-            0.0,
-            0.0,
-            near,
-            0.0,
-        ]);
-        let view =
-            glam::camera::rh::view::look_to_mat4(Vec3::ZERO, vf.forward.as_vec3(), vf.up.as_vec3());
-        let view_proj = proj * view;
 
         let mut bodies = Vec::new();
         for (i, body) in self.scene.bodies.iter().enumerate() {
@@ -379,16 +354,12 @@ impl State {
             // Rotate in f64 as well as subtracting the camera. In telescope
             // space, near-axis ray x/y stay tiny instead of being rounded away
             // when added to a large world-space direction at extreme zoom.
-            let view_center = DVec3::new(
-                relative.dot(vf.right),
-                relative.dot(vf.up),
-                -relative.dot(vf.forward),
-            );
+            let view_center = vf.world_to_view(relative);
             let center = view_center.as_vec3();
             let low = (view_center - center.as_dvec3()).as_vec3();
             let star = body.kind == BodyKind::Star;
             let radiance = (SUN_LIGHT * body.luminosity as f64 / body.radius.powi(2)) as f32;
-            bodies.push(BodyInstance {
+            bodies.push(Sphere {
                 center: center.into(),
                 radius: body.radius as f32,
                 color: if star {
@@ -402,7 +373,6 @@ impl State {
         }
 
         let globals = Globals {
-            view_proj: view_proj.to_cols_array(),
             cam_right: [vf.right.x as f32, vf.right.y as f32, vf.right.z as f32, 0.0],
             cam_up: [vf.up.x as f32, vf.up.y as f32, vf.up.z as f32, 0.0],
             cam_forward: [
@@ -410,12 +380,6 @@ impl State {
                 vf.forward.y as f32,
                 vf.forward.z as f32,
                 tan_half as f32,
-            ],
-            cam_zenith: [
-                vf.zenith.x as f32,
-                vf.zenith.y as f32,
-                vf.zenith.z as f32,
-                0.0,
             ],
             viewport: [width as f32, height as f32, 1.0, 0.0],
         };
@@ -425,34 +389,34 @@ impl State {
         {
             let w = width as f32;
             let h = height as f32;
-            let tan_half_f = tan_half as f32;
-            let zenith = vf.zenith.as_vec3();
             for (i, body) in self.scene.bodies.iter().enumerate() {
                 if i == self.scene.host || body.kind == BodyKind::Anchor {
                     continue;
                 }
-                let center = (positions[i] - vf.position).as_vec3();
-                let dist = center.length();
+                let relative = positions[i] - vf.position;
+                let dist = relative.length();
                 if dist < 1.0e-9 {
                     continue;
                 }
                 // Skip anything below the local horizon.
-                if (center / dist).dot(zenith) < 0.0 {
+                if relative.dot(vf.zenith) < 0.0 {
                     continue;
                 }
-                let clip = view_proj * glam::Vec4::new(center.x, center.y, center.z, 1.0);
-                if clip.w <= 0.0 {
+                // Labels use the same f64 telescope coordinates as the traced
+                // geometry; no raster projection or depth range is needed.
+                let center = vf.world_to_view(relative);
+                if center.z >= 0.0 {
                     continue;
                 }
-                let ndc_x = clip.x / clip.w;
-                let ndc_y = clip.y / clip.w;
+                let ndc_x = center.x / (-center.z * tan_half * aspect);
+                let ndc_y = center.y / (-center.z * tan_half);
                 if !(-1.0..=1.0).contains(&ndc_x) || !(-1.0..=1.0).contains(&ndc_y) {
                     continue;
                 }
-                let sx = (ndc_x * 0.5 + 0.5) * w;
-                let sy = (1.0 - (ndc_y * 0.5 + 0.5)) * h;
-                let ang = body.radius as f32 / dist;
-                let px_r = (ang / tan_half_f) * (h * 0.5);
+                let sx = (ndc_x * 0.5 + 0.5) as f32 * w;
+                let sy = (1.0 - (ndc_y * 0.5 + 0.5)) as f32 * h;
+                let ang = body.radius / dist;
+                let px_r = (ang / tan_half) as f32 * (h * 0.5);
                 labels.push(Label {
                     x: sx,
                     y: sy,
@@ -476,7 +440,7 @@ struct App {
     state: State,
     window: Option<Arc<Window>>,
     renderer: Option<Renderer>,
-    stars: Vec<StarInstance>,
+    stars: Vec<CatalogueStar>,
     last_title: String,
     scale: f32,
     cursor: (f64, f64),
@@ -577,24 +541,24 @@ impl ApplicationHandler for App {
                     ElementState::Pressed => {
                         let (cx, cy) = self.cursor;
                         let mut consumed = false;
-                        if self.show_hud {
-                            if let Some(layout) = self.ui_layout() {
-                                if layout.toggle.contains(cx, cy) {
-                                    self.show_labels = !self.show_labels;
-                                    consumed = true;
-                                } else {
-                                    for (rect, (_, delta)) in
-                                        layout.buttons.iter().zip(ui::TIME_BUTTONS.iter())
-                                    {
-                                        if rect.contains(cx, cy) {
-                                            self.state.sim_time += delta;
-                                            consumed = true;
-                                            break;
-                                        }
-                                    }
-                                    if !consumed && layout.bar.contains(cx, cy) {
+                        if self.show_hud
+                            && let Some(layout) = self.ui_layout()
+                        {
+                            if layout.toggle.contains(cx, cy) {
+                                self.show_labels = !self.show_labels;
+                                consumed = true;
+                            } else {
+                                for (rect, (_, delta)) in
+                                    layout.buttons.iter().zip(ui::TIME_BUTTONS.iter())
+                                {
+                                    if rect.contains(cx, cy) {
+                                        self.state.sim_time += delta;
                                         consumed = true;
+                                        break;
                                     }
+                                }
+                                if !consumed && layout.bar.contains(cx, cy) {
+                                    consumed = true;
                                 }
                             }
                         }
@@ -612,28 +576,28 @@ impl ApplicationHandler for App {
             WindowEvent::CursorMoved { position, .. } => {
                 let pos = (position.x, position.y);
                 self.cursor = pos;
-                if self.state.dragging {
-                    if let Some(prev) = self.state.last_cursor {
-                        let dx = pos.0 - prev.0;
-                        let dy = pos.1 - prev.1;
-                        // Grab-the-sky dragging: the content follows the cursor,
-                        // at a rate set by the current field of view, so zooming
-                        // also changes how fast looking feels.
-                        let height = self
-                            .renderer
-                            .as_ref()
-                            .map(|r| r.size().1)
-                            .unwrap_or(1)
-                            .max(1) as f64;
-                        let rad_per_px = self.state.observer.fov_y / height;
-                        self.state.observer.az -= dx * rad_per_px;
-                        self.state.observer.alt += dy * rad_per_px;
-                        self.state.observer.alt = self
-                            .state
-                            .observer
-                            .alt
-                            .clamp(-5.0_f64.to_radians(), 89.0_f64.to_radians());
-                    }
+                if self.state.dragging
+                    && let Some(prev) = self.state.last_cursor
+                {
+                    let dx = pos.0 - prev.0;
+                    let dy = pos.1 - prev.1;
+                    // Grab-the-sky dragging: the content follows the cursor,
+                    // at a rate set by the current field of view, so zooming
+                    // also changes how fast looking feels.
+                    let height = self
+                        .renderer
+                        .as_ref()
+                        .map(|r| r.size().1)
+                        .unwrap_or(1)
+                        .max(1) as f64;
+                    let rad_per_px = self.state.observer.fov_y / height;
+                    self.state.observer.az -= dx * rad_per_px;
+                    self.state.observer.alt += dy * rad_per_px;
+                    self.state.observer.alt = self
+                        .state
+                        .observer
+                        .alt
+                        .clamp(-5.0_f64.to_radians(), 89.0_f64.to_radians());
                 }
                 self.state.last_cursor = Some(pos);
             }
@@ -740,30 +704,18 @@ fn main() -> Result<()> {
     );
     if std::env::var("STARGAZE_DEBUG").is_ok() {
         let frame = app.state.build_frame(1280, 720);
-        let m = frame.globals.view_proj;
-        let mm = glam::Mat4::from_cols_array(&m);
         log::info!("forward={:?}", frame.globals.cam_forward);
-        log::info!("zenith={:?}", frame.globals.cam_zenith);
         log::info!(
             "ray-traced bodies={} viewport={:?}",
             frame.bodies.len(),
             frame.globals.viewport
         );
-        log::info!("view_proj={:?}", m);
         for (i, s) in app.stars.iter().take(4).enumerate() {
-            let d = s.dir;
-            let p = glam::Vec4::new(d[0] * 1e5, d[1] * 1e5, d[2] * 1e5, 1.0);
-            let c = mm * p;
             log::info!(
-                "star{i}: bright={:.3} size={:.2} clip=({:.0},{:.0},{:.4},{:.0}) ndc=({:.3},{:.3})",
+                "star{i}: direction={:?} brightness={:.3} angular_radius={:.6} rad",
+                s.dir,
                 s.bright,
-                s.size,
-                c.x,
-                c.y,
-                c.z,
-                c.w,
-                c.x / c.w,
-                c.y / c.w
+                s.angular_radius
             );
         }
         for b in &frame.bodies {
@@ -783,6 +735,34 @@ fn main() -> Result<()> {
 #[cfg(test)]
 mod app_tests {
     use super::*;
+
+    #[test]
+    fn labels_stay_aligned_with_traced_geometry_at_deep_zoom() {
+        let mut state = State::with_scene(sim::binary_scene());
+        state.sim_time = 444.478;
+        state.point_at_fov(8, 0.005323985_f64.to_radians());
+        let centered = state.build_frame(801, 601);
+        let label = centered.labels.iter().find(|l| l.text == "Vantus").unwrap();
+        assert!((label.x - 400.5).abs() < 0.01);
+        assert!((label.y - 300.5).abs() < 0.01);
+
+        state.observer.az += state.observer.fov_y * 0.1;
+        let offset = state.build_frame(801, 601);
+        let label = offset.labels.iter().find(|l| l.text == "Vantus").unwrap();
+        // Binary scene index 0 is an invisible anchor, hence sphere index 7.
+        let sphere = &offset.bodies[7];
+        let center = DVec3::from_array(sphere.center.map(f64::from))
+            + DVec3::new(
+                sphere.center_low[0] as f64,
+                sphere.center_low[1] as f64,
+                sphere.center_low[2] as f64,
+            );
+        let tan_half = offset.globals.cam_forward[3] as f64;
+        let x = (center.x / (-center.z * tan_half * 801.0 / 601.0) * 0.5 + 0.5) * 801.0;
+        let y = (0.5 - center.y / (-center.z * tan_half) * 0.5) * 601.0;
+        assert!((label.x as f64 - x).abs() < 0.01);
+        assert!((label.y as f64 - y).abs() < 0.01);
+    }
 
     #[test]
     fn eclipse_search_finds_something() {

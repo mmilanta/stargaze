@@ -2,7 +2,7 @@
 use std::sync::Arc;
 
 use crate::pathtracer::{Options, PathTracer};
-use crate::stars::StarInstance;
+use crate::stars::CatalogueStar;
 use crate::ui::{self, Label, UiVertex};
 use anyhow::{Result, anyhow};
 use bytemuck::{Pod, Zeroable};
@@ -11,17 +11,15 @@ use winit::window::Window;
 #[repr(C)]
 #[derive(Clone, Copy, Pod, Zeroable)]
 pub struct Globals {
-    pub view_proj: [f32; 16], // retained for CPU label projection/debugging
     pub cam_right: [f32; 4],
     pub cam_up: [f32; 4],
     pub cam_forward: [f32; 4], // w = tan(fov_y / 2)
-    pub cam_zenith: [f32; 4],
-    pub viewport: [f32; 4], // width, height, exposure, unused
+    pub viewport: [f32; 4],    // width, height, exposure, unused
 }
 
 #[repr(C)]
 #[derive(Clone, Copy, Pod, Zeroable)]
-pub struct BodyInstance {
+pub struct Sphere {
     pub center: [f32; 3], // telescope space, looking along -Z
     pub radius: f32,
     pub color: [f32; 3], // reflectance or emitted radiance
@@ -31,7 +29,7 @@ pub struct BodyInstance {
 
 pub struct Frame {
     pub globals: Globals,
-    pub bodies: Vec<BodyInstance>,
+    pub bodies: Vec<Sphere>,
     pub scene_time: f64,
     pub labels: Vec<Label>,
     pub ui: Vec<UiVertex>,
@@ -51,7 +49,7 @@ pub struct Renderer {
 }
 
 impl Renderer {
-    pub fn new(window: Arc<Window>, stars: &[StarInstance]) -> Result<Self> {
+    pub fn new(window: Arc<Window>, stars: &[CatalogueStar]) -> Result<Self> {
         let instance = wgpu::Instance::new(wgpu::InstanceDescriptor::new_without_display_handle());
         let surface = instance.create_surface(window.clone())?;
         let adapter = pollster::block_on(instance.request_adapter(&wgpu::RequestAdapterOptions {

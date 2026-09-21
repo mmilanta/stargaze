@@ -44,6 +44,17 @@ pub struct ViewFrame {
     pub sun_altitude: f64,
 }
 
+impl ViewFrame {
+    /// Rotate a camera-relative vector into telescope space (forward is -Z).
+    pub fn world_to_view(&self, relative: DVec3) -> DVec3 {
+        DVec3::new(
+            relative.dot(self.right),
+            relative.dot(self.up),
+            -relative.dot(self.forward),
+        )
+    }
+}
+
 impl Observer {
     pub fn frame(&self, scene: &Scene, t: f64, positions: &[DVec3]) -> ViewFrame {
         let host = scene.body(self.body);

@@ -14,8 +14,8 @@ fn frame() -> Frame {
         ui: vec![],
     }
 }
-fn body(center: [f32; 3], radius: f32, color: [f32; 3], emissive: bool) -> BodyInstance {
-    BodyInstance {
+fn body(center: [f32; 3], radius: f32, color: [f32; 3], emissive: bool) -> Sphere {
+    Sphere {
         center,
         radius,
         color,
@@ -42,7 +42,7 @@ fn validate_shaders_and_buffer_layouts() {
             let expected = match ty.name.as_deref() {
                 Some("Settings") => Some(std::mem::size_of::<Settings>()),
                 Some("Globals") => Some(std::mem::size_of::<Globals>()),
-                Some("Body") => Some(std::mem::size_of::<BodyInstance>()),
+                Some("Body") => Some(std::mem::size_of::<Sphere>()),
                 Some("CatalogueStar") => Some(std::mem::size_of::<stars::RayStar>()),
                 _ => None,
             };

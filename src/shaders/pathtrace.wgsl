@@ -2,11 +2,9 @@
 // Direct light: one solid-angle sample per stellar disc, with power-heuristic MIS.
 // Indirect light: cosine-weighted Lambertian bounces and Russian roulette.
 struct Globals {
-    view_proj: mat4x4<f32>,
     cam_right: vec4<f32>,
     cam_up: vec4<f32>,
     cam_forward: vec4<f32>, // w = tan(vertical FOV / 2)
-    cam_zenith: vec4<f32>,
     viewport: vec4<f32>, // width, height, exposure, unused
 };
 struct Settings {

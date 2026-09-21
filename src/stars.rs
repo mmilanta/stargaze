@@ -2,12 +2,12 @@
 
 use bytemuck::{Pod, Zeroable};
 
-#[repr(C)]
-#[derive(Clone, Copy, Debug, Pod, Zeroable)]
-pub struct StarInstance {
+#[derive(Clone, Copy, Debug)]
+pub struct CatalogueStar {
     pub dir: [f32; 3],
     pub color: [f32; 3],
-    pub size: f32,
+    /// Fixed angular radius in radians, not a screen-space point size.
+    pub angular_radius: f32,
     pub bright: f32,
 }
 
@@ -73,22 +73,22 @@ fn random_dir(rng: &mut Rng) -> [f32; 3] {
     [r * phi.cos(), r * phi.sin(), z]
 }
 
-fn star(rng: &mut Rng, dim: f32) -> StarInstance {
+fn star(rng: &mut Rng, dim: f32) -> CatalogueStar {
     let u = rng.f32();
     // Power law: many faint, few bright.
     let bright = (0.02 + u * u * u * 1.6) * dim;
     let temp = 2500.0 + 12000.0 * rng.f32().powi(2);
-    let size = (0.7 + 2.6 * bright.sqrt()).clamp(0.7, 3.4);
-    StarInstance {
+    let angular_radius = (0.7 + 2.6 * bright.sqrt()).clamp(0.7, 3.4) * 0.0004;
+    CatalogueStar {
         dir: random_dir(rng),
         color: blackbody_linear(temp),
-        size,
+        angular_radius,
         bright,
     }
 }
 
 /// Build `count` uniform stars plus `band` extra stars along the Milky Way.
-pub fn generate(count: usize, band: usize, seed: u64) -> Vec<StarInstance> {
+pub fn generate(count: usize, band: usize, seed: u64) -> Vec<CatalogueStar> {
     let mut rng = Rng::new(seed);
     let mut out = Vec::with_capacity(count + band);
 
@@ -125,7 +125,7 @@ pub struct RayStar {
 
 /// Conservative spherical grid: a miss ray tests only discs overlapping its
 /// cell, rather than all 6000 catalogue entries. Includes wraparound and poles.
-pub fn ray_catalogue(stars: &[StarInstance]) -> (Vec<RayStar>, Vec<u32>) {
+pub fn ray_catalogue(stars: &[CatalogueStar]) -> (Vec<RayStar>, Vec<u32>) {
     const W: usize = 256;
     const H: usize = 128;
     use std::f64::consts::{PI, TAU};
@@ -133,7 +133,7 @@ pub fn ray_catalogue(stars: &[StarInstance]) -> (Vec<RayStar>, Vec<u32>) {
     let mut data = Vec::new();
     for (index, star) in stars.iter().enumerate() {
         let dir = glam::DVec3::from_array(star.dir.map(f64::from)).normalize();
-        let radius = (star.size as f64 * 0.0004).clamp(1e-6, 0.1);
+        let radius = (star.angular_radius as f64).clamp(1e-6, 0.1);
         data.push(RayStar {
             direction: [
                 dir.x as f32,
@@ -190,10 +190,10 @@ mod ray_tests {
     fn grid_contains_disc_samples_including_seam_and_poles() {
         let mut stars = generate(100, 0, 123);
         for dir in [[-1.0, 0.0, 0.0], [0.0, 0.0, 1.0], [0.0, 0.0, -1.0]] {
-            stars.push(StarInstance {
+            stars.push(CatalogueStar {
                 dir,
                 color: [1.0; 3],
-                size: 3.0,
+                angular_radius: 0.0012,
                 bright: 1.0,
             });
         }
@@ -203,7 +203,7 @@ mod ray_tests {
             let tangent = axis.any_orthonormal_vector();
             for j in 0..32 {
                 let phi = j as f64 * std::f64::consts::TAU / 32.0;
-                let radius = star.size as f64 * 0.0004 * 0.999;
+                let radius = star.angular_radius as f64 * 0.999;
                 let dir = axis * radius.cos()
                     + (tangent * phi.cos() + axis.cross(tangent) * phi.sin()) * radius.sin();
                 let x = (((dir.y.atan2(dir.x) + std::f64::consts::PI) / std::f64::consts::TAU

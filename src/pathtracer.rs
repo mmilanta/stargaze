@@ -6,8 +6,8 @@ mod tests;
 use bytemuck::{Pod, Zeroable};
 use wgpu::util::DeviceExt;
 
-use crate::renderer::{BodyInstance, Frame, Globals};
-use crate::stars::{self, StarInstance};
+use crate::renderer::{Frame, Globals, Sphere};
+use crate::stars::{self, CatalogueStar};
 
 const BODY_CAPACITY: usize = 256;
 
@@ -147,7 +147,7 @@ impl PathTracer {
         device: &wgpu::Device,
         format: wgpu::TextureFormat,
         dimensions: (u32, u32),
-        stars: &[StarInstance],
+        stars: &[CatalogueStar],
         options: Options,
     ) -> Self {
         log::info!(
@@ -260,7 +260,7 @@ impl PathTracer {
         });
         let bodies = device.create_buffer(&wgpu::BufferDescriptor {
             label: Some("analytic-spheres"),
-            size: (BODY_CAPACITY * std::mem::size_of::<BodyInstance>()) as u64,
+            size: (BODY_CAPACITY * std::mem::size_of::<Sphere>()) as u64,
             usage: wgpu::BufferUsages::STORAGE | wgpu::BufferUsages::COPY_DST,
             mapped_at_creation: false,
         });

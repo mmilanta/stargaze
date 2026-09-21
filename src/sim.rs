@@ -29,7 +29,15 @@ pub struct Elements {
 
 impl Elements {
     pub fn circular(a: f64, m0: f64) -> Self {
-        Self { a, e: 0.0, inc: 0.0, node: 0.0, peri: 0.0, m0, epoch: 0.0 }
+        Self {
+            a,
+            e: 0.0,
+            inc: 0.0,
+            node: 0.0,
+            peri: 0.0,
+            m0,
+            epoch: 0.0,
+        }
     }
 }
 
@@ -95,8 +103,7 @@ impl Body {
 
     /// Orientation of the body's fixed frame in world space.
     pub fn spin_quat(&self, t: f64) -> DQuat {
-        let theta = self.spin_phase
-            + std::f64::consts::TAU * (t / self.spin_period);
+        let theta = self.spin_phase + std::f64::consts::TAU * (t / self.spin_period);
         let axis = DVec3::new(0.0, self.obliquity.cos(), self.obliquity.sin());
         DQuat::from_axis_angle(axis, theta)
     }
@@ -346,12 +353,28 @@ pub fn binary_scene() -> Scene {
         // 1 — Aur: larger, yellow.
         star("Aur", 0.30, 0.0, 0.0060, [1.0, 0.96, 0.86], 2.0, 22.0),
         // 2 — Igni: smaller and redder.
-        star("Igni", 0.50, std::f64::consts::PI, 0.0035, [1.0, 0.42, 0.20], 0.7, 30.0),
+        star(
+            "Igni",
+            0.50,
+            std::f64::consts::PI,
+            0.0035,
+            [1.0, 0.42, 0.20],
+            0.7,
+            30.0,
+        ),
         // 3 — Nerid, one moon.
         Body {
             name: "Nerid".into(),
             parent: Some(0),
-            elements: Elements { a: 2.6, e: 0.03, inc: 1.5 * deg, node: 0.4, peri: 1.1, m0: 2.0, epoch: 0.0 },
+            elements: Elements {
+                a: 2.6,
+                e: 0.03,
+                inc: 1.5 * deg,
+                node: 0.4,
+                peri: 1.1,
+                m0: 2.0,
+                epoch: 0.0,
+            },
             period_days: 1530.0,
             radius: 5_734.0 / AU_KM,
             kind: BodyKind::Planet,
@@ -366,7 +389,15 @@ pub fn binary_scene() -> Scene {
         Body {
             name: "Pip".into(),
             parent: Some(3),
-            elements: Elements { a: 2.2e-4, e: 0.01, inc: 2.0 * deg, node: 0.0, peri: 0.5, m0: 1.0, epoch: 0.0 },
+            elements: Elements {
+                a: 2.2e-4,
+                e: 0.01,
+                inc: 2.0 * deg,
+                node: 0.0,
+                peri: 0.5,
+                m0: 1.0,
+                epoch: 0.0,
+            },
             period_days: 2.5,
             radius: 1_200.0 / AU_KM,
             kind: BodyKind::Moon,
@@ -381,7 +412,15 @@ pub fn binary_scene() -> Scene {
         Body {
             name: "Calyx".into(),
             parent: Some(0),
-            elements: Elements { a: 4.2, e: 0.02, inc: 1.0 * deg, node: 2.0, peri: 3.0, m0: 4.5, epoch: 0.0 },
+            elements: Elements {
+                a: 4.2,
+                e: 0.02,
+                inc: 1.0 * deg,
+                node: 2.0,
+                peri: 3.0,
+                m0: 4.5,
+                epoch: 0.0,
+            },
             period_days: 3000.0,
             radius: 9_560.0 / AU_KM,
             kind: BodyKind::Planet,
@@ -396,7 +435,15 @@ pub fn binary_scene() -> Scene {
         Body {
             name: "Halo".into(),
             parent: Some(5),
-            elements: Elements { a: 1.6e-4, e: 0.002, inc: 0.5 * deg, node: 0.0, peri: 0.0, m0: 0.0, epoch: 0.0 },
+            elements: Elements {
+                a: 1.6e-4,
+                e: 0.002,
+                inc: 0.5 * deg,
+                node: 0.0,
+                peri: 0.0,
+                m0: 0.0,
+                epoch: 0.0,
+            },
             period_days: 3.5,
             radius: 1_500.0 / AU_KM,
             kind: BodyKind::Moon,
@@ -412,7 +459,15 @@ pub fn binary_scene() -> Scene {
         Body {
             name: "Umbra".into(),
             parent: Some(5),
-            elements: Elements { a: 3.2e-4, e: 0.01, inc: 1.5 * deg, node: 1.0, peri: 2.0, m0: 3.0, epoch: 0.0 },
+            elements: Elements {
+                a: 3.2e-4,
+                e: 0.01,
+                inc: 1.5 * deg,
+                node: 1.0,
+                peri: 2.0,
+                m0: 3.0,
+                epoch: 0.0,
+            },
             period_days: 8.0,
             radius: 1_000.0 / AU_KM,
             kind: BodyKind::Moon,
@@ -427,7 +482,15 @@ pub fn binary_scene() -> Scene {
         Body {
             name: "Vantus".into(),
             parent: Some(0),
-            elements: Elements { a: 6.8, e: 0.05, inc: 2.5 * deg, node: 1.5, peri: 0.8, m0: 1.2, epoch: 0.0 },
+            elements: Elements {
+                a: 6.8,
+                e: 0.05,
+                inc: 2.5 * deg,
+                node: 1.5,
+                peri: 0.8,
+                m0: 1.2,
+                epoch: 0.0,
+            },
             period_days: 6200.0,
             radius: 14_016.0 / AU_KM,
             kind: BodyKind::Planet,
@@ -442,7 +505,15 @@ pub fn binary_scene() -> Scene {
         Body {
             name: "Iri".into(),
             parent: Some(8),
-            elements: Elements { a: 1.8e-4, e: 0.005, inc: 1.0 * deg, node: 0.0, peri: 1.0, m0: 0.5, epoch: 0.0 },
+            elements: Elements {
+                a: 1.8e-4,
+                e: 0.005,
+                inc: 1.0 * deg,
+                node: 0.0,
+                peri: 1.0,
+                m0: 0.5,
+                epoch: 0.0,
+            },
             period_days: 5.0,
             radius: 800.0 / AU_KM,
             kind: BodyKind::Moon,
@@ -456,7 +527,15 @@ pub fn binary_scene() -> Scene {
         Body {
             name: "Kesh".into(),
             parent: Some(8),
-            elements: Elements { a: 3.0e-4, e: 0.01, inc: 2.0 * deg, node: 0.5, peri: 2.0, m0: 2.5, epoch: 0.0 },
+            elements: Elements {
+                a: 3.0e-4,
+                e: 0.01,
+                inc: 2.0 * deg,
+                node: 0.5,
+                peri: 2.0,
+                m0: 2.5,
+                epoch: 0.0,
+            },
             period_days: 11.0,
             radius: 600.0 / AU_KM,
             kind: BodyKind::Moon,
@@ -470,7 +549,15 @@ pub fn binary_scene() -> Scene {
         Body {
             name: "Coll".into(),
             parent: Some(8),
-            elements: Elements { a: 4.5e-4, e: 0.02, inc: 3.0 * deg, node: 0.2, peri: 4.0, m0: 5.0, epoch: 0.0 },
+            elements: Elements {
+                a: 4.5e-4,
+                e: 0.02,
+                inc: 3.0 * deg,
+                node: 0.2,
+                peri: 4.0,
+                m0: 5.0,
+                epoch: 0.0,
+            },
             period_days: 18.0,
             radius: 500.0 / AU_KM,
             kind: BodyKind::Moon,
@@ -485,8 +572,8 @@ pub fn binary_scene() -> Scene {
 
     Scene {
         bodies,
-        host: 6,             // Halo, inner moon of Calyx
-        default_target: 5,   // Calyx
+        host: 6,           // Halo, inner moon of Calyx
+        default_target: 5, // Calyx
         default_fov_deg: 80.0,
         targets: vec![5, 1, 2, 7, 3, 8, 4, 9],
         // Face the planet: on a tidally-locked moon Calyx never rises or sets,
@@ -552,7 +639,10 @@ mod tests {
                 .cloned()
                 .min_by(|a, b| a.1.partial_cmp(&b.1).unwrap())
         };
-        let best_lunar = lunar.iter().cloned().min_by(|a, b| a.1.partial_cmp(&b.1).unwrap());
+        let best_lunar = lunar
+            .iter()
+            .cloned()
+            .min_by(|a, b| a.1.partial_cmp(&b.1).unwrap());
         println!("SOLAR windows visible: {}", solar.len());
         println!("  deepest (t, sep/(rm+rs), rm/rs): {:?}", best(&solar));
         println!("LUNAR windows visible: {}", lunar.len());
@@ -560,14 +650,8 @@ mod tests {
 
         assert!(!solar.is_empty(), "no solar eclipse in 1500 days");
         assert!(!lunar.is_empty(), "no lunar eclipse in 1500 days");
-        assert!(
-            best(&solar).unwrap().1 < 0.5,
-            "no deep solar eclipse"
-        );
-        assert!(
-            best_lunar.unwrap().1 < 0.8,
-            "no deep (total) lunar eclipse"
-        );
+        assert!(best(&solar).unwrap().1 < 0.5, "no deep solar eclipse");
+        assert!(best_lunar.unwrap().1 < 0.8, "no deep (total) lunar eclipse");
     }
 
     #[test]
@@ -608,9 +692,20 @@ mod tests {
             }
             t += step;
         }
-        println!("Phobos transits of Mars (visible): {}  first {:?}", transits.len(), transits.first());
-        println!("Phobos eclipsed by Mars (visible):   {}  first {:?}", shadowed.len(), shadowed.first());
-        assert!(!transits.is_empty() || !shadowed.is_empty(), "no Phobos/Mars events");
+        println!(
+            "Phobos transits of Mars (visible): {}  first {:?}",
+            transits.len(),
+            transits.first()
+        );
+        println!(
+            "Phobos eclipsed by Mars (visible):   {}  first {:?}",
+            shadowed.len(),
+            shadowed.first()
+        );
+        assert!(
+            !transits.is_empty() || !shadowed.is_empty(),
+            "no Phobos/Mars events"
+        );
     }
 
     #[test]
@@ -655,7 +750,10 @@ mod tests {
             assert_eq!(scene.body(s).parent, Some(0));
         }
         let (a, b) = (scene.body(stars[0]), scene.body(stars[1]));
-        assert!(a.emission != b.emission, "the two suns should differ in colour");
+        assert!(
+            a.emission != b.emission,
+            "the two suns should differ in colour"
+        );
 
         // The observatory stands on a moon...
         assert_eq!(scene.body(scene.host).kind, BodyKind::Moon);
@@ -664,7 +762,9 @@ mod tests {
 
         // ...that planet has exactly two moons...
         let moons: Vec<usize> = (0..scene.bodies.len())
-            .filter(|&i| scene.bodies[i].parent == Some(planet) && scene.bodies[i].kind == BodyKind::Moon)
+            .filter(|&i| {
+                scene.bodies[i].parent == Some(planet) && scene.bodies[i].kind == BodyKind::Moon
+            })
             .collect();
         assert_eq!(moons.len(), 2, "Calyx should have two moons");
 
@@ -675,11 +775,22 @@ mod tests {
             .map(|&i| scene.body(i).elements.a)
             .filter(|&a| a != host_a)
             .fold(f64::INFINITY, f64::min);
-        assert!(host_a < other_a, "the observatory should be on the inner moon");
+        assert!(
+            host_a < other_a,
+            "the observatory should be on the inner moon"
+        );
 
         // Three planets, six moons in total.
-        let planets = scene.bodies.iter().filter(|b| b.kind == BodyKind::Planet).count();
-        let moon_count = scene.bodies.iter().filter(|b| b.kind == BodyKind::Moon).count();
+        let planets = scene
+            .bodies
+            .iter()
+            .filter(|b| b.kind == BodyKind::Planet)
+            .count();
+        let moon_count = scene
+            .bodies
+            .iter()
+            .filter(|b| b.kind == BodyKind::Moon)
+            .count();
         assert_eq!(planets, 3);
         assert_eq!(moon_count, 6);
     }

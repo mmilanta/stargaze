@@ -82,7 +82,12 @@ pub fn layout(w: f32, h: f32, scale: f32) -> Layout {
     let s = scale.min((w / natural).max(scale * 0.45));
 
     let bar_h = 46.0 * s;
-    let bar = Rect { x: 0.0, y: h - bar_h, w, h: bar_h };
+    let bar = Rect {
+        x: 0.0,
+        y: h - bar_h,
+        w,
+        h: bar_h,
+    };
     let pad = 12.0 * s;
     let toggle = Rect {
         x: pad,
@@ -94,20 +99,39 @@ pub fn layout(w: f32, h: f32, scale: f32) -> Layout {
     let bh = 28.0 * s;
     let gap = 6.0 * s;
     let mut bx = toggle.right() + 18.0 * s;
-    let mut buttons = [Rect { x: 0.0, y: 0.0, w: 0.0, h: 0.0 }; TIME_BUTTONS.len()];
+    let mut buttons = [Rect {
+        x: 0.0,
+        y: 0.0,
+        w: 0.0,
+        h: 0.0,
+    }; TIME_BUTTONS.len()];
     for b in buttons.iter_mut() {
-        *b = Rect { x: bx, y: bar.y + (bar_h - bh) * 0.5, w: bw, h: bh };
+        *b = Rect {
+            x: bx,
+            y: bar.y + (bar_h - bh) * 0.5,
+            w: bw,
+            h: bh,
+        };
         bx += bw + gap;
     }
-    Layout { bar, toggle, buttons, scale: s }
+    Layout {
+        bar,
+        toggle,
+        buttons,
+        scale: s,
+    }
 }
 
 /// Build the atlas bitmap (coverage in R) and return it as a tight byte buffer.
 pub fn build_atlas() -> Vec<u8> {
     let mut data = vec![0u8; ATLAS_W * ATLAS_H];
     for code in 32u32..127 {
-        let Some(ch) = char::from_u32(code) else { continue };
-        let Some(glyph) = BASIC_FONTS.get(ch) else { continue };
+        let Some(ch) = char::from_u32(code) else {
+            continue;
+        };
+        let Some(glyph) = BASIC_FONTS.get(ch) else {
+            continue;
+        };
         let idx = (code - 32) as usize;
         let (cx, cy) = (idx % ATLAS_COLS, idx / ATLAS_COLS);
         for (row, bits) in glyph.iter().enumerate() {
@@ -155,18 +179,15 @@ fn to_ndc(x: f32, y: f32, w: f32, h: f32) -> [f32; 2] {
     [2.0 * x / w - 1.0, 1.0 - 2.0 * y / h]
 }
 
-#[allow(clippy::too_many_arguments)]
 fn push_quad(
     verts: &mut Vec<UiVertex>,
-    x0: f32,
-    y0: f32,
-    x1: f32,
-    y1: f32,
+    bounds: [[f32; 2]; 2],
     uv: [[f32; 2]; 4],
     color: [f32; 4],
-    w: f32,
-    h: f32,
+    viewport: [f32; 2],
 ) {
+    let [[x0, y0], [x1, y1]] = bounds;
+    let [w, h] = viewport;
     let p00 = to_ndc(x0, y0, w, h);
     let p10 = to_ndc(x1, y0, w, h);
     let p01 = to_ndc(x0, y1, w, h);
@@ -190,11 +211,10 @@ fn push_rect(
     rw: f32,
     rh: f32,
     color: [f32; 4],
-    w: f32,
-    h: f32,
+    viewport: [f32; 2],
 ) {
     let uv = solid_uv();
-    push_quad(verts, x, y, x + rw, y + rh, [uv; 4], color, w, h);
+    push_quad(verts, [[x, y], [x + rw, y + rh]], [uv; 4], color, viewport);
 }
 
 pub fn text_width(text: &str, scale: f32) -> f32 {
@@ -208,8 +228,7 @@ fn push_text(
     scale: f32,
     text: &str,
     color: [f32; 4],
-    w: f32,
-    h: f32,
+    viewport: [f32; 2],
 ) {
     let step = 8.0 * scale;
     let mut cx = x;
@@ -217,14 +236,10 @@ fn push_text(
         if ch != ' ' {
             push_quad(
                 verts,
-                cx,
-                y,
-                cx + step,
-                y + step,
+                [[cx, y], [cx + step, y + step]],
                 glyph_uv(ch as u32),
                 color,
-                w,
-                h,
+                viewport,
             );
         }
         cx += step;
@@ -232,7 +247,6 @@ fn push_text(
 }
 
 /// Emit the whole HUD: labels first (in the sky), then the bottom bar.
-#[allow(clippy::too_many_arguments)]
 pub fn build(
     verts: &mut Vec<UiVertex>,
     layout: &Layout,
@@ -267,8 +281,7 @@ fn build_labels(verts: &mut Vec<UiVertex>, labels: &[Label], s: f32, w: f32, h: 
             tw + 6.0 * s,
             th + 4.0 * s,
             [0.0, 0.0, 0.0, 0.55],
-            w,
-            h,
+            [w, h],
         );
         // Marker tick next to the body.
         push_rect(
@@ -278,8 +291,7 @@ fn build_labels(verts: &mut Vec<UiVertex>, labels: &[Label], s: f32, w: f32, h: 
             4.0 * s,
             1.0 * s,
             [0.75, 0.85, 1.0, 0.9],
-            w,
-            h,
+            [w, h],
         );
         push_text(
             verts,
@@ -288,8 +300,7 @@ fn build_labels(verts: &mut Vec<UiVertex>, labels: &[Label], s: f32, w: f32, h: 
             text_scale,
             &label.text,
             [0.92, 0.95, 1.0, 1.0],
-            w,
-            h,
+            [w, h],
         );
     }
 }
@@ -305,8 +316,24 @@ fn build_bar(
     let s = layout.scale;
     let bar = layout.bar;
     // Panel + top hairline.
-    push_rect(verts, bar.x, bar.y, bar.w, bar.h, [0.015, 0.02, 0.03, 0.86], w, h);
-    push_rect(verts, bar.x, bar.y, bar.w, 1.0 * s, [1.0, 1.0, 1.0, 0.10], w, h);
+    push_rect(
+        verts,
+        bar.x,
+        bar.y,
+        bar.w,
+        bar.h,
+        [0.015, 0.02, 0.03, 0.86],
+        [w, h],
+    );
+    push_rect(
+        verts,
+        bar.x,
+        bar.y,
+        bar.w,
+        1.0 * s,
+        [1.0, 1.0, 1.0, 0.10],
+        [w, h],
+    );
 
     // --- labels toggle ---
     let t = layout.toggle;
@@ -315,12 +342,12 @@ fn build_bar(
     } else {
         [0.10, 0.11, 0.13, 0.95]
     };
-    push_rect(verts, t.x, t.y, t.w, t.h, bg, w, h);
-    push_rect(verts, t.x, t.y, t.w, 1.0 * s, [1.0, 1.0, 1.0, 0.12], w, h);
+    push_rect(verts, t.x, t.y, t.w, t.h, bg, [w, h]);
+    push_rect(verts, t.x, t.y, t.w, 1.0 * s, [1.0, 1.0, 1.0, 0.12], [w, h]);
     let box_s = 12.0 * s;
     let bx = t.x + 8.0 * s;
     let by = t.center_y() - box_s * 0.5;
-    push_rect(verts, bx, by, box_s, box_s, [0.05, 0.06, 0.07, 1.0], w, h);
+    push_rect(verts, bx, by, box_s, box_s, [0.05, 0.06, 0.07, 1.0], [w, h]);
     if show_labels {
         push_rect(
             verts,
@@ -329,8 +356,7 @@ fn build_bar(
             box_s - 6.0 * s,
             box_s - 6.0 * s,
             [0.55, 0.78, 1.0, 1.0],
-            w,
-            h,
+            [w, h],
         );
     }
     let ts = TEXT_SCALE * s * 0.85;
@@ -341,8 +367,7 @@ fn build_bar(
         ts,
         "Labels",
         [0.9, 0.93, 0.97, 1.0],
-        w,
-        h,
+        [w, h],
     );
 
     // --- delicate time-step buttons ---
@@ -354,10 +379,17 @@ fn build_bar(
             rect.w,
             rect.h,
             [0.12, 0.13, 0.16, 0.95],
-            w,
-            h,
+            [w, h],
         );
-        push_rect(verts, rect.x, rect.y, rect.w, 1.0 * s, [1.0, 1.0, 1.0, 0.14], w, h);
+        push_rect(
+            verts,
+            rect.x,
+            rect.y,
+            rect.w,
+            1.0 * s,
+            [1.0, 1.0, 1.0, 0.14],
+            [w, h],
+        );
         let tw = text_width(caption, ts);
         push_text(
             verts,
@@ -366,8 +398,7 @@ fn build_bar(
             ts,
             caption,
             [0.88, 0.92, 0.98, 1.0],
-            w,
-            h,
+            [w, h],
         );
     }
 
@@ -385,8 +416,7 @@ fn build_bar(
             ts,
             &time_text,
             [0.85, 0.88, 0.92, 1.0],
-            w,
-            h,
+            [w, h],
         );
     }
 }
@@ -450,7 +480,10 @@ mod tests {
         for text in ["t = 8.7847 d", "t = 9999.9999 d"] {
             let tw = text_width(text, ts);
             let x = w - 12.0 * scale - tw;
-            assert!(x > buttons_end + 10.0 * scale, "'{text}' overlaps the buttons");
+            assert!(
+                x > buttons_end + 10.0 * scale,
+                "'{text}' overlaps the buttons"
+            );
         }
     }
 
@@ -464,7 +497,10 @@ mod tests {
         let ts = TEXT_SCALE * l.scale * 0.85;
         let tw = text_width("t = 9999.9999 d", ts);
         let x = w - 12.0 * l.scale - tw;
-        assert!(x > buttons_end + 10.0 * l.scale, "clock overlaps the buttons");
+        assert!(
+            x > buttons_end + 10.0 * l.scale,
+            "clock overlaps the buttons"
+        );
     }
 
     #[test]
