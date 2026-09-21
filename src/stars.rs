@@ -113,3 +113,112 @@ pub fn generate(count: usize, band: usize, seed: u64) -> Vec<StarInstance> {
 
     out
 }
+
+/// Fixed angular discs, independent of zoom/resolution. These are a stylized
+/// catalogue at infinity, not finite scene lights or screen-space billboards.
+#[repr(C)]
+#[derive(Clone, Copy, Pod, Zeroable)]
+pub struct RayStar {
+    pub direction: [f32; 4],
+    pub radiance: [f32; 4],
+}
+
+/// Conservative spherical grid: a miss ray tests only discs overlapping its
+/// cell, rather than all 6000 catalogue entries. Includes wraparound and poles.
+pub fn ray_catalogue(stars: &[StarInstance]) -> (Vec<RayStar>, Vec<u32>) {
+    const W: usize = 256;
+    const H: usize = 128;
+    use std::f64::consts::{PI, TAU};
+    let mut bins = vec![Vec::<u32>::new(); W * H];
+    let mut data = Vec::new();
+    for (index, star) in stars.iter().enumerate() {
+        let dir = glam::DVec3::from_array(star.dir.map(f64::from)).normalize();
+        let radius = (star.size as f64 * 0.0004).clamp(1e-6, 0.1);
+        data.push(RayStar {
+            direction: [
+                dir.x as f32,
+                dir.y as f32,
+                dir.z as f32,
+                radius.sin().powi(2) as f32,
+            ],
+            radiance: [
+                star.color[0] * star.bright,
+                star.color[1] * star.bright,
+                star.color[2] * star.bright,
+                0.0,
+            ],
+        });
+        let theta = dir.z.clamp(-1.0, 1.0).acos();
+        let phi = dir.y.atan2(dir.x) + PI;
+        let y0 = (((theta - radius).max(0.0) / PI * H as f64) as usize).min(H - 1);
+        let y1 = (((theta + radius).min(PI) / PI * H as f64) as usize).min(H - 1);
+        let longitude_radius = if theta <= radius || theta + radius >= PI {
+            PI
+        } else {
+            (radius.sin() / theta.sin()).clamp(0.0, 1.0).asin()
+        };
+        for x in 0..W {
+            let cell_phi = (x as f64 + 0.5) * TAU / W as f64;
+            let separation = ((cell_phi - phi + PI).rem_euclid(TAU) - PI).abs();
+            if separation <= longitude_radius + PI / W as f64 + 1e-6 {
+                for y in y0..=y1 {
+                    bins[y * W + x].push(index as u32);
+                }
+            }
+        }
+    }
+    let mut offsets = Vec::with_capacity(W * H + 1);
+    let mut indices = Vec::new();
+    for bin in bins {
+        offsets.push(indices.len() as u32);
+        indices.extend(bin);
+    }
+    offsets.push(indices.len() as u32);
+    offsets.extend(indices);
+    // Bindings cannot be empty; no cell references this dummy entry.
+    if data.is_empty() {
+        data.push(RayStar::zeroed());
+    }
+    (data, offsets)
+}
+
+#[cfg(test)]
+mod ray_tests {
+    use super::*;
+
+    #[test]
+    fn grid_contains_disc_samples_including_seam_and_poles() {
+        let mut stars = generate(100, 0, 123);
+        for dir in [[-1.0, 0.0, 0.0], [0.0, 0.0, 1.0], [0.0, 0.0, -1.0]] {
+            stars.push(StarInstance {
+                dir,
+                color: [1.0; 3],
+                size: 3.0,
+                bright: 1.0,
+            });
+        }
+        let (_, cells) = ray_catalogue(&stars);
+        for (i, star) in stars.iter().enumerate() {
+            let axis = glam::DVec3::from_array(star.dir.map(f64::from)).normalize();
+            let tangent = axis.any_orthonormal_vector();
+            for j in 0..32 {
+                let phi = j as f64 * std::f64::consts::TAU / 32.0;
+                let radius = star.size as f64 * 0.0004 * 0.999;
+                let dir = axis * radius.cos()
+                    + (tangent * phi.cos() + axis.cross(tangent) * phi.sin()) * radius.sin();
+                let x = (((dir.y.atan2(dir.x) + std::f64::consts::PI) / std::f64::consts::TAU
+                    * 256.0) as usize)
+                    .min(255);
+                let y = ((dir.z.clamp(-1.0, 1.0).acos() / std::f64::consts::PI * 128.0) as usize)
+                    .min(127);
+                let cell = y * 256 + x;
+                let start = 32769 + cells[cell] as usize;
+                let end = 32769 + cells[cell + 1] as usize;
+                assert!(
+                    cells[start..end].contains(&(i as u32)),
+                    "disc {i} missing from cell {cell}"
+                );
+            }
+        }
+    }
+}

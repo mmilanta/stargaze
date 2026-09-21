@@ -1819,6 +1819,7 @@ dependencies = [
  "font8x8",
  "glam",
  "log",
+ "naga",
  "pollster",
  "wgpu",
  "winit",

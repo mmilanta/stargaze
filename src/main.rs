@@ -1,6 +1,7 @@
 //! stargaze — an observatory on a planet, looking out at a solar system.
 
 mod camera;
+mod pathtracer;
 mod renderer;
 mod sim;
 mod stars;
@@ -18,7 +19,7 @@ use winit::keyboard::{KeyCode, PhysicalKey};
 use winit::window::{Window, WindowId};
 
 use camera::{Observer, ViewFrame};
-use renderer::{BodyInstance, Frame, Globals, Renderer, MAX_OCCLUDERS, MAX_STARS};
+use renderer::{BodyInstance, Frame, Globals, Renderer};
 use sim::{BodyKind, Scene};
 use stars::StarInstance;
 use ui::Label;
@@ -30,16 +31,10 @@ const START_WARP: usize = 2;
 const MIN_FOV_DEG: f64 = 0.001;
 const MAX_FOV_DEG: f64 = 90.0;
 const ZOOM_STEP: f64 = 0.78;
-/// Illumination reaching a body 1 AU from the star. Kept well below 1 so that
-/// surfaces keep their detail instead of clipping to white.
+/// Exposure-scale normalization: a white Lambertian surface facing a unit
+/// luminosity star at 1 AU has outgoing radiance 2.5. The same stellar radiance
+/// is used for camera hits AND illumination (no independent bright-disc gain).
 const SUN_LIGHT: f64 = 2.5;
-/// How brightly a star's own disc is drawn, relative to its luminosity.
-const STAR_DISC_GAIN: f32 = 5.0;
-
-fn smoothstep(edge0: f64, edge1: f64, x: f64) -> f64 {
-    let t = ((x - edge0) / (edge1 - edge0)).clamp(0.0, 1.0);
-    t * t * (3.0 - 2.0 * t)
-}
 
 /// Which system to load at startup. Defaults to the fictitious binary system;
 /// set `STARGAZE_SYSTEM=solar` for the original solar system.
@@ -99,8 +94,9 @@ impl State {
         }
         if let Ok(f) = std::env::var("STARGAZE_FOV") {
             if let Ok(v) = f.parse::<f64>() {
-                state.observer.fov_y =
-                    v.to_radians().clamp(MIN_FOV_DEG.to_radians(), MAX_FOV_DEG.to_radians());
+                state.observer.fov_y = v
+                    .to_radians()
+                    .clamp(MIN_FOV_DEG.to_radians(), MAX_FOV_DEG.to_radians());
             }
         }
         if std::env::var("STARGAZE_FIND_ECLIPSE").is_ok() {
@@ -130,9 +126,9 @@ impl State {
             let dir = (positions[target] - vf.position).normalize();
             let alt = dir.dot(vf.zenith).asin();
             if alt > 0.2 {
-                let night = stars.iter().all(|&si| {
-                    (positions[si] - vf.position).normalize().dot(vf.zenith) < -0.1
-                });
+                let night = stars
+                    .iter()
+                    .all(|&si| (positions[si] - vf.position).normalize().dot(vf.zenith) < -0.1);
                 if is_star || night {
                     self.sim_time = t;
                     return;
@@ -353,78 +349,56 @@ impl State {
 
         // Reverse-Z, infinite far plane: near -> 1.0, infinity -> 0.0.
         let proj = Mat4::from_cols_array(&[
-            (f / aspect) as f32, 0.0, 0.0, 0.0,
-            0.0, f as f32, 0.0, 0.0,
-            0.0, 0.0, 0.0, -1.0,
-            0.0, 0.0, near, 0.0,
+            (f / aspect) as f32,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            f as f32,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            -1.0,
+            0.0,
+            0.0,
+            near,
+            0.0,
         ]);
-        let view = glam::camera::rh::view::look_to_mat4(
-            Vec3::ZERO,
-            vf.forward.as_vec3(),
-            vf.up.as_vec3(),
-        );
+        let view =
+            glam::camera::rh::view::look_to_mat4(Vec3::ZERO, vf.forward.as_vec3(), vf.up.as_vec3());
         let view_proj = proj * view;
-
-        // Night falls only when every star is below the horizon.
-        let mut day = 0.0f64;
-        for si in self.scene.star_indices() {
-            let d = (positions[si] - vf.position).normalize();
-            let up = smoothstep(-0.10, 0.05, d.dot(vf.zenith));
-            day = day.max(up * self.scene.body(si).luminosity as f64);
-        }
-        let night = (1.0 - day.clamp(0.0, 1.0)) as f32;
-
-        // Light sources.
-        let mut stars = [[0.0f32; 4]; MAX_STARS];
-        let mut star_color = [[0.0f32; 4]; MAX_STARS];
-        let mut star_count = 0usize;
-        for (i, body) in self.scene.bodies.iter().enumerate() {
-            if body.kind != BodyKind::Star || star_count >= MAX_STARS {
-                continue;
-            }
-            let rel = (positions[i] - vf.position).as_vec3();
-            stars[star_count] = [rel.x, rel.y, rel.z, body.radius as f32];
-            star_color[star_count] = [
-                body.emission[0],
-                body.emission[1],
-                body.emission[2],
-                body.luminosity,
-            ];
-            star_count += 1;
-        }
 
         let mut bodies = Vec::new();
         for (i, body) in self.scene.bodies.iter().enumerate() {
-            if i == self.scene.host || body.kind == BodyKind::Anchor {
-                continue; // our own body (the ground) and invisible anchors
+            if body.kind == BodyKind::Anchor {
+                continue; // invisible orbit anchors, not the observer's planet
             }
-            let center = (positions[i] - vf.position).as_vec3();
+            let relative = positions[i] - vf.position;
+            // Rotate in f64 as well as subtracting the camera. In telescope
+            // space, near-axis ray x/y stay tiny instead of being rounded away
+            // when added to a large world-space direction at extreme zoom.
+            let view_center = DVec3::new(
+                relative.dot(vf.right),
+                relative.dot(vf.up),
+                -relative.dot(vf.forward),
+            );
+            let center = view_center.as_vec3();
+            let low = (view_center - center.as_dvec3()).as_vec3();
             let star = body.kind == BodyKind::Star;
+            let radiance = (SUN_LIGHT * body.luminosity as f64 / body.radius.powi(2)) as f32;
             bodies.push(BodyInstance {
                 center: center.into(),
                 radius: body.radius as f32,
-                color: if star { body.emission } else { body.albedo },
-                emissive: if star { 1.0 } else { 0.0 },
-                intensity: if star {
-                    body.luminosity * STAR_DISC_GAIN
+                color: if star {
+                    body.emission.map(|c| c * radiance)
                 } else {
-                    0.0
+                    body.albedo
                 },
+                emissive: if star { 1.0 } else { 0.0 },
+                center_low: [low.x, low.y, low.z, if star { 0.0 } else { 1.0 }],
             });
-        }
-
-        // Every non-star, non-anchor body can cast a shadow on the others.
-        let mut occluders = [[0.0f32; 4]; MAX_OCCLUDERS];
-        let mut occluder_count = 0usize;
-        for (i, body) in self.scene.bodies.iter().enumerate() {
-            if matches!(body.kind, BodyKind::Star | BodyKind::Anchor)
-                || occluder_count >= MAX_OCCLUDERS
-            {
-                continue;
-            }
-            let rel = (positions[i] - vf.position).as_vec3();
-            occluders[occluder_count] = [rel.x, rel.y, rel.z, body.radius as f32];
-            occluder_count += 1;
         }
 
         let globals = Globals {
@@ -437,13 +411,12 @@ impl State {
                 vf.forward.z as f32,
                 tan_half as f32,
             ],
-            cam_zenith: [vf.zenith.x as f32, vf.zenith.y as f32, vf.zenith.z as f32, 0.0],
-            stars,
-            star_color,
-            occluders,
-            star_meta: [star_count as f32, 0.0, 0.0, 0.0],
-            occluder_meta: [occluder_count as f32, 0.0, 0.0, 0.0],
-            params: [aspect as f32, 0.006, night, SUN_LIGHT as f32],
+            cam_zenith: [
+                vf.zenith.x as f32,
+                vf.zenith.y as f32,
+                vf.zenith.z as f32,
+                0.0,
+            ],
             viewport: [width as f32, height as f32, 1.0, 0.0],
         };
 
@@ -489,7 +462,13 @@ impl State {
             }
         }
 
-        Frame { globals, bodies, labels, ui: Vec::new() }
+        Frame {
+            globals,
+            bodies,
+            scene_time: self.sim_time,
+            labels,
+            ui: Vec::new(),
+        }
     }
 }
 
@@ -544,12 +523,7 @@ impl ApplicationHandler for App {
         }
     }
 
-    fn window_event(
-        &mut self,
-        event_loop: &ActiveEventLoop,
-        _id: WindowId,
-        event: WindowEvent,
-    ) {
+    fn window_event(&mut self, event_loop: &ActiveEventLoop, _id: WindowId, event: WindowEvent) {
         match event {
             WindowEvent::CloseRequested => event_loop.exit(),
             WindowEvent::Resized(size) => {
@@ -583,10 +557,11 @@ impl ApplicationHandler for App {
                         format!("{:.3} day/s", WARPS[self.state.warp])
                     };
                     let title = format!(
-                        "stargaze  ·  t = {:.2} d ({:.3} yr)  ·  {}  ·  drag=look  scroll=zoom  space=play/pause  [ ]=speed  R=reset  E=eclipse  T=phobos  H=hud  L=labels",
+                        "stargaze  ·  t = {:.2} d ({:.3} yr)  ·  {}  ·  {} spp  ·  drag=look  scroll=zoom  space=play/pause  [ ]=speed  R=reset  E=eclipse  T=phobos  H=hud  L=labels",
                         self.state.sim_time,
                         self.state.sim_time / 365.256,
                         rate,
+                        r.samples(),
                     );
                     if title != self.last_title {
                         window.set_title(&title);
@@ -668,10 +643,8 @@ impl ApplicationHandler for App {
                     MouseScrollDelta::PixelDelta(p) => p.y / 50.0,
                 };
                 let fov = self.state.observer.fov_y * ZOOM_STEP.powf(y);
-                self.state.observer.fov_y = fov.clamp(
-                    MIN_FOV_DEG.to_radians(),
-                    MAX_FOV_DEG.to_radians(),
-                );
+                self.state.observer.fov_y =
+                    fov.clamp(MIN_FOV_DEG.to_radians(), MAX_FOV_DEG.to_radians());
             }
             WindowEvent::KeyboardInput { event, .. } => {
                 if event.state != ElementState::Pressed {
@@ -771,7 +744,11 @@ fn main() -> Result<()> {
         let mm = glam::Mat4::from_cols_array(&m);
         log::info!("forward={:?}", frame.globals.cam_forward);
         log::info!("zenith={:?}", frame.globals.cam_zenith);
-        log::info!("stars={:?} params={:?}", frame.globals.stars[0], frame.globals.params);
+        log::info!(
+            "ray-traced bodies={} viewport={:?}",
+            frame.bodies.len(),
+            frame.globals.viewport
+        );
         log::info!("view_proj={:?}", m);
         for (i, s) in app.stars.iter().take(4).enumerate() {
             let d = s.dir;
@@ -779,11 +756,23 @@ fn main() -> Result<()> {
             let c = mm * p;
             log::info!(
                 "star{i}: bright={:.3} size={:.2} clip=({:.0},{:.0},{:.4},{:.0}) ndc=({:.3},{:.3})",
-                s.bright, s.size, c.x, c.y, c.z, c.w, c.x / c.w, c.y / c.w
+                s.bright,
+                s.size,
+                c.x,
+                c.y,
+                c.z,
+                c.w,
+                c.x / c.w,
+                c.y / c.w
             );
         }
         for b in &frame.bodies {
-            log::info!("body center={:?} r={:.3e} col={:?}", b.center, b.radius, b.color);
+            log::info!(
+                "body center={:?} r={:.3e} col={:?}",
+                b.center,
+                b.radius,
+                b.color
+            );
         }
     }
 

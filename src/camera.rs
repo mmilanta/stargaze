@@ -62,7 +62,10 @@ impl Observer {
         let north = q * north_local;
         let east = q * east_local;
 
-        let position = center + zenith * host.radius;
+        // Two metres above the actual surface. The host is now intersectable
+        // geometry, so a camera exactly on its boundary is numerically unsafe.
+        let observer_height_au = 2.0 / 149_597_870_700.0;
+        let position = center + zenith * (host.radius + observer_height_au);
 
         let (salt, calt) = self.alt.sin_cos();
         let (saz, caz) = self.az.sin_cos();
@@ -77,6 +80,15 @@ impl Observer {
             None => 0.0,
         };
 
-        ViewFrame { position, forward, right, up, zenith, north, east, sun_altitude }
+        ViewFrame {
+            position,
+            forward,
+            right,
+            up,
+            zenith,
+            north,
+            east,
+            sun_altitude,
+        }
     }
 }

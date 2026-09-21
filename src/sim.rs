@@ -51,7 +51,7 @@ pub struct Body {
     /// systems can be tuned freely; it is not derived from the parent's mass.
     /// Unused (0) for the root body.
     pub period_days: f64,
-    /// Physical radius (AU). Visual scale only in this MVP.
+    /// Physical radius (AU), used for ray intersections and light transport.
     pub radius: f64,
     pub kind: BodyKind,
     /// Surface albedo for lit bodies.
