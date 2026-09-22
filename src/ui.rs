@@ -76,19 +76,40 @@ pub struct LabelOptions {
     pub locked: Option<usize>,
 }
 
+pub const MIN_EV: f32 = -8.0;
+pub const MAX_EV: f32 = 8.0;
+
+#[derive(Clone, Copy, Debug)]
+pub struct HudState {
+    pub labels: LabelOptions,
+    pub sim_time: f64,
+    pub auto_exposure: bool,
+    pub ev_bias: f32,
+}
+
 pub struct Layout {
     pub bar: Rect,
     pub toggle: Rect,
     /// One rectangle per entry of [`TIME_BUTTONS`].
     pub buttons: [Rect; TIME_BUTTONS.len()],
     pub scale: f32,
+    pub exposure: Rect,
+    pub auto: Rect,
+}
+
+impl Layout {
+    pub fn exposure_bias_at(&self, x: f64) -> f32 {
+        let fraction = ((x as f32 - self.exposure.x) / self.exposure.w).clamp(0.0, 1.0);
+        ((MIN_EV + fraction * (MAX_EV - MIN_EV)) * 4.0).round() / 4.0
+    }
 }
 
 pub fn layout(w: f32, h: f32, scale: f32) -> Layout {
     // Shrink the whole HUD if the window is too narrow for it, so the toggle,
     // the six buttons and the clock always fit.
-    let natural = 12.0 + 116.0 + 18.0 + 6.0 * (52.0 + 6.0) + 14.0 + 220.0;
-    let s = scale.min((w / natural).max(scale * 0.45));
+    let natural =
+        12.0 + 116.0 + 18.0 + 6.0 * (52.0 + 6.0) + 12.0 + 192.0 + 16.0 + 86.0 + 14.0 + 220.0;
+    let s = scale.min(w / natural);
 
     let bar_h = 46.0 * s;
     let bar = Rect {
@@ -123,7 +144,21 @@ pub fn layout(w: f32, h: f32, scale: f32) -> Layout {
         };
         bx += bw + gap;
     }
+    let exposure = Rect {
+        x: bx + 12.0 * s,
+        y: toggle.y,
+        w: 192.0 * s,
+        h: toggle.h,
+    };
+    let auto = Rect {
+        x: exposure.right() + 16.0 * s,
+        y: toggle.y,
+        w: 86.0 * s,
+        h: toggle.h,
+    };
     Layout {
+        exposure,
+        auto,
         bar,
         toggle,
         buttons,
@@ -261,15 +296,14 @@ pub fn build(
     layout: &Layout,
     w: f32,
     h: f32,
-    labels: LabelOptions,
-    sim_time: f64,
+    state: HudState,
     body_labels: &[Label],
 ) {
     let s = layout.scale;
-    if labels.show {
-        build_labels(verts, body_labels, labels.locked, s, w, h);
+    if state.labels.show {
+        build_labels(verts, body_labels, state.labels.locked, s, w, h);
     }
-    build_bar(verts, layout, w, h, labels.show, sim_time);
+    build_bar(verts, layout, w, h, state);
 }
 
 fn build_labels(
@@ -364,14 +398,9 @@ fn build_labels(
     }
 }
 
-fn build_bar(
-    verts: &mut Vec<UiVertex>,
-    layout: &Layout,
-    w: f32,
-    h: f32,
-    show_labels: bool,
-    sim_time: f64,
-) {
+fn build_bar(verts: &mut Vec<UiVertex>, layout: &Layout, w: f32, h: f32, state: HudState) {
+    let show_labels = state.labels.show;
+    let sim_time = state.sim_time;
     let s = layout.scale;
     let bar = layout.bar;
     // Panel + top hairline.
@@ -461,11 +490,104 @@ fn build_bar(
         );
     }
 
-    // --- current time, right aligned (only if it clears the buttons) ---
+    // Exposure compensation is applied to presentation in both modes.
+    let slider = layout.exposure;
+    let caption = format!("Exposure {:+.2} EV", state.ev_bias);
+    push_text(
+        verts,
+        slider.x,
+        slider.y,
+        s * 1.25,
+        &caption,
+        [0.88, 0.92, 0.98, 1.0],
+        [w, h],
+    );
+    let track_y = slider.y + 23.0 * s;
+    push_rect(
+        verts,
+        slider.x,
+        track_y,
+        slider.w,
+        2.0 * s,
+        [0.3, 0.35, 0.43, 1.0],
+        [w, h],
+    );
+    let fraction = ((state.ev_bias - MIN_EV) / (MAX_EV - MIN_EV)).clamp(0.0, 1.0);
+    push_rect(
+        verts,
+        slider.x,
+        track_y,
+        slider.w * fraction,
+        2.0 * s,
+        [0.45, 0.73, 0.95, 1.0],
+        [w, h],
+    );
+    push_rect(
+        verts,
+        slider.x + slider.w * 0.5,
+        track_y - 3.0 * s,
+        s,
+        8.0 * s,
+        [0.65, 0.68, 0.73, 1.0],
+        [w, h],
+    );
+    push_rect(
+        verts,
+        slider.x + slider.w * fraction - 3.0 * s,
+        track_y - 4.0 * s,
+        6.0 * s,
+        10.0 * s,
+        [0.78, 0.91, 1.0, 1.0],
+        [w, h],
+    );
+
+    let a = layout.auto;
+    push_rect(verts, a.x, a.y, a.w, a.h, [0.10, 0.11, 0.13, 0.95], [w, h]);
+    let check_y = a.center_y() - 6.0 * s;
+    push_rect(
+        verts,
+        a.x + 8.0 * s,
+        check_y,
+        12.0 * s,
+        12.0 * s,
+        [0.35, 0.40, 0.48, 1.0],
+        [w, h],
+    );
+    push_rect(
+        verts,
+        a.x + 9.0 * s,
+        check_y + s,
+        10.0 * s,
+        10.0 * s,
+        [0.05, 0.06, 0.07, 1.0],
+        [w, h],
+    );
+    if state.auto_exposure {
+        push_rect(
+            verts,
+            a.x + 11.0 * s,
+            check_y + 3.0 * s,
+            6.0 * s,
+            6.0 * s,
+            [0.55, 0.85, 1.0, 1.0],
+            [w, h],
+        );
+    }
+    push_text(
+        verts,
+        a.x + 27.0 * s,
+        a.center_y() - 4.0 * ts,
+        ts,
+        "Auto",
+        [0.88, 0.92, 0.98, 1.0],
+        [w, h],
+    );
+
+    // Current time, right aligned, only when it clears all controls.
     let time_text = format!("t = {:.4} d", sim_time);
     let tw = text_width(&time_text, ts);
     let pad = 12.0 * s;
-    let buttons_end = layout.buttons.last().map(|b| b.right()).unwrap_or(0.0);
+    let buttons_end = layout.auto.right();
     let x = w - pad - tw;
     if x > buttons_end + 10.0 * s {
         push_text(
@@ -513,6 +635,29 @@ mod tests {
     }
 
     #[test]
+    fn exposure_slider_maps_clamps_and_fits_after_time_buttons() {
+        for (w, scale) in [(1400.0, 1.0), (1190.0, 1.6), (581.0, 1.6), (320.0, 2.0)] {
+            let l = layout(w, 800.0, scale);
+            assert!(l.exposure.x > l.buttons.last().unwrap().right());
+            assert!(l.auto.x > l.exposure.right());
+            assert!(l.auto.right() < w);
+            assert_eq!(l.exposure_bias_at(l.exposure.x as f64 - 100.0), MIN_EV);
+            assert_eq!(
+                l.exposure_bias_at(l.exposure.right() as f64 + 100.0),
+                MAX_EV
+            );
+            assert_eq!(
+                l.exposure_bias_at((l.exposure.x + l.exposure.w * 0.5) as f64),
+                0.0
+            );
+            assert_eq!(
+                l.exposure_bias_at((l.exposure.x + l.exposure.w * 0.75) as f64),
+                4.0
+            );
+        }
+    }
+
+    #[test]
     fn time_buttons_step_both_ways() {
         let deltas: Vec<f64> = TIME_BUTTONS.iter().map(|(_, d)| *d).collect();
         assert_eq!(deltas.len(), 6);
@@ -532,15 +677,15 @@ mod tests {
         // Surface width and scale observed on this machine.
         let (w, scale) = (1190.0_f32, 1.6_f32);
         let l = layout(w, 800.0, scale);
-        let ts = TEXT_SCALE * scale * 0.85;
-        let buttons_end = l.buttons.last().unwrap().right();
+        let ts = TEXT_SCALE * l.scale * 0.85;
+        let buttons_end = l.auto.right();
         assert!(l.buttons[0].x > l.toggle.right());
         assert!(buttons_end < w, "buttons must fit on screen");
         for text in ["t = 8.7847 d", "t = 9999.9999 d"] {
             let tw = text_width(text, ts);
-            let x = w - 12.0 * scale - tw;
+            let x = w - 12.0 * l.scale - tw;
             assert!(
-                x > buttons_end + 10.0 * scale,
+                x > buttons_end + 10.0 * l.scale,
                 "'{text}' overlaps the buttons"
             );
         }
@@ -551,7 +696,7 @@ mod tests {
         // A narrow tiled window: 581 surface px at scale 1.6.
         let (w, scale) = (581.0_f32, 1.6_f32);
         let l = layout(w, 700.0, scale);
-        let buttons_end = l.buttons.last().unwrap().right();
+        let buttons_end = l.auto.right();
         assert!(buttons_end < w, "buttons overflow a narrow window");
         let ts = TEXT_SCALE * l.scale * 0.85;
         let tw = text_width("t = 9999.9999 d", ts);

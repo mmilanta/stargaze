@@ -114,8 +114,8 @@ pub fn generate(count: usize, band: usize, seed: u64) -> Vec<CatalogueStar> {
     out
 }
 
-/// Fixed angular discs, independent of zoom/resolution. These are a stylized
-/// catalogue at infinity, not finite scene lights or screen-space billboards.
+/// Angular discs for the visual catalogue at infinity, with a primary-ray
+/// pixel cap. Illumination comes from finite scene stars and reflected light.
 #[repr(C)]
 #[derive(Clone, Copy, Pod, Zeroable)]
 pub struct RayStar {

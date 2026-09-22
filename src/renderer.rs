@@ -1,4 +1,4 @@
-//! Presentation and HUD around the progressive, all-sphere path tracer.
+//! Presentation and HUD around the progressive analytic path tracer.
 use std::sync::Arc;
 
 use crate::pathtracer::{Options, PathTracer};
@@ -15,6 +15,11 @@ pub struct Globals {
     pub cam_up: [f32; 4],
     pub cam_forward: [f32; 4], // w = tan(fov_y / 2)
     pub viewport: [f32; 4],    // width, height, exposure, unused
+    // Host-atmosphere shell, in telescope space.
+    pub atmo_center: [f32; 4],   // xyz = host centre, w = host radius
+    pub atmo_rayleigh: [f32; 4], // rgb = Rayleigh coefficients (1/AU), w = Mie
+    // x = Mie g, y = scale height (AU), z = top altitude (AU), w = enabled
+    pub atmo_params: [f32; 4],
 }
 
 #[repr(C)]
@@ -25,6 +30,9 @@ pub struct Sphere {
     pub color: [f32; 3], // reflectance or emitted radiance
     pub emissive: f32,
     pub center_low: [f32; 4], // xyz = residual centre, w = procedural albedo strength
+    pub ring_plane: [f32; 4], // xyz = unit pole in telescope space, w = inner radius / body radius
+    pub ring_params: [f32; 4], // outer radius / body radius (0 = absent), optical depth, banded, unused
+    pub ring_color: [f32; 4],  // rgb = single-scattering albedo
 }
 
 pub struct Frame {
@@ -238,6 +246,20 @@ impl Renderer {
     }
     pub fn samples(&self) -> u32 {
         self.tracer.samples()
+    }
+    /// Switch between automatic metering and the manual exposure, and set the
+    /// exposure-compensation bias in stops.
+    pub fn set_exposure_controls(&mut self, auto: bool, bias: f32) {
+        self.tracer.set_exposure_controls(auto, bias);
+    }
+    pub fn auto_exposure(&self) -> bool {
+        self.tracer.auto_exposure()
+    }
+    pub fn ev_bias(&self) -> f32 {
+        self.tracer.ev_bias()
+    }
+    pub fn manual_exposure(&self) -> f32 {
+        self.tracer.manual_exposure()
     }
 
     pub fn render(&mut self, frame: &Frame) {

@@ -16,12 +16,14 @@ pub struct Observer {
     pub alt: f64,
     /// Vertical field of view (rad).
     pub fov_y: f64,
+    pub height_m: f64,
 }
 
 impl Observer {
     pub fn new(body: usize) -> Self {
         Self {
             body,
+            height_m: 2.0,
             lat: 35.0_f64.to_radians(),
             lon: 0.0,
             az: 0.0,
@@ -73,15 +75,17 @@ impl Observer {
         let north = q * north_local;
         let east = q * east_local;
 
-        // Two metres above the actual surface. The host is now intersectable
+        // Configured height above the actual surface. The host is now intersectable
         // geometry, so a camera exactly on its boundary is numerically unsafe.
-        let observer_height_au = 2.0 / 149_597_870_700.0;
+        let observer_height_au = self.height_m / (crate::sim::AU_KM * 1000.0);
         let position = center + zenith * (host.radius + observer_height_au);
 
         let (salt, calt) = self.alt.sin_cos();
         let (saz, caz) = self.az.sin_cos();
         let forward = (calt * (caz * north + saz * east) + salt * zenith).normalize();
-        let right = forward.cross(zenith).normalize();
+        // Derive right from azimuth, not forward × zenith: a tracked body
+        // can pass through the zenith, where that cross product vanishes.
+        let right = (caz * east - saz * north).normalize();
         let up = right.cross(forward);
 
         // `sun_altitude` refers to the primary (first) star; used only for "is

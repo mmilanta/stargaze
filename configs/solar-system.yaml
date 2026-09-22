@@ -1,0 +1,367 @@
+# Stargaze system format v1. Distances and angles use explicit units.
+# Omit time_days to search for a suitable night view; set it for an exact epoch.
+# Orbit angles are measured in the shared ecliptic frame, including moon orbits.
+# Sun, all eight planets, and selected moons; Earth observatory aimed at the Moon.
+# Approximate fixed J2000 elements; satellite phases are illustrative, not ephemerides.
+# Planet element source: https://ssd.jpl.nasa.gov/planets/approx_pos.html
+# Rounded physical radii and periods retained from the original solar preset.
+version: 1
+name: Solar System
+camera:
+  body: earth
+  latitude_deg: 35.0
+  longitude_deg: 0.0
+  height_m: 2.0
+  look_at: moon
+  fov_deg: 1.1
+  atmosphere: earthlike
+targets:
+  - moon
+  - sun
+  - mercury
+  - venus
+  - mars
+  - jupiter
+  - saturn
+  - uranus
+  - neptune
+bodies:
+  - id: sun
+    name: Sun
+    kind: star
+    radius_km: 696340.0
+    albedo: [0.0, 0.0, 0.0]
+    luminosity: 1.0
+    emission: [1.0, 0.95, 0.88]
+    rotation:
+      mode: free
+      period_days: 25.38
+      obliquity_deg: 7.250000000000001
+  - id: earth
+    name: Earth
+    kind: planet
+    parent: sun
+    radius_km: 6371.0
+    albedo: [0.18, 0.27, 0.4]
+    orbit:
+      semi_major_axis_au: 1.00000261
+      period_days: 365.256
+      eccentricity: 0.01671123
+      inclination_deg: -1.531e-05
+      periapsis_deg: 102.93768193
+      mean_anomaly_deg: 357.52688973
+    rotation:
+      mode: free
+      period_days: 0.99726968
+      obliquity_deg: 23.44
+  - id: moon
+    name: Moon
+    kind: moon
+    parent: earth
+    radius_km: 1737.4
+    albedo: [0.12, 0.12, 0.11]
+    orbit:
+      period_days: 27.321661
+      eccentricity: 0.0549
+      inclination_deg: 5.145
+      ascending_node_deg: 125.08
+      periapsis_deg: 318.15
+      mean_anomaly_deg: 115.3654
+      semi_major_axis_km: 384400.0
+    rotation:
+      mode: free
+      period_days: 27.321661
+      obliquity_deg: 6.68
+  - id: mars
+    name: Mars
+    kind: planet
+    parent: sun
+    radius_km: 3389.5
+    albedo: [0.25, 0.12, 0.07]
+    orbit:
+      semi_major_axis_au: 1.52371034
+      period_days: 686.98
+      eccentricity: 0.0933941
+      inclination_deg: 1.84969142
+      ascending_node_deg: 49.55953891
+      periapsis_deg: 286.4968315
+      mean_anomaly_deg: 19.39019754
+    rotation:
+      mode: free
+      period_days: 1.025957
+      obliquity_deg: 25.19
+  - id: phobos
+    name: Phobos
+    kind: moon
+    parent: mars
+    radius_km: 11.3
+    albedo: [0.07, 0.065, 0.06]
+    orbit:
+      period_days: 0.31891
+      eccentricity: 0.0151
+      inclination_deg: -25.2114317055
+      ascending_node_deg: -92.5243808088
+      periapsis_deg: 149.5841816418
+      semi_major_axis_km: 9376.0
+    rotation:
+      mode: free
+      period_days: 0.31891
+      obliquity_deg: 25.19
+  - id: mercury
+    name: Mercury
+    kind: planet
+    parent: sun
+    radius_km: 2439.7
+    albedo: [0.12, 0.115, 0.11]
+    orbit:
+      semi_major_axis_au: 0.38709927
+      period_days: 87.9691
+      eccentricity: 0.20563593
+      inclination_deg: 7.00497902
+      ascending_node_deg: 48.33076593
+      periapsis_deg: 29.12703035
+      mean_anomaly_deg: 174.79252722
+    rotation:
+      mode: free
+      period_days: 58.646
+      obliquity_deg: 0.034
+  - id: venus
+    name: Venus
+    kind: planet
+    parent: sun
+    radius_km: 6051.8
+    albedo: [0.67, 0.64, 0.54]
+    orbit:
+      semi_major_axis_au: 0.72333566
+      period_days: 224.701
+      eccentricity: 0.00677672
+      inclination_deg: 3.39467605
+      ascending_node_deg: 76.67984255
+      periapsis_deg: 54.92262463
+      mean_anomaly_deg: 50.37663232
+    rotation:
+      mode: free
+      period_days: 243.025
+      obliquity_deg: 177.36
+  - id: jupiter
+    name: Jupiter
+    kind: planet
+    parent: sun
+    radius_km: 69911.0
+    albedo: [0.5, 0.43, 0.32]
+    orbit:
+      semi_major_axis_au: 5.202887
+      period_days: 4332.589
+      eccentricity: 0.04838624
+      inclination_deg: 1.30439695
+      ascending_node_deg: 100.47390909
+      periapsis_deg: 274.25457074
+      mean_anomaly_deg: 19.66796068
+    rotation:
+      mode: free
+      period_days: 0.41354
+      obliquity_deg: 3.1300000000000003
+  - id: saturn
+    name: Saturn
+    kind: planet
+    parent: sun
+    radius_km: 58232.0
+    albedo: [0.47, 0.42, 0.29]
+    orbit:
+      semi_major_axis_au: 9.53667594
+      period_days: 10759.22
+      eccentricity: 0.05386179
+      inclination_deg: 2.48599187
+      ascending_node_deg: 113.66242448
+      periapsis_deg: 338.93645383
+      mean_anomaly_deg: 317.35536592
+    rotation:
+      mode: free
+      period_days: 0.44401
+      obliquity_deg: 26.73
+    rings:
+      inner_radius: 1.2820785822228329
+      outer_radius: 2.34879447726336
+      optical_depth: 1.0
+      albedo: [0.88, 0.8, 0.66]
+      banded: true
+  - id: uranus
+    name: Uranus
+    kind: planet
+    parent: sun
+    radius_km: 25362.0
+    albedo: [0.35, 0.55, 0.6]
+    orbit:
+      semi_major_axis_au: 19.18916464
+      period_days: 30688.5
+      eccentricity: 0.04725744
+      inclination_deg: 0.77263783
+      ascending_node_deg: 74.01692503
+      periapsis_deg: 96.93735127
+      mean_anomaly_deg: 142.28382821
+    rotation:
+      mode: free
+      period_days: 0.71833
+      obliquity_deg: 97.77
+  - id: neptune
+    name: Neptune
+    kind: planet
+    parent: sun
+    radius_km: 24622.0
+    albedo: [0.25, 0.4, 0.65]
+    orbit:
+      semi_major_axis_au: 30.06992276
+      period_days: 60182.0
+      eccentricity: 0.00859048
+      inclination_deg: 1.77004347
+      ascending_node_deg: 131.78422574
+      periapsis_deg: 273.18053653
+      mean_anomaly_deg: 259.91520804
+    rotation:
+      mode: free
+      period_days: 0.67125
+      obliquity_deg: 28.32
+  - id: deimos
+    name: Deimos
+    kind: moon
+    parent: mars
+    radius_km: 6.2
+    albedo: [0.07, 0.065, 0.06]
+    orbit:
+      period_days: 1.26244
+      eccentricity: 0.00033
+      inclination_deg: -25.2492444868
+      ascending_node_deg: -94.1947702974
+      periapsis_deg: 93.795237966
+      mean_anomaly_deg: 180.0
+      semi_major_axis_km: 23463.2
+    rotation:
+      mode: free
+      period_days: 1.26244
+      obliquity_deg: 25.19
+  - id: io
+    name: Io
+    kind: moon
+    parent: jupiter
+    radius_km: 1821.6
+    albedo: [0.63, 0.52, 0.25]
+    orbit:
+      period_days: 1.769138
+      eccentricity: 0.0041
+      inclination_deg: -3.1302068159
+      ascending_node_deg: -90.6592918652
+      periapsis_deg: 90.658308302
+      mean_anomaly_deg: 20.0
+      semi_major_axis_km: 421700.0
+    rotation:
+      mode: free
+      period_days: 1.769138
+      obliquity_deg: 3.1300000000000003
+  - id: europa
+    name: Europa
+    kind: moon
+    parent: jupiter
+    radius_km: 1560.8
+    albedo: [0.67, 0.62, 0.51]
+    orbit:
+      period_days: 3.551181
+      eccentricity: 0.0094
+      inclination_deg: -3.1644651896
+      ascending_node_deg: -98.4724327546
+      periapsis_deg: 98.4597010063
+      mean_anomaly_deg: 100.0
+      semi_major_axis_km: 671034.0
+    rotation:
+      mode: free
+      period_days: 3.551181
+      obliquity_deg: 3.1300000000000003
+  - id: ganymede
+    name: Ganymede
+    kind: moon
+    parent: jupiter
+    radius_km: 2634.1
+    albedo: [0.43, 0.4, 0.35]
+    orbit:
+      period_days: 7.154553
+      eccentricity: 0.0013
+      inclination_deg: -3.1349956665
+      ascending_node_deg: -93.2382190056
+      periapsis_deg: 93.2333831498
+      mean_anomaly_deg: 210.0
+      semi_major_axis_km: 1070412.0
+    rotation:
+      mode: free
+      period_days: 7.154553
+      obliquity_deg: 3.1300000000000003
+  - id: callisto
+    name: Callisto
+    kind: moon
+    parent: jupiter
+    radius_km: 2410.3
+    albedo: [0.22, 0.2, 0.17]
+    orbit:
+      period_days: 16.689018
+      eccentricity: 0.0074
+      inclination_deg: -3.1358774404
+      ascending_node_deg: -93.511986188
+      periapsis_deg: 93.5067405131
+      mean_anomaly_deg: 300.0
+      semi_major_axis_km: 1882709.0
+    rotation:
+      mode: free
+      period_days: 16.689018
+      obliquity_deg: 3.1300000000000003
+  - id: titan
+    name: Titan
+    kind: moon
+    parent: saturn
+    radius_km: 2574.7
+    albedo: [0.3, 0.22, 0.12]
+    orbit:
+      period_days: 15.945421
+      eccentricity: 0.0288
+      inclination_deg: -26.7321105322
+      ascending_node_deg: -90.7758855002
+      periapsis_deg: 90.6929669894
+      mean_anomaly_deg: 80.0
+      semi_major_axis_km: 1221870.0
+    rotation:
+      mode: free
+      period_days: 15.945421
+      obliquity_deg: 26.73
+  - id: titania
+    name: Titania
+    kind: moon
+    parent: uranus
+    radius_km: 788.9
+    albedo: [0.27, 0.25, 0.23]
+    orbit:
+      period_days: 8.705872
+      eccentricity: 0.0011
+      inclination_deg: -97.7699925685
+      ascending_node_deg: -90.0797320376
+      periapsis_deg: 89.9892204871
+      mean_anomaly_deg: 160.0
+      semi_major_axis_km: 435910.0
+    rotation:
+      mode: free
+      period_days: 8.705872
+      obliquity_deg: 97.77
+  - id: triton
+    name: Triton
+    kind: moon
+    parent: neptune
+    radius_km: 1353.4
+    albedo: [0.76, 0.72, 0.68]
+    orbit:
+      period_days: 5.876854
+      eccentricity: 1.6e-05
+      inclination_deg: -144.0489237553
+      ascending_node_deg: 132.0073820308
+      periapsis_deg: 126.0951428342
+      mean_anomaly_deg: 250.0
+      semi_major_axis_km: 354759.0
+    rotation:
+      mode: free
+      period_days: 5.876854
+      obliquity_deg: 156.865

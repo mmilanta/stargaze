@@ -6,6 +6,9 @@
 
 use glam::{DMat3, DQuat, DVec3};
 
+#[path = "solar.rs"]
+mod solar;
+
 /// Kilometres per astronomical unit.
 pub const AU_KM: f64 = 149_597_870.7;
 
@@ -50,6 +53,19 @@ pub enum BodyKind {
     Moon,
 }
 
+/// An equatorial, infinitesimally thin particulate disc. Radii are multiples
+/// of the parent body's radius; optical depth is measured normal to the plane.
+#[derive(Clone, Copy, Debug)]
+pub struct Rings {
+    pub inner_radius: f64,
+    pub outer_radius: f64,
+    pub optical_depth: f32,
+    pub albedo: [f32; 3],
+    /// Saturn-like C/B/A bands, Cassini division and narrow outer gaps.
+    /// Disable for a uniform disc (also useful for transport tests).
+    pub banded: bool,
+}
+
 #[derive(Clone, Debug)]
 pub struct Body {
     pub name: String,
@@ -71,6 +87,9 @@ pub struct Body {
     pub obliquity: f64,
     pub spin_period: f64,
     pub spin_phase: f64,
+    pub rings: Option<Rings>,
+    /// Align spin with the orbital plane and synchronize it with mean anomaly.
+    pub tidally_locked: bool,
 }
 
 impl Body {
@@ -103,9 +122,19 @@ impl Body {
 
     /// Orientation of the body's fixed frame in world space.
     pub fn spin_quat(&self, t: f64) -> DQuat {
+        if self.tidally_locked {
+            let orbit = DQuat::from_rotation_z(self.elements.node)
+                * DQuat::from_rotation_x(self.elements.inc)
+                * DQuat::from_rotation_z(self.elements.peri);
+            let phase = self.elements.m0
+                + std::f64::consts::TAU * (t - self.elements.epoch) / self.period_days;
+            return orbit * DQuat::from_rotation_z(phase);
+        }
         let theta = self.spin_phase + std::f64::consts::TAU * (t / self.spin_period);
-        let axis = DVec3::new(0.0, self.obliquity.cos(), self.obliquity.sin());
-        DQuat::from_axis_angle(axis, theta)
+        // Body-local Z is the spin axis. Tilt that entire frame relative to
+        // ecliptic north; rotating around a tilted axis without tilting the
+        // frame makes latitude drift and gives the wrong day/night cycle.
+        DQuat::from_rotation_y(self.obliquity) * DQuat::from_rotation_z(theta)
     }
 }
 
@@ -125,11 +154,44 @@ fn solve_kepler(m: f64, e: f64) -> f64 {
     ea
 }
 
+/// A body's atmosphere: single-scattering Rayleigh + Mie.
+#[derive(Clone, Copy, Debug)]
+pub struct Atmosphere {
+    /// Height at which density falls to 1/e (AU).
+    pub scale_height: f64,
+    /// Top of the modelled atmosphere above the surface (AU).
+    pub thickness: f64,
+    /// Rayleigh scattering coefficients at the surface, per RGB (1/AU).
+    pub rayleigh: [f64; 3],
+    /// Mie scattering coefficient at the surface (1/AU).
+    pub mie: f64,
+    /// Henyey-Greenstein asymmetry of the Mie lobe (0 isotropic, ~0.76 haze).
+    pub mie_g: f64,
+}
+
+impl Atmosphere {
+    /// Earth-like Rayleigh scattering plus a light forward-scattering haze.
+    pub fn earthlike() -> Self {
+        // Convert sea-level coefficients from 1/m to 1/AU.
+        let au_metres = AU_KM * 1_000.0;
+        let per_au = |beta: f64| beta * au_metres;
+        Self {
+            scale_height: 8_500.0 / au_metres,
+            thickness: 80_000.0 / au_metres,
+            rayleigh: [per_au(5.8e-6), per_au(13.5e-6), per_au(33.1e-6)],
+            mie: per_au(21.0e-6),
+            mie_g: 0.76,
+        }
+    }
+}
+
 /// A star system plus the index of the body the telescope stands on.
 pub struct Scene {
     pub bodies: Vec<Body>,
     /// The body the observatory is attached to (a planet, or a moon).
     pub host: usize,
+    /// Atmosphere of the host body, if it has one.
+    pub atmosphere: Option<Atmosphere>,
     /// Body to aim at on startup.
     pub default_target: usize,
     /// Field of view, in degrees, for the startup view.
@@ -139,6 +201,8 @@ pub struct Scene {
     /// Observatory latitude and longitude on the host body (degrees).
     pub observer_lat_deg: f64,
     pub observer_lon_deg: f64,
+    pub observer_height_m: f64,
+    pub initial_time_days: Option<f64>,
 }
 
 impl Scene {
@@ -165,149 +229,22 @@ impl Scene {
     }
 }
 
-/// A small, hand-tuned system: one Sun, two planets, one moon each. The
-/// telescope stands on `Terra`.
+/// True-scale solar system, observed from Earth.
 pub fn default_scene() -> Scene {
-    let deg = std::f64::consts::PI / 180.0;
+    solar::scene()
+}
 
-    // Orbital periods (days). Each body owns its own period, so Terra and Mars
-    // are genuinely independent: ~1 year vs ~1.9 years.
-    let terra_period = 365.256;
-    let luna_period = 27.321_661;
-    let mars_period = 686.980;
-    let phobos_period = 0.318_910;
-
-    let terra_a = 1.0;
-    let mars_a = 1.523_679;
-
-    let bodies = vec![
-        Body {
-            name: "Sun".into(),
-            parent: None,
-            elements: Elements::circular(0.0, 0.0),
-            period_days: 0.0,
-            radius: 696_340.0 / AU_KM,
-            kind: BodyKind::Star,
-            albedo: [0.0; 3],
-            emission: [1.0, 0.95, 0.88],
-            luminosity: 1.0,
-            obliquity: 0.0,
-            spin_period: 25.38,
-            spin_phase: 0.0,
-        },
-        Body {
-            name: "Terra".into(),
-            parent: Some(0),
-            elements: Elements {
-                a: terra_a,
-                e: 0.016_7,
-                inc: 0.0,
-                node: 0.0,
-                peri: 1.8,
-                m0: 0.6,
-                epoch: 0.0,
-            },
-            period_days: terra_period,
-            // Three times the real diameter, as requested. The Moon's orbit is
-            // still well outside.
-            radius: 3.0 * 6_371.0 / AU_KM,
-            kind: BodyKind::Planet,
-            albedo: [0.28, 0.36, 0.55],
-            emission: [0.0; 3],
-            luminosity: 0.0,
-            obliquity: 23.44 * deg,
-            spin_period: 0.997_270,
-            // Start the observatory at local midnight.
-            spin_phase: std::f64::consts::PI,
-        },
-        Body {
-            name: "Luna".into(),
-            parent: Some(1),
-            elements: Elements {
-                a: 384_400.0 / AU_KM,
-                e: 0.054_9,
-                inc: 5.145 * deg,
-                node: 0.2,
-                peri: 4.2,
-                m0: 2.1,
-                epoch: 0.0,
-            },
-            period_days: luna_period,
-            radius: 1_737.4 / AU_KM,
-            kind: BodyKind::Moon,
-            albedo: [0.52, 0.51, 0.48],
-            emission: [0.0; 3],
-            luminosity: 0.0,
-            obliquity: 6.68 * deg,
-            spin_period: 27.321_661,
-            spin_phase: 0.0,
-        },
-        Body {
-            name: "Mars".into(),
-            parent: Some(0),
-            elements: Elements {
-                a: mars_a,
-                e: 0.093_4,
-                inc: 1.850 * deg,
-                node: 0.7,
-                peri: 2.9,
-                m0: 3.4,
-                epoch: 0.0,
-            },
-            period_days: mars_period,
-            // Three times the real diameter. Phobos's orbit below is scaled by
-            // the same factor so it does not end up inside the larger planet.
-            radius: 3.0 * 3_389.5 / AU_KM,
-            kind: BodyKind::Planet,
-            albedo: [0.55, 0.30, 0.18],
-            emission: [0.0; 3],
-            luminosity: 0.0,
-            obliquity: 25.19 * deg,
-            spin_period: 1.025_957,
-            spin_phase: 0.4,
-        },
-        Body {
-            name: "Phobos".into(),
-            parent: Some(3),
-            elements: Elements {
-                // Scaled with Mars's enlarged radius (still ~2.8 Mars radii out).
-                a: 3.0 * 9_376.0 / AU_KM,
-                e: 0.015_1,
-                inc: 1.075 * deg,
-                node: 0.0,
-                peri: 1.0,
-                m0: 0.0,
-                epoch: 0.0,
-            },
-            period_days: phobos_period,
-            radius: 11.3 / AU_KM,
-            kind: BodyKind::Moon,
-            albedo: [0.30, 0.28, 0.26],
-            emission: [0.0; 3],
-            luminosity: 0.0,
-            obliquity: 0.0,
-            spin_period: 0.318_910,
-            spin_phase: 0.0,
-        },
-    ];
-
-    Scene {
-        bodies,
-        host: 1,
-        default_target: 2,
-        default_fov_deg: 1.1,
-        targets: vec![2, 0, 3, 4],
-        observer_lat_deg: 35.0,
-        observer_lon_deg: 0.0,
-    }
+/// Solar system observed from Saturn at 20 degrees north.
+pub fn saturn_scene() -> Scene {
+    solar::saturn_observatory()
 }
 
 /// A fictitious binary system.
 ///
 /// Two stars orbit their common barycentre — `Aur`, a large yellow star, and
 /// `Igni`, a smaller, redder one. Three planets circle the pair, with one, two
-/// and three moons. The observatory stands on `Halo`, the *inner* moon of the
-/// two-mooned planet `Calyx`, so the giant planet hangs permanently overhead.
+/// and three moons. The observatory stands on `Calyx`, watching its two moons,
+/// `Halo` and `Umbra`, rise and set as the planet rotates.
 pub fn binary_scene() -> Scene {
     let deg = std::f64::consts::PI / 180.0;
     let star = |name: &str,
@@ -337,6 +274,8 @@ pub fn binary_scene() -> Scene {
         obliquity: 0.0,
         spin_period: spin,
         spin_phase: 0.0,
+        tidally_locked: false,
+        rings: None,
     };
 
     let bodies = vec![
@@ -354,11 +293,13 @@ pub fn binary_scene() -> Scene {
             obliquity: 0.0,
             spin_period: 1.0,
             spin_phase: 0.0,
+            tidally_locked: false,
+            rings: None,
         },
         // 1 — Aur: larger, yellow. The radii are inflated for a thicker disc
         // while `luminosity` (the total light output) is unchanged: emitted
         // radiance scales as luminosity / radius^2, so a bigger sphere is
-        // dimmer per unit area and the surface illumination is identical.
+        // dimmer per unit area, preserving far-field irradiance.
         star("Aur", 0.30, 0.0, 0.030, [1.0, 0.96, 0.86], 2.0, 22.0),
         // 2 — Igni: smaller and redder.
         star(
@@ -392,6 +333,8 @@ pub fn binary_scene() -> Scene {
             obliquity: 18.0 * deg,
             spin_period: 0.85,
             spin_phase: 0.0,
+            tidally_locked: false,
+            rings: None,
         },
         // 4 — Pip (moon of Nerid).
         Body {
@@ -412,11 +355,13 @@ pub fn binary_scene() -> Scene {
             albedo: [0.60, 0.60, 0.62],
             emission: [0.0; 3],
             luminosity: 0.0,
-            obliquity: 90.0 * deg,
+            obliquity: 2.0 * deg,
             spin_period: 2.5,
             spin_phase: 0.0,
+            tidally_locked: false,
+            rings: None,
         },
-        // 5 — Calyx: the two-mooned planet.
+        // 5 — Calyx: the two-mooned planet and observatory host.
         Body {
             name: "Calyx".into(),
             parent: Some(0),
@@ -438,8 +383,10 @@ pub fn binary_scene() -> Scene {
             obliquity: 22.0 * deg,
             spin_period: 0.60,
             spin_phase: 0.0,
+            tidally_locked: false,
+            rings: None,
         },
-        // 6 — Halo: inner moon of Calyx, and the observatory.
+        // 6 — Halo: inner moon of Calyx and the startup target.
         Body {
             name: "Halo".into(),
             parent: Some(5),
@@ -458,10 +405,12 @@ pub fn binary_scene() -> Scene {
             albedo: [0.55, 0.57, 0.60],
             emission: [0.0; 3],
             luminosity: 0.0,
-            // Spin axis along the orbit normal, so the planet stays fixed.
-            obliquity: 90.0 * deg,
+            // Nearly ecliptic-normal spin for the synchronous inner moon.
+            obliquity: 0.5 * deg,
             spin_period: 3.5,
             spin_phase: 0.0,
+            tidally_locked: false,
+            rings: None,
         },
         // 7 — Umbra: outer moon of Calyx.
         Body {
@@ -482,9 +431,11 @@ pub fn binary_scene() -> Scene {
             albedo: [0.35, 0.33, 0.32],
             emission: [0.0; 3],
             luminosity: 0.0,
-            obliquity: 90.0 * deg,
+            obliquity: 1.5 * deg,
             spin_period: 8.0,
             spin_phase: 0.0,
+            tidally_locked: false,
+            rings: None,
         },
         // 8 — Vantus, three moons.
         Body {
@@ -508,6 +459,8 @@ pub fn binary_scene() -> Scene {
             obliquity: 12.0 * deg,
             spin_period: 0.40,
             spin_phase: 0.0,
+            tidally_locked: false,
+            rings: None,
         },
         // 9, 10, 11 — Iri, Kesh, Coll (moons of Vantus).
         Body {
@@ -528,9 +481,11 @@ pub fn binary_scene() -> Scene {
             albedo: [0.50, 0.50, 0.55],
             emission: [0.0; 3],
             luminosity: 0.0,
-            obliquity: 90.0 * deg,
+            obliquity: 1.0 * deg,
             spin_period: 5.0,
             spin_phase: 0.0,
+            tidally_locked: false,
+            rings: None,
         },
         Body {
             name: "Kesh".into(),
@@ -550,9 +505,11 @@ pub fn binary_scene() -> Scene {
             albedo: [0.45, 0.40, 0.35],
             emission: [0.0; 3],
             luminosity: 0.0,
-            obliquity: 90.0 * deg,
+            obliquity: 2.0 * deg,
             spin_period: 11.0,
             spin_phase: 0.0,
+            tidally_locked: false,
+            rings: None,
         },
         Body {
             name: "Coll".into(),
@@ -572,23 +529,32 @@ pub fn binary_scene() -> Scene {
             albedo: [0.30, 0.32, 0.38],
             emission: [0.0; 3],
             luminosity: 0.0,
-            obliquity: 90.0 * deg,
+            obliquity: 3.0 * deg,
             spin_period: 18.0,
             spin_phase: 0.0,
+            tidally_locked: false,
+            rings: None,
         },
     ];
 
     Scene {
         bodies,
-        host: 6,           // Halo, inner moon of Calyx
-        default_target: 5, // Calyx
-        default_fov_deg: 80.0,
-        targets: vec![5, 1, 2, 7, 3, 8, 4, 9],
-        // Face the planet: on a tidally-locked moon Calyx never rises or sets,
-        // so the observatory must sit on the Calyx-facing hemisphere.
+        host: 5, // Calyx
+        atmosphere: Some(Atmosphere::earthlike()),
+        default_target: 6, // Halo
+        default_fov_deg: 20.0,
+        targets: vec![6, 1, 2, 7, 3, 8, 4, 9],
         observer_lat_deg: 35.0,
-        observer_lon_deg: 180.0,
+        observer_lon_deg: 0.0,
+        observer_height_m: 2.0,
+        initial_time_days: None,
     }
+}
+
+/// Halo's near-side observatory, facing ringed Calyx in the binary system.
+pub fn halo_scene() -> Scene {
+    crate::config::parse(include_str!("../configs/halo.yaml"))
+        .expect("bundled Halo configuration must be valid")
 }
 
 #[cfg(test)]
@@ -601,6 +567,114 @@ mod tests {
             .iter()
             .position(|b| b.name == name)
             .unwrap_or_else(|| panic!("no body named {name}"))
+    }
+
+    #[test]
+    fn earthlike_atmosphere_uses_consistent_units() {
+        let a = Atmosphere::earthlike();
+        let au_metres = 149_597_870_700.0;
+        assert!((a.scale_height * au_metres - 8_500.0).abs() < 1e-9);
+        assert!((a.thickness * au_metres - 80_000.0).abs() < 1e-9);
+        // Vertical sea-level optical depth is dimensionless and order unity,
+        // not the hundreds produced by mixing kilometres and metres.
+        let optical_depth = (a.rayleigh[2] + a.mie) * a.scale_height;
+        assert!((optical_depth - 0.45985).abs() < 1e-6);
+    }
+
+    #[test]
+    fn moons_remain_outside_their_parents() {
+        for scene in [default_scene(), binary_scene()] {
+            for moon in scene.bodies.iter().filter(|b| b.kind == BodyKind::Moon) {
+                let parent = scene.body(moon.parent.unwrap());
+                assert!(moon.elements.a * (1.0 - moon.elements.e) > parent.radius + moon.radius);
+            }
+        }
+    }
+
+    #[test]
+    fn solar_system_has_real_scales_and_all_observable_planets() {
+        let scene = default_scene();
+        assert_eq!(scene.body(scene.host).name, "Earth");
+        assert_eq!(
+            scene
+                .bodies
+                .iter()
+                .filter(|b| b.kind == BodyKind::Planet)
+                .count(),
+            8
+        );
+        assert_eq!(
+            scene
+                .bodies
+                .iter()
+                .filter(|b| b.kind == BodyKind::Moon)
+                .count(),
+            10
+        );
+        for (name, radius_km, distance_au, period_days) in [
+            ("Mercury", 2_439.7, 0.38709927, 87.9691),
+            ("Venus", 6_051.8, 0.72333566, 224.701),
+            ("Earth", 6_371.0, 1.00000261, 365.256),
+            ("Mars", 3_389.5, 1.52371034, 686.980),
+            ("Jupiter", 69_911.0, 5.202887, 4_332.589),
+            ("Saturn", 58_232.0, 9.53667594, 10_759.22),
+            ("Uranus", 25_362.0, 19.18916464, 30_688.5),
+            ("Neptune", 24_622.0, 30.06992276, 60_182.0),
+        ] {
+            let i = index(&scene, name);
+            let body = scene.body(i);
+            assert!((body.radius * AU_KM - radius_km).abs() < 1e-6);
+            assert!((body.elements.a - distance_au).abs() < 1e-9);
+            assert!((body.period_days - period_days).abs() < 1e-6);
+            assert_eq!(scene.targets.contains(&i), i != scene.host);
+            let start = body.relative_position(0.0);
+            let end = body.relative_position(body.period_days);
+            assert!(
+                (start - end).length() < 1e-10,
+                "{name}: orbit failed to close"
+            );
+        }
+        assert_eq!(scene.targets.len(), 9);
+        assert!((scene.body(index(&scene, "Phobos")).elements.a * AU_KM - 9_376.0).abs() < 1e-6);
+        for (i, body) in scene.bodies.iter().enumerate() {
+            if let Some(parent) = body.parent {
+                assert!(parent < i, "parents must precede children");
+            }
+        }
+        for t in [-365.25, 0.0, 365.25, 60_182.0] {
+            assert!(scene.positions(t).iter().all(|p| p.is_finite()));
+        }
+    }
+
+    #[test]
+    fn spin_keeps_latitude_fixed_and_respects_axial_tilt() {
+        let scene = default_scene();
+        for body in &scene.bodies {
+            let expected_pole = DQuat::from_rotation_y(body.obliquity) * DVec3::Z;
+            let latitude = 35_f64.to_radians();
+            let local = DVec3::new(latitude.cos(), 0.0, latitude.sin());
+            for fraction in [0.0, 0.25, 0.5, 0.75, 1.0] {
+                let q = body.spin_quat(body.spin_period * fraction);
+                assert!((q * DVec3::Z - expected_pole).length() < 1e-12);
+                assert!(((q * local).dot(expected_pole) - latitude.sin()).abs() < 1e-12);
+            }
+        }
+        for name in ["Venus", "Uranus"] {
+            assert!((scene.body(index(&scene, name)).spin_quat(0.0) * DVec3::Z).z < 0.0);
+        }
+        for (name, inclination) in [
+            ("Phobos", 1.075_f64),
+            ("Titania", 0.079),
+            ("Triton", 156.865),
+        ] {
+            let moon = scene.body(index(&scene, name));
+            let planet = scene.body(moon.parent.unwrap());
+            let pole = planet.spin_quat(0.0) * DVec3::Z;
+            let normal = DMat3::from_rotation_z(moon.elements.node)
+                * DMat3::from_rotation_x(moon.elements.inc)
+                * DVec3::Z;
+            assert!((pole.dot(normal) - inclination.to_radians().cos()).abs() < 1e-12);
+        }
     }
 
     #[test]
@@ -658,7 +732,9 @@ mod tests {
 
         assert!(!solar.is_empty(), "no solar eclipse in 1500 days");
         assert!(!lunar.is_empty(), "no lunar eclipse in 1500 days");
-        assert!(best(&solar).unwrap().1 < 0.5, "no deep solar eclipse");
+        // With the real Earth radius, a deep solar eclipse is not guaranteed
+        // at this particular observatory within four years.
+        assert!(best(&solar).unwrap().1 < 1.0, "no solar-disc overlap");
         assert!(best_lunar.unwrap().1 < 0.8, "no deep (total) lunar eclipse");
     }
 
@@ -717,9 +793,9 @@ mod tests {
     }
 
     #[test]
-    fn terra_and_mars_have_distinct_periods() {
+    fn earth_and_mars_have_distinct_periods() {
         let scene = default_scene();
-        let terra = scene.bodies[index(&scene, "Terra")].period_days;
+        let terra = scene.bodies[index(&scene, "Earth")].period_days;
         let mars = scene.bodies[index(&scene, "Mars")].period_days;
         assert!((terra - 365.256).abs() < 0.01, "terra period {terra}");
         assert!((mars - 686.98).abs() < 0.5, "mars period {mars}");
@@ -763,12 +839,10 @@ mod tests {
             "the two suns should differ in colour"
         );
 
-        // The observatory stands on a moon...
-        assert_eq!(scene.body(scene.host).kind, BodyKind::Moon);
-        let planet = scene.body(scene.host).parent.unwrap();
+        // The observatory stands on Calyx, which has exactly two moons.
+        let planet = scene.host;
+        assert_eq!(scene.body(planet).name, "Calyx");
         assert_eq!(scene.body(planet).kind, BodyKind::Planet);
-
-        // ...that planet has exactly two moons...
         let moons: Vec<usize> = (0..scene.bodies.len())
             .filter(|&i| {
                 scene.bodies[i].parent == Some(planet) && scene.bodies[i].kind == BodyKind::Moon
@@ -776,17 +850,12 @@ mod tests {
             .collect();
         assert_eq!(moons.len(), 2, "Calyx should have two moons");
 
-        // ...and the observatory is on the inner of the two.
-        let host_a = scene.body(scene.host).elements.a;
-        let other_a = moons
-            .iter()
-            .map(|&i| scene.body(i).elements.a)
-            .filter(|&a| a != host_a)
-            .fold(f64::INFINITY, f64::min);
-        assert!(
-            host_a < other_a,
-            "the observatory should be on the inner moon"
-        );
+        // Halo is the startup target; the host is not an aiming shortcut.
+        let target = scene.default_target;
+        assert_eq!(scene.body(target).name, "Halo");
+        assert!(moons.contains(&target));
+        assert_eq!(scene.targets[0], target);
+        assert!(!scene.targets.contains(&scene.host));
 
         // Three planets, six moons in total.
         let planets = scene

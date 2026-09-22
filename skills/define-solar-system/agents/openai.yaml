@@ -1,0 +1,4 @@
+interface:
+  display_name: "Define Solar System"
+  short_description: "Create Stargaze systems and camera setups from prompts"
+  default_prompt: "Use $define-solar-system to create a Stargaze system with a ringed planet viewed from a tidally locked moon."

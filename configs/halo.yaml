@@ -1,0 +1,219 @@
+# Stargaze system format v1. Distances and angles use explicit units.
+# Omit time_days to search for a suitable night view; set it for an exact epoch.
+# Orbit angles are measured in the shared ecliptic frame, including moon orbits.
+# Halo: 29,919.574 km from Calyx, synchronous rotation, airless near-side camera.
+# Calyx rings end at 18,164 km; clearance to Halo's near surface is 10,255.574 km.
+version: 1
+name: Calyx and Halo
+camera:
+  body: halo
+  latitude_deg: 35.0
+  longitude_deg: 180.0
+  height_m: 2.0
+  look_at: calyx
+  fov_deg: 80.0
+targets:
+  - calyx
+  - aur
+  - igni
+  - umbra
+  - nerid
+  - vantus
+  - pip
+  - iri
+bodies:
+  - id: barycentre
+    name: Barycentre
+    kind: anchor
+    radius_km: 0.0
+  - id: aur
+    name: Aur
+    kind: star
+    parent: barycentre
+    radius_km: 4487936.121
+    albedo: [0.0, 0.0, 0.0]
+    luminosity: 2.0
+    emission: [1.0, 0.96, 0.86]
+    orbit:
+      semi_major_axis_au: 0.3
+      period_days: 120.0
+    rotation:
+      mode: free
+      period_days: 22.0
+  - id: igni
+    name: Igni
+    kind: star
+    parent: barycentre
+    radius_km: 2692761.6726
+    albedo: [0.0, 0.0, 0.0]
+    luminosity: 0.7
+    emission: [1.0, 0.42, 0.2]
+    orbit:
+      semi_major_axis_au: 0.5
+      period_days: 120.0
+      mean_anomaly_deg: 180.0
+    rotation:
+      mode: free
+      period_days: 30.0
+  - id: nerid
+    name: Nerid
+    kind: planet
+    parent: barycentre
+    radius_km: 5734.0
+    albedo: [0.45, 0.55, 0.65]
+    orbit:
+      semi_major_axis_au: 2.6
+      period_days: 1530.0
+      eccentricity: 0.03
+      inclination_deg: 1.5
+      ascending_node_deg: 22.9183118052
+      periapsis_deg: 63.0253574644
+      mean_anomaly_deg: 114.5915590262
+    rotation:
+      mode: free
+      period_days: 0.85
+      obliquity_deg: 18.0
+  - id: pip
+    name: Pip
+    kind: moon
+    parent: nerid
+    radius_km: 1200.0
+    albedo: [0.6, 0.6, 0.62]
+    orbit:
+      period_days: 2.5
+      eccentricity: 0.01
+      inclination_deg: 2.0
+      periapsis_deg: 28.6478897565
+      mean_anomaly_deg: 57.2957795131
+      semi_major_axis_km: 32911.531554
+    rotation:
+      mode: free
+      period_days: 2.5
+      obliquity_deg: 2.0
+  - id: calyx
+    name: Calyx
+    kind: planet
+    parent: barycentre
+    radius_km: 9560.0
+    albedo: [0.72, 0.6, 0.42]
+    orbit:
+      semi_major_axis_au: 4.2
+      period_days: 3000.0
+      eccentricity: 0.02
+      inclination_deg: 1.0
+      ascending_node_deg: 114.5915590262
+      periapsis_deg: 171.8873385392
+      mean_anomaly_deg: 257.8310078089
+    rotation:
+      mode: free
+      period_days: 0.6
+      obliquity_deg: 22.0
+    rings:
+      inner_radius: 1.25
+      outer_radius: 1.9
+      optical_depth: 1.0
+      albedo: [0.88, 0.8, 0.66]
+      banded: true
+  - id: halo
+    name: Halo
+    kind: moon
+    parent: calyx
+    radius_km: 1500.0
+    albedo: [0.55, 0.57, 0.6]
+    orbit:
+      period_days: 4.89139870078079
+      inclination_deg: 0.5
+      ascending_node_deg: 90.0
+      periapsis_deg: -90.0
+      semi_major_axis_km: 29919.57414
+    rotation:
+      mode: tidal_lock
+  - id: umbra
+    name: Umbra
+    kind: moon
+    parent: calyx
+    radius_km: 1000.0
+    albedo: [0.35, 0.33, 0.32]
+    orbit:
+      period_days: 8.0
+      eccentricity: 0.01
+      inclination_deg: 1.5
+      ascending_node_deg: 57.2957795131
+      periapsis_deg: 114.5915590262
+      mean_anomaly_deg: 171.8873385392
+      semi_major_axis_km: 47871.318624
+    rotation:
+      mode: free
+      period_days: 8.0
+      obliquity_deg: 1.5000000000000002
+  - id: vantus
+    name: Vantus
+    kind: planet
+    parent: barycentre
+    radius_km: 14016.0
+    albedo: [0.35, 0.42, 0.55]
+    orbit:
+      semi_major_axis_au: 6.8
+      period_days: 6200.0
+      eccentricity: 0.05
+      inclination_deg: 2.5
+      ascending_node_deg: 85.9436692696
+      periapsis_deg: 45.8366236105
+      mean_anomaly_deg: 68.7549354157
+    rotation:
+      mode: free
+      period_days: 0.4
+      obliquity_deg: 12.000000000000002
+  - id: iri
+    name: Iri
+    kind: moon
+    parent: vantus
+    radius_km: 800.0
+    albedo: [0.5, 0.5, 0.55]
+    orbit:
+      period_days: 5.0
+      eccentricity: 0.005
+      inclination_deg: 1.0
+      periapsis_deg: 57.2957795131
+      mean_anomaly_deg: 28.6478897565
+      semi_major_axis_km: 26927.616726
+    rotation:
+      mode: free
+      period_days: 5.0
+      obliquity_deg: 1.0
+  - id: kesh
+    name: Kesh
+    kind: moon
+    parent: vantus
+    radius_km: 600.0
+    albedo: [0.45, 0.4, 0.35]
+    orbit:
+      period_days: 11.0
+      eccentricity: 0.01
+      inclination_deg: 2.0
+      ascending_node_deg: 28.6478897565
+      periapsis_deg: 114.5915590262
+      mean_anomaly_deg: 143.2394487827
+      semi_major_axis_km: 44879.361209999995
+    rotation:
+      mode: free
+      period_days: 11.0
+      obliquity_deg: 2.0
+  - id: coll
+    name: Coll
+    kind: moon
+    parent: vantus
+    radius_km: 500.0
+    albedo: [0.3, 0.32, 0.38]
+    orbit:
+      period_days: 18.0
+      eccentricity: 0.02
+      inclination_deg: 3.0
+      ascending_node_deg: 11.4591559026
+      periapsis_deg: 229.1831180523
+      mean_anomaly_deg: 286.4788975654
+      semi_major_axis_km: 67319.04181499999
+    rotation:
+      mode: free
+      period_days: 18.0
+      obliquity_deg: 3.0000000000000004
