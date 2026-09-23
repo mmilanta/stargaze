@@ -132,7 +132,15 @@ cargo run --release -- --check-config configs/halo.yaml
 The default launch reads `configs/halo.yaml` from the project directory at
 runtime. The second config contains the Sun, all eight planets and selected
 moons, with the camera on Earth looking at the Moon. Edit either file or
-create your own; changes take effect on the next launch without rebuilding.
+create your own; changes take effect when selected from the menu or on the next launch without rebuilding.
+
+Click the house icon in the bottom bar, left of the Labels checkbox, to open the
+solar-system menu. It lists every `.yaml` and `.yml` file in `configs`, using
+the system name and filename, and refreshes each time you open it. Click a
+system to load its scene and camera. Use Previous/Next or the mouse wheel to
+browse longer lists. Time is suspended while the menu is open; press Escape
+or click the house again to resume your current view. The house remains
+available when the HUD is hidden. Invalid configs show an error in the menu.
 `STARGAZE_CONFIG=/path/to/system.yaml` also selects a file; an explicit
 `--config` takes precedence. `--check-config` validates without a display or GPU.
 
@@ -233,6 +241,7 @@ sequence is deterministic for a given pixel and sample index.
 
 | Input | Action |
 | --- | --- |
+| Home icon (left of Labels) | open solar-system menu; click again to resume |
 | left-drag (sky) | look around |
 | left-click (body) | lock the telescope onto that body; click empty sky or start a drag to release |
 | scroll / `=` / `-` | zoom, down to 0.001° |
@@ -250,7 +259,7 @@ sequence is deterministic for a given pixel and sample index.
 | `A` | toggle automatic exposure metering (on by default) |
 | `H` | show / hide HUD |
 | `L` | toggle labels |
-| esc | quit |
+| esc | close menu, or quit while observing |
 
 Clicking a body locks the view to it: as simulation time advances the
 telescope keeps pointing at that body, so it stays framed while its phase and

@@ -1,0 +1,100 @@
+# A fictional double-star system. At day 0 Median lies between Umber and Lumen:
+# Umber -- 6 AU -- Median -- 6 AU -- Lumen. Their circular orbits continue
+# independently, so the three bodies do not remain aligned.
+# Umber is five times wider than before, with the same luminosity value.
+# Its radiance per unit area is reduced accordingly; stellar mass is not modeled.
+# Cadence spins in 1.2 days while orbiting in 3 days, so it is not locked.
+version: 1
+name: Median and the three resonant moons
+time_days: 0
+camera:
+  body: cadence
+  latitude_deg: 30
+  longitude_deg: -75
+  height_m: 2
+  look_at: median
+  fov_deg: 50
+targets: [median, pulse, refrain, lumen, umber]
+bodies:
+  - id: umber
+    name: Umber
+    kind: star
+    radius_km: 10000000
+    luminosity: 0.5
+    emission: [1.0, 0.28, 0.10]
+    rotation:
+      mode: free
+      period_days: 25
+
+  - id: lumen
+    name: Lumen
+    kind: star
+    parent: umber
+    radius_km: 850000
+    luminosity: 8
+    emission: [0.78, 0.88, 1.0]
+    orbit:
+      semi_major_axis_au: 12
+      period_days: 9051
+      mean_anomaly_deg: 0
+    rotation:
+      mode: free
+      period_days: 18
+
+  - id: median
+    name: Median
+    kind: planet
+    parent: umber
+    radius_km: 15000
+    albedo: [0.35, 0.43, 0.48]
+    orbit:
+      semi_major_axis_au: 6
+      period_days: 3200
+      mean_anomaly_deg: 0
+    rotation:
+      mode: free
+      period_days: 1.1
+      obliquity_deg: 15
+
+  # 1:2:4 mean-motion chain. For each doubling of period, the orbital radius
+  # grows by 2^(2/3). Mean longitudes start at 75°, 105°, and 30°, giving
+  # a Laplace angle of 75 - 3*105 + 2*30 = -180°.
+  - id: pulse
+    name: Pulse
+    kind: moon
+    parent: median
+    radius_km: 950
+    albedo: [0.70, 0.62, 0.53]
+    orbit:
+      semi_major_axis_km: 60000
+      period_days: 1.5
+      mean_anomaly_deg: 75
+    rotation:
+      mode: tidal_lock
+
+  - id: cadence
+    name: Cadence
+    kind: moon
+    parent: median
+    radius_km: 1200
+    albedo: [0.58, 0.66, 0.72]
+    orbit:
+      semi_major_axis_km: 95244.063118
+      period_days: 3
+      mean_anomaly_deg: 105
+    rotation:
+      mode: free
+      period_days: 1.2
+
+  - id: refrain
+    name: Refrain
+    kind: moon
+    parent: median
+    radius_km: 1600
+    albedo: [0.55, 0.48, 0.44]
+    orbit:
+      semi_major_axis_km: 151190.525988
+      period_days: 6
+      mean_anomaly_deg: 30
+    rotation:
+      mode: tidal_lock

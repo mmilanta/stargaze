@@ -2,6 +2,7 @@
 
 mod camera;
 mod config;
+mod menu;
 mod pathtracer;
 mod renderer;
 mod sim;
@@ -673,6 +674,7 @@ impl State {
 
 struct App {
     state: State,
+    menu: menu::Menu,
     window: Option<Arc<Window>>,
     renderer: Option<Renderer>,
     stars: Vec<CatalogueStar>,
@@ -687,6 +689,59 @@ struct App {
 }
 
 impl App {
+    fn toggle_menu(&mut self) {
+        self.state.end_sky_press();
+        self.exposure_dragging = false;
+        if self.menu.open {
+            self.menu.open = false;
+            self.state.last = Instant::now();
+        } else {
+            self.menu.refresh();
+        }
+    }
+
+    fn menu_layout(&self) -> Option<menu::Layout> {
+        let (w, h) = self.renderer.as_ref()?.size();
+        (w > 0 && h > 0).then(|| menu::Layout::new(w as f32, h as f32, self.scale))
+    }
+
+    fn menu_click(&mut self, cx: f64, cy: f64) -> bool {
+        let Some(layout) = self.menu_layout() else {
+            return self.menu.open;
+        };
+        if layout.home.contains(cx, cy) {
+            self.toggle_menu();
+            return true;
+        }
+        if !self.menu.open {
+            return false;
+        }
+        let page = layout.rows.len();
+        if layout.previous.contains(cx, cy) {
+            self.menu.offset = self.menu.offset.saturating_sub(page);
+        } else if layout.next.contains(cx, cy) && self.menu.offset + page < self.menu.entries.len()
+        {
+            self.menu.offset += page;
+        } else if let Some(row) = layout.rows.iter().position(|r| r.contains(cx, cy))
+            && let Some(entry) = self.menu.entries.get(self.menu.offset + row)
+        {
+            match config::load(&entry.path) {
+                Ok(scene) => {
+                    self.state = State::with_scene(scene);
+                    self.menu.open = false;
+                    self.menu.error = None;
+                }
+                Err(error) => {
+                    self.menu.error = Some(format!(
+                        "Could not load {}: {error:#}",
+                        entry.path.file_name().unwrap_or_default().to_string_lossy()
+                    ));
+                }
+            }
+        }
+        true
+    }
+
     fn adjust_exposure(&mut self, layout: &ui::Layout, x: f64) {
         self.ev_bias = layout.exposure_bias_at(x);
         self.sync_exposure();
@@ -741,19 +796,26 @@ impl ApplicationHandler for App {
     fn window_event(&mut self, event_loop: &ActiveEventLoop, _id: WindowId, event: WindowEvent) {
         match event {
             WindowEvent::CloseRequested => event_loop.exit(),
+            WindowEvent::ScaleFactorChanged { scale_factor, .. } => {
+                self.scale = scale_factor as f32;
+            }
             WindowEvent::Resized(size) => {
                 if let Some(r) = self.renderer.as_mut() {
                     r.resize(size.width, size.height);
                 }
             }
             WindowEvent::RedrawRequested => {
-                self.state.advance();
-                self.state.track();
+                if self.menu.open {
+                    self.state.last = Instant::now();
+                } else {
+                    self.state.advance();
+                    self.state.track();
+                }
                 if let (Some(r), Some(window)) = (self.renderer.as_mut(), self.window.as_ref()) {
                     let (w, h) = r.size();
                     if w > 0 && h > 0 {
                         let mut frame = self.state.build_frame(w, h);
-                        if self.show_hud {
+                        if self.show_hud && !self.menu.open {
                             let layout = ui::layout(w as f32, h as f32, self.scale);
                             ui::build(
                                 &mut frame.ui,
@@ -772,6 +834,13 @@ impl ApplicationHandler for App {
                                 &frame.labels,
                             );
                         }
+                        menu::build(
+                            &mut frame.ui,
+                            [w as f32, h as f32],
+                            self.scale,
+                            &self.menu,
+                            self.cursor,
+                        );
                         r.render(&frame);
                     }
                     let rate = if self.state.paused {
@@ -788,13 +857,17 @@ impl ApplicationHandler for App {
                     } else {
                         format!("exp {:.3} {:+.2} EV", r.manual_exposure(), self.ev_bias)
                     };
-                    let title = format!(
-                        "stargaze  ·  t = {:.2} d ({:.3} yr)  ·  {}  ·  {} spp  ·  {exposure}{lock}  ·  click body=lock  drag=look  scroll=zoom  space=play/pause  , . =exposure  A=auto  [ ]=speed  R=reset  E=eclipse  T=transit  H=hud  L=labels",
-                        self.state.sim_time,
-                        self.state.sim_time / 365.256,
-                        rate,
-                        r.samples(),
-                    );
+                    let title = if self.menu.open {
+                        "stargaze  ·  Solar systems".to_string()
+                    } else {
+                        format!(
+                            "stargaze  ·  t = {:.2} d ({:.3} yr)  ·  {}  ·  {} spp  ·  {exposure}{lock}  ·  click body=lock  drag=look  scroll=zoom  space=play/pause  , . =exposure  A=auto  [ ]=speed  R=reset  E=eclipse  T=transit  H=hud  L=labels",
+                            self.state.sim_time,
+                            self.state.sim_time / 365.256,
+                            rate,
+                            r.samples(),
+                        )
+                    };
                     if title != self.last_title {
                         window.set_title(&title);
                         self.last_title = title;
@@ -808,6 +881,10 @@ impl ApplicationHandler for App {
                 match state {
                     ElementState::Pressed => {
                         let (cx, cy) = self.cursor;
+                        if self.menu_click(cx, cy) {
+                            self.state.end_sky_press();
+                            return;
+                        }
                         let mut consumed = false;
                         if self.show_hud
                             && let Some(layout) = self.ui_layout()
@@ -879,12 +956,29 @@ impl ApplicationHandler for App {
                     MouseScrollDelta::LineDelta(_, y) => y as f64,
                     MouseScrollDelta::PixelDelta(p) => p.y / 50.0,
                 };
+                if self.menu.open {
+                    if let Some(layout) = self.menu_layout() {
+                        let page = layout.rows.len();
+                        if y > 0.0 {
+                            self.menu.offset = self.menu.offset.saturating_sub(page);
+                        } else if y < 0.0 && self.menu.offset + page < self.menu.entries.len() {
+                            self.menu.offset += page;
+                        }
+                    }
+                    return;
+                }
                 let fov = self.state.observer.fov_y * ZOOM_STEP.powf(y);
                 self.state.observer.fov_y =
                     fov.clamp(MIN_FOV_DEG.to_radians(), MAX_FOV_DEG.to_radians());
             }
             WindowEvent::KeyboardInput { event, .. } => {
                 if event.state != ElementState::Pressed {
+                    return;
+                }
+                if self.menu.open {
+                    if event.physical_key == PhysicalKey::Code(KeyCode::Escape) {
+                        self.toggle_menu();
+                    }
                     return;
                 }
                 match event.physical_key {
@@ -974,6 +1068,7 @@ fn main() -> Result<()> {
 
     let mut app = App {
         state: State::with_scene(scene),
+        menu: menu::Menu::default(),
         window: None,
         renderer: None,
         stars,

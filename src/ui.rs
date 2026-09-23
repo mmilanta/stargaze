@@ -89,6 +89,7 @@ pub struct HudState {
 
 pub struct Layout {
     pub bar: Rect,
+    pub home: Rect,
     pub toggle: Rect,
     /// One rectangle per entry of [`TIME_BUTTONS`].
     pub buttons: [Rect; TIME_BUTTONS.len()],
@@ -107,8 +108,18 @@ impl Layout {
 pub fn layout(w: f32, h: f32, scale: f32) -> Layout {
     // Shrink the whole HUD if the window is too narrow for it, so the toggle,
     // the six buttons and the clock always fit.
-    let natural =
-        12.0 + 116.0 + 18.0 + 6.0 * (52.0 + 6.0) + 12.0 + 192.0 + 16.0 + 86.0 + 14.0 + 220.0;
+    let natural = 12.0
+        + 28.0
+        + 8.0
+        + 116.0
+        + 18.0
+        + 6.0 * (52.0 + 6.0)
+        + 12.0
+        + 192.0
+        + 16.0
+        + 86.0
+        + 14.0
+        + 220.0;
     let s = scale.min(w / natural);
 
     let bar_h = 46.0 * s;
@@ -119,8 +130,14 @@ pub fn layout(w: f32, h: f32, scale: f32) -> Layout {
         h: bar_h,
     };
     let pad = 12.0 * s;
-    let toggle = Rect {
+    let home = Rect {
         x: pad,
+        y: bar.y + (bar_h - 28.0 * s) * 0.5,
+        w: 28.0 * s,
+        h: 28.0 * s,
+    };
+    let toggle = Rect {
+        x: home.right() + 8.0 * s,
         y: bar.y + (bar_h - 28.0 * s) * 0.5,
         w: 116.0 * s,
         h: 28.0 * s,
@@ -157,6 +174,7 @@ pub fn layout(w: f32, h: f32, scale: f32) -> Layout {
         h: toggle.h,
     };
     Layout {
+        home,
         exposure,
         auto,
         bar,
@@ -248,7 +266,7 @@ fn push_quad(
     }
 }
 
-fn push_rect(
+pub(crate) fn push_rect(
     verts: &mut Vec<UiVertex>,
     x: f32,
     y: f32,
@@ -265,7 +283,7 @@ pub fn text_width(text: &str, scale: f32) -> f32 {
     text.chars().count() as f32 * 8.0 * scale
 }
 
-fn push_text(
+pub(crate) fn push_text(
     verts: &mut Vec<UiVertex>,
     x: f32,
     y: f32,
