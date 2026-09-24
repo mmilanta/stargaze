@@ -1,5 +1,5 @@
 //! Minimal immediate-mode UI: an 8x8 bitmap font atlas, a bottom bar with a
-//! labels toggle and delicate time-step buttons, and screen-space body labels.
+//! labels toggle and signed playback controls, and screen-space body labels.
 //!
 //! All geometry is generated in physical pixels (origin top-left) and converted
 //! to NDC when pushed, so the caller only deals with screen coordinates.
@@ -15,16 +15,9 @@ pub const ATLAS_H: usize = ATLAS_ROWS * GLYPH; // 64
 /// Rendering text taller than 8px makes it readable at ordinary DPI.
 const TEXT_SCALE: f32 = 2.0;
 const SOLID_CELL: usize = 127;
-
-/// Time steps, in simulated days, applied by the bar buttons.
-pub const TIME_BUTTONS: [(&str, f64); 6] = [
-    ("-1d", -1.0),
-    ("-1h", -1.0 / 24.0),
-    ("-1m", -1.0 / 1440.0),
-    ("+1m", 1.0 / 1440.0),
-    ("+1h", 1.0 / 24.0),
-    ("+1d", 1.0),
-];
+// Two Unicode arrows occupy unused atlas cells after the printable ASCII set.
+const ARROW_LEFT_CELL: usize = 95;
+const ARROW_RIGHT_CELL: usize = 96;
 
 #[repr(C)]
 #[derive(Clone, Copy, Debug, Pod, Zeroable)]
@@ -57,7 +50,7 @@ pub struct Rect {
 impl Rect {
     pub fn contains(&self, px: f64, py: f64) -> bool {
         px >= self.x as f64
-            && px <= (self.x + self.w) as f64
+            && px <= self.right() as f64
             && py >= self.y as f64
             && py <= (self.y + self.h) as f64
     }
@@ -80,25 +73,46 @@ pub const MIN_EV: f32 = -8.0;
 pub const MAX_EV: f32 = 8.0;
 
 #[derive(Clone, Copy, Debug)]
-pub struct HudState {
+pub struct HudState<'a> {
     pub labels: LabelOptions,
+    pub lock_label: Option<&'a str>,
     pub sim_time: f64,
     pub auto_exposure: bool,
     pub ev_bias: f32,
+    pub steady_stars: bool,
+    pub minutes_per_second: f64,
 }
 
 pub struct Layout {
     pub bar: Rect,
     pub home: Rect,
     pub toggle: Rect,
-    /// One rectangle per entry of [`TIME_BUTTONS`].
-    pub buttons: [Rect; TIME_BUTTONS.len()],
     pub scale: f32,
     pub exposure: Rect,
     pub auto: Rect,
+    pub lock: Rect,
+    pub orientation: Rect,
+    pub draw: Rect,
+    pub stop: Rect,
+    pub slower: Rect,
+    pub faster: Rect,
+    pub speed: Rect,
+    pub time_label: Rect,
+    pub clock: Rect,
+    requested_scale: f32,
+    puzzle: bool,
 }
 
 impl Layout {
+    pub fn with_puzzle(self, puzzle: bool) -> Self {
+        layout_mode(
+            self.bar.w,
+            self.bar.y + self.bar.h,
+            self.requested_scale,
+            puzzle,
+        )
+    }
+
     pub fn exposure_bias_at(&self, x: f64) -> f32 {
         let fraction = ((x as f32 - self.exposure.x) / self.exposure.w).clamp(0.0, 1.0);
         ((MIN_EV + fraction * (MAX_EV - MIN_EV)) * 4.0).round() / 4.0
@@ -106,81 +120,60 @@ impl Layout {
 }
 
 pub fn layout(w: f32, h: f32, scale: f32) -> Layout {
-    // Shrink the whole HUD if the window is too narrow for it, so the toggle,
-    // the six buttons and the clock always fit.
-    let natural = 12.0
-        + 28.0
-        + 8.0
-        + 116.0
-        + 18.0
-        + 6.0 * (52.0 + 6.0)
-        + 12.0
-        + 192.0
-        + 16.0
-        + 86.0
-        + 14.0
-        + 220.0;
-    let s = scale.min(w / natural);
+    layout_mode(w, h, scale, false)
+}
 
-    let bar_h = 46.0 * s;
+fn layout_mode(w: f32, h: f32, scale: f32, puzzle: bool) -> Layout {
+    let s = scale.min(w / 1316.0).min(h / 100.0);
     let bar = Rect {
         x: 0.0,
-        y: h - bar_h,
+        y: h - 52.0 * s,
         w,
-        h: bar_h,
+        h: 52.0 * s,
     };
-    let pad = 12.0 * s;
-    let home = Rect {
-        x: pad,
-        y: bar.y + (bar_h - 28.0 * s) * 0.5,
-        w: 28.0 * s,
-        h: 28.0 * s,
-    };
-    let toggle = Rect {
-        x: home.right() + 8.0 * s,
-        y: bar.y + (bar_h - 28.0 * s) * 0.5,
-        w: 116.0 * s,
-        h: 28.0 * s,
-    };
-    let bw = 52.0 * s;
-    let bh = 28.0 * s;
-    let gap = 6.0 * s;
-    let mut bx = toggle.right() + 18.0 * s;
-    let mut buttons = [Rect {
-        x: 0.0,
-        y: 0.0,
-        w: 0.0,
-        h: 0.0,
-    }; TIME_BUTTONS.len()];
-    for b in buttons.iter_mut() {
-        *b = Rect {
-            x: bx,
-            y: bar.y + (bar_h - bh) * 0.5,
-            w: bw,
-            h: bh,
+    let mut x = 10.0 * s;
+    let mut control = |width: f32, gap: f32| {
+        x += gap * s;
+        let r = Rect {
+            x,
+            y: bar.y + 9.0 * s,
+            w: width * s,
+            h: 34.0 * s,
         };
-        bx += bw + gap;
-    }
-    let exposure = Rect {
-        x: bx + 12.0 * s,
-        y: toggle.y,
-        w: 192.0 * s,
-        h: toggle.h,
+        x += (width + 6.0) * s;
+        r
     };
-    let auto = Rect {
-        x: exposure.right() + 16.0 * s,
-        y: toggle.y,
-        w: 86.0 * s,
-        h: toggle.h,
-    };
+    let home = control(84.0, 0.0);
+    let toggle = control(120.0, 0.0);
+    let draw = toggle;
+    let time_label = control(44.0, 18.0);
+    let slower = control(34.0, 0.0);
+    let speed = control(112.0, 0.0);
+    let faster = control(34.0, 0.0);
+    let stop = control(98.0, 0.0);
+    let clock = control(164.0, 0.0);
+    let lock = control(122.0, 18.0);
+    let orientation = control(84.0, 0.0);
+    let exposure = control(168.0, 18.0);
+    let auto = control(110.0, 0.0);
     Layout {
+        bar,
         home,
+        lock,
+        orientation,
+        toggle,
+        draw,
+        stop,
+        slower,
+        speed,
+        time_label,
+        faster,
+        clock,
         exposure,
         auto,
-        bar,
-        toggle,
-        buttons,
         scale: s,
+        puzzle,
+        requested_scale: scale,
     }
 }
 
@@ -196,6 +189,19 @@ pub fn build_atlas() -> Vec<u8> {
         };
         let idx = (code - 32) as usize;
         let (cx, cy) = (idx % ATLAS_COLS, idx / ATLAS_COLS);
+        for (row, bits) in glyph.iter().enumerate() {
+            for col in 0..GLYPH {
+                if bits & (1 << col) != 0 {
+                    data[(cy * GLYPH + row) * ATLAS_W + cx * GLYPH + col] = 255;
+                }
+            }
+        }
+    }
+    for (cell, glyph) in [
+        (ARROW_LEFT_CELL, [0, 0x08, 0x04, 0x7e, 0x04, 0x08, 0, 0]),
+        (ARROW_RIGHT_CELL, [0, 0x10, 0x20, 0x7e, 0x20, 0x10, 0, 0]),
+    ] {
+        let (cx, cy) = (cell % ATLAS_COLS, cell / ATLAS_COLS);
         for (row, bits) in glyph.iter().enumerate() {
             for col in 0..GLYPH {
                 if bits & (1 << col) != 0 {
@@ -226,8 +232,12 @@ fn glyph_uv(code: u32) -> [[f32; 2]; 4] {
     let idx = if (32..127).contains(&code) {
         (code - 32) as usize
     } else {
-        // Unknown glyphs fall back to the solid cell (a filled box).
-        SOLID_CELL
+        match code {
+            0x2190 => ARROW_LEFT_CELL,
+            0x2192 => ARROW_RIGHT_CELL,
+            // Unknown glyphs fall back to the solid cell (a filled box).
+            _ => SOLID_CELL,
+        }
     };
     let (cx, cy) = (idx % ATLAS_COLS, idx / ATLAS_COLS);
     let u0 = (cx * GLYPH) as f32 / ATLAS_W as f32;
@@ -314,7 +324,7 @@ pub fn build(
     layout: &Layout,
     w: f32,
     h: f32,
-    state: HudState,
+    state: HudState<'_>,
     body_labels: &[Label],
 ) {
     let s = layout.scale;
@@ -416,12 +426,108 @@ fn build_labels(
     }
 }
 
-fn build_bar(verts: &mut Vec<UiVertex>, layout: &Layout, w: f32, h: f32, state: HudState) {
-    let show_labels = state.labels.show;
-    let sim_time = state.sim_time;
+/// Also drawn with the rest of the HUD hidden, so a lock can always be released.
+pub fn build_lock(
+    verts: &mut Vec<UiVertex>,
+    layout: &Layout,
+    viewport: [f32; 2],
+    target: Option<&str>,
+) {
     let s = layout.scale;
-    let bar = layout.bar;
-    // Panel + top hairline.
+    let r = layout.lock;
+    let color = if target.is_some() {
+        [0.45, 0.88, 0.77, 1.0]
+    } else {
+        [0.58, 0.65, 0.74, 1.0]
+    };
+    push_rect(
+        verts,
+        r.x,
+        r.y,
+        r.w,
+        r.h,
+        if target.is_some() {
+            [0.045, 0.17, 0.16, 0.98]
+        } else {
+            [0.05, 0.07, 0.10, 0.95]
+        },
+        viewport,
+    );
+    // Padlock body and shackle; unlocked shackle has an open right side.
+    let x = r.x + 9.0 * s;
+    let y = r.y + 12.0 * s;
+    push_rect(verts, x, y, 12.0 * s, 10.0 * s, color, viewport);
+    push_rect(
+        verts,
+        x + 2.0 * s,
+        y - 6.0 * s,
+        2.0 * s,
+        7.0 * s,
+        color,
+        viewport,
+    );
+    push_rect(
+        verts,
+        x + 2.0 * s,
+        y - 7.0 * s,
+        8.0 * s,
+        2.0 * s,
+        color,
+        viewport,
+    );
+    if target.is_some() {
+        push_rect(
+            verts,
+            x + 8.0 * s,
+            y - 6.0 * s,
+            2.0 * s,
+            7.0 * s,
+            color,
+            viewport,
+        );
+    }
+    let label = if target.is_some() {
+        "Locked [U]"
+    } else {
+        "Unlocked"
+    };
+    push_text(
+        verts,
+        r.x + 30.0 * s,
+        r.y + 6.0 * s,
+        1.0 * s,
+        label,
+        color,
+        viewport,
+    );
+    let detail = target.unwrap_or("[U] / click sky");
+    let columns = ((r.w - 12.0 * s) / (7.0 * s)).floor() as usize;
+    let mut detail: String = detail
+        .chars()
+        .map(|c| if c.is_ascii() { c } else { '?' })
+        .collect();
+    if detail.len() > columns {
+        detail.truncate(columns.saturating_sub(3));
+        detail.push_str("...");
+    }
+    push_text(
+        verts,
+        r.x + 6.0 * s,
+        r.y + 23.0 * s,
+        0.875 * s,
+        &detail,
+        color,
+        viewport,
+    );
+}
+
+pub(crate) fn toolbar_panel(
+    verts: &mut Vec<UiVertex>,
+    bar: Rect,
+    scale: f32,
+    groups: &[Rect],
+    viewport: [f32; 2],
+) {
     push_rect(
         verts,
         bar.x,
@@ -429,95 +535,155 @@ fn build_bar(verts: &mut Vec<UiVertex>, layout: &Layout, w: f32, h: f32, state: 
         bar.w,
         bar.h,
         [0.015, 0.02, 0.03, 0.86],
-        [w, h],
+        viewport,
     );
     push_rect(
         verts,
         bar.x,
         bar.y,
         bar.w,
-        1.0 * s,
+        scale,
         [1.0, 1.0, 1.0, 0.10],
-        [w, h],
+        viewport,
     );
-
-    // --- labels toggle ---
-    let t = layout.toggle;
-    let bg = if show_labels {
-        [0.16, 0.34, 0.55, 0.95]
-    } else {
-        [0.10, 0.11, 0.13, 0.95]
-    };
-    push_rect(verts, t.x, t.y, t.w, t.h, bg, [w, h]);
-    push_rect(verts, t.x, t.y, t.w, 1.0 * s, [1.0, 1.0, 1.0, 0.12], [w, h]);
-    let box_s = 12.0 * s;
-    let bx = t.x + 8.0 * s;
-    let by = t.center_y() - box_s * 0.5;
-    push_rect(verts, bx, by, box_s, box_s, [0.05, 0.06, 0.07, 1.0], [w, h]);
-    if show_labels {
+    for next_group in groups {
         push_rect(
             verts,
-            bx + 3.0 * s,
-            by + 3.0 * s,
-            box_s - 6.0 * s,
-            box_s - 6.0 * s,
-            [0.55, 0.78, 1.0, 1.0],
-            [w, h],
+            next_group.x - 12.0 * scale,
+            bar.y + 13.0 * scale,
+            scale,
+            26.0 * scale,
+            [0.32, 0.38, 0.46, 0.8],
+            viewport,
         );
     }
-    let ts = TEXT_SCALE * s * 0.85;
+}
+
+pub(crate) fn toolbar_button(
+    verts: &mut Vec<UiVertex>,
+    rect: Rect,
+    label: &str,
+    scale: f32,
+    active: bool,
+    hovered: bool,
+    viewport: [f32; 2],
+) {
+    let color = if active {
+        [0.08, 0.25, 0.23, 0.98]
+    } else if hovered {
+        [0.12, 0.20, 0.28, 0.98]
+    } else {
+        [0.10, 0.13, 0.17, 0.95]
+    };
+    push_rect(verts, rect.x, rect.y, rect.w, rect.h, color, viewport);
+    let size = if matches!(label, "←" | "→") {
+        2.0
+    } else {
+        1.1
+    } * scale;
+    let size = size.min((rect.w - 8.0 * scale) / text_width(label, 1.0).max(1.0));
     push_text(
         verts,
-        bx + box_s + 8.0 * s,
-        t.center_y() - 4.0 * ts,
-        ts,
-        "Labels",
-        [0.9, 0.93, 0.97, 1.0],
+        rect.x + (rect.w - text_width(label, size)) * 0.5,
+        rect.center_y() - 4.0 * size,
+        size,
+        label,
+        [0.88, 0.92, 0.98, 1.0],
+        viewport,
+    );
+}
+
+fn build_bar(verts: &mut Vec<UiVertex>, layout: &Layout, w: f32, h: f32, state: HudState<'_>) {
+    let show_labels = state.labels.show;
+    let sim_time = state.sim_time;
+    let s = layout.scale;
+    let bar = layout.bar;
+    toolbar_panel(
+        verts,
+        bar,
+        s,
+        &[layout.time_label, layout.lock, layout.exposure],
         [w, h],
     );
-
-    // --- delicate time-step buttons ---
-    for (rect, (caption, _)) in layout.buttons.iter().zip(TIME_BUTTONS.iter()) {
-        push_rect(
-            verts,
-            rect.x,
-            rect.y,
-            rect.w,
-            rect.h,
-            [0.12, 0.13, 0.16, 0.95],
-            [w, h],
-        );
-        push_rect(
-            verts,
-            rect.x,
-            rect.y,
-            rect.w,
-            1.0 * s,
-            [1.0, 1.0, 1.0, 0.14],
-            [w, h],
-        );
-        let tw = text_width(caption, ts);
-        push_text(
-            verts,
-            rect.x + (rect.w - tw) * 0.5,
-            rect.center_y() - 4.0 * ts,
-            ts,
-            caption,
-            [0.88, 0.92, 0.98, 1.0],
-            [w, h],
-        );
-    }
+    push_text(
+        verts,
+        layout.time_label.x,
+        layout.time_label.center_y() - 4.4 * s,
+        1.1 * s,
+        "Time",
+        [0.68, 0.75, 0.84, 1.0],
+        [w, h],
+    );
+    build_lock(verts, layout, [w, h], state.lock_label);
+    let ts = 1.1 * s;
+    let button = |verts: &mut Vec<UiVertex>, rect: Rect, label: &str, active: bool| {
+        toolbar_button(verts, rect, label, s, active, false, [w, h]);
+    };
+    button(verts, layout.home, "[M]enu", false);
+    button(verts, layout.orientation, "[S]tars", state.steady_stars);
+    button(
+        verts,
+        layout.toggle,
+        if layout.puzzle {
+            "Draw [Tab]"
+        } else {
+            "[L]abels"
+        },
+        !layout.puzzle && show_labels,
+    );
+    button(
+        verts,
+        layout.stop,
+        "Stop [Spc]",
+        state.minutes_per_second == 0.0,
+    );
+    button(verts, layout.slower, "←", false);
+    button(verts, layout.faster, "→", false);
+    let speed_text = if state.minutes_per_second == 0.0 {
+        "0 min/s".into()
+    } else {
+        format!("{:+} min/s", state.minutes_per_second)
+    };
+    let speed_scale = ts.min((layout.speed.w - 8.0 * s) / text_width(&speed_text, 1.0));
+    push_text(
+        verts,
+        layout.speed.x + (layout.speed.w - text_width(&speed_text, speed_scale)) * 0.5,
+        layout.speed.center_y() - 4.0 * speed_scale,
+        speed_scale,
+        &speed_text,
+        [0.85, 0.88, 0.92, 1.0],
+        [w, h],
+    );
+    let clock = layout.clock;
+    let time_text = format!("{:.1} min", sim_time * 1440.0);
+    let clock_scale = ts.min((clock.w - 8.0 * s) / (time_text.len() as f32 * 8.0));
+    push_text(
+        verts,
+        clock.x + 4.0 * s,
+        clock.center_y() - 4.0 * clock_scale,
+        clock_scale,
+        &time_text,
+        [0.85, 0.88, 0.92, 1.0],
+        [w, h],
+    );
 
     // Exposure compensation is applied to presentation in both modes.
     let slider = layout.exposure;
-    let caption = format!("Exposure {:+.2} EV", state.ev_bias);
+    let exposure_color = |manual: [f32; 4]| {
+        if state.auto_exposure {
+            [0.46, 0.46, 0.46, 1.0]
+        } else {
+            manual
+        }
+    };
+    let caption = format!("EV {:+.2} [,][.]", state.ev_bias);
     push_text(
         verts,
         slider.x,
         slider.y,
-        s * 1.25,
+        s * 1.1,
         &caption,
-        [0.88, 0.92, 0.98, 1.0],
+        exposure_color([0.88, 0.92, 0.98, 1.0]),
         [w, h],
     );
     let track_y = slider.y + 23.0 * s;
@@ -527,7 +693,7 @@ fn build_bar(verts: &mut Vec<UiVertex>, layout: &Layout, w: f32, h: f32, state: 
         track_y,
         slider.w,
         2.0 * s,
-        [0.3, 0.35, 0.43, 1.0],
+        exposure_color([0.3, 0.35, 0.43, 1.0]),
         [w, h],
     );
     let fraction = ((state.ev_bias - MIN_EV) / (MAX_EV - MIN_EV)).clamp(0.0, 1.0);
@@ -537,7 +703,7 @@ fn build_bar(verts: &mut Vec<UiVertex>, layout: &Layout, w: f32, h: f32, state: 
         track_y,
         slider.w * fraction,
         2.0 * s,
-        [0.45, 0.73, 0.95, 1.0],
+        exposure_color([0.45, 0.73, 0.95, 1.0]),
         [w, h],
     );
     push_rect(
@@ -546,7 +712,7 @@ fn build_bar(verts: &mut Vec<UiVertex>, layout: &Layout, w: f32, h: f32, state: 
         track_y - 3.0 * s,
         s,
         8.0 * s,
-        [0.65, 0.68, 0.73, 1.0],
+        exposure_color([0.65, 0.68, 0.73, 1.0]),
         [w, h],
     );
     push_rect(
@@ -555,7 +721,7 @@ fn build_bar(verts: &mut Vec<UiVertex>, layout: &Layout, w: f32, h: f32, state: 
         track_y - 4.0 * s,
         6.0 * s,
         10.0 * s,
-        [0.78, 0.91, 1.0, 1.0],
+        exposure_color([0.78, 0.91, 1.0, 1.0]),
         [w, h],
     );
 
@@ -596,28 +762,10 @@ fn build_bar(verts: &mut Vec<UiVertex>, layout: &Layout, w: f32, h: f32, state: 
         a.x + 27.0 * s,
         a.center_y() - 4.0 * ts,
         ts,
-        "Auto",
+        "Auto [A]",
         [0.88, 0.92, 0.98, 1.0],
         [w, h],
     );
-
-    // Current time, right aligned, only when it clears all controls.
-    let time_text = format!("t = {:.4} d", sim_time);
-    let tw = text_width(&time_text, ts);
-    let pad = 12.0 * s;
-    let buttons_end = layout.auto.right();
-    let x = w - pad - tw;
-    if x > buttons_end + 10.0 * s {
-        push_text(
-            verts,
-            x,
-            bar.center_y() - 4.0 * ts,
-            ts,
-            &time_text,
-            [0.85, 0.88, 0.92, 1.0],
-            [w, h],
-        );
-    }
 }
 
 #[cfg(test)]
@@ -632,11 +780,11 @@ mod tests {
             (l.toggle.y + l.toggle.h * 0.5) as f64,
         );
         assert!(l.toggle.contains(tc.0, tc.1));
-        for b in &l.buttons {
+        for b in [l.stop, l.slower, l.faster] {
             assert!(!b.contains(tc.0, tc.1), "toggle must not overlap a button");
         }
 
-        for b in &l.buttons {
+        for b in [l.stop, l.slower, l.faster] {
             let c = ((b.x + b.w * 0.5) as f64, (b.y + b.h * 0.5) as f64);
             assert!(b.contains(c.0, c.1));
             assert!(!l.toggle.contains(c.0, c.1));
@@ -644,7 +792,7 @@ mod tests {
         }
 
         // Buttons must not run into each other.
-        for pair in l.buttons.windows(2) {
+        for pair in [l.slower, l.faster, l.stop].windows(2) {
             assert!(pair[0].right() <= pair[1].x);
         }
 
@@ -656,7 +804,7 @@ mod tests {
     fn exposure_slider_maps_clamps_and_fits_after_time_buttons() {
         for (w, scale) in [(1400.0, 1.0), (1190.0, 1.6), (581.0, 1.6), (320.0, 2.0)] {
             let l = layout(w, 800.0, scale);
-            assert!(l.exposure.x > l.buttons.last().unwrap().right());
+            assert!(l.exposure.x > l.faster.right());
             assert!(l.auto.x > l.exposure.right());
             assert!(l.auto.right() < w);
             assert_eq!(l.exposure_bias_at(l.exposure.x as f64 - 100.0), MIN_EV);
@@ -676,53 +824,69 @@ mod tests {
     }
 
     #[test]
-    fn time_buttons_step_both_ways() {
-        let deltas: Vec<f64> = TIME_BUTTONS.iter().map(|(_, d)| *d).collect();
-        assert_eq!(deltas.len(), 6);
-        assert!(deltas[0] < 0.0 && deltas[1] < 0.0 && deltas[2] < 0.0);
-        assert!(deltas[3] > 0.0 && deltas[4] > 0.0 && deltas[5] > 0.0);
-        // Symmetric, and one minute really is a minute.
-        for i in 0..3 {
-            assert!((deltas[i] + deltas[5 - i]).abs() < 1e-12);
+    fn single_row_controls_and_minute_clock_fit_at_small_and_hidpi_sizes() {
+        for (w, h, scale) in [
+            (1280.0, 720.0, 1.0),
+            (1190.0, 800.0, 1.6),
+            (581.0, 700.0, 1.6),
+            (320.0, 240.0, 2.0),
+        ] {
+            for puzzle in [false, true] {
+                let l = layout(w, h, scale).with_puzzle(puzzle);
+                let controls = [
+                    l.home,
+                    l.toggle,
+                    l.time_label,
+                    l.slower,
+                    l.speed,
+                    l.faster,
+                    l.stop,
+                    l.clock,
+                    l.lock,
+                    l.orientation,
+                    l.exposure,
+                    l.auto,
+                ];
+                assert!(l.time_label.x - l.toggle.right() > l.toggle.x - l.home.right());
+                assert!(l.exposure.x - l.orientation.right() > l.auto.x - l.exposure.right());
+                assert!(controls.windows(2).all(|pair| pair[0].right() < pair[1].x));
+                for r in controls {
+                    assert_eq!(r.y, l.lock.y);
+                    assert!(r.x >= 0.0 && r.right() <= w && r.y >= l.bar.y && r.y + r.h <= h);
+                }
+                // Long target names and large/negative minute counts must stay in the viewport.
+                for time in [-1e6, 0.0, 1e9] {
+                    let mut vertices = Vec::new();
+                    build(
+                        &mut vertices,
+                        &l,
+                        w,
+                        h,
+                        HudState {
+                            labels: LabelOptions::default(),
+                            lock_label: Some(&"Long name ".repeat(20)),
+                            sim_time: time,
+                            auto_exposure: true,
+                            ev_bias: MAX_EV,
+                            steady_stars: true,
+                            minutes_per_second: if time < 0.0 {
+                                -57600.0
+                            } else if time == 0.0 {
+                                0.0
+                            } else {
+                                57600.0
+                            },
+                        },
+                        &[],
+                    );
+                    assert!(vertices.iter().all(|v| {
+                        v.pos
+                            .iter()
+                            .all(|p| p.is_finite() && (-1.001..=1.001).contains(p))
+                    }));
+                }
+            }
         }
-        assert!((deltas[5] - 1.0).abs() < 1e-12);
-        assert!((deltas[4] - 1.0 / 24.0).abs() < 1e-12);
-        assert!((deltas[3] - 1.0 / 1440.0).abs() < 1e-12);
-    }
-
-    #[test]
-    fn time_text_clears_the_buttons_at_hidpi() {
-        // Surface width and scale observed on this machine.
-        let (w, scale) = (1190.0_f32, 1.6_f32);
-        let l = layout(w, 800.0, scale);
-        let ts = TEXT_SCALE * l.scale * 0.85;
-        let buttons_end = l.auto.right();
-        assert!(l.buttons[0].x > l.toggle.right());
-        assert!(buttons_end < w, "buttons must fit on screen");
-        for text in ["t = 8.7847 d", "t = 9999.9999 d"] {
-            let tw = text_width(text, ts);
-            let x = w - 12.0 * l.scale - tw;
-            assert!(
-                x > buttons_end + 10.0 * l.scale,
-                "'{text}' overlaps the buttons"
-            );
-        }
-    }
-
-    #[test]
-    fn hud_fits_a_narrow_window() {
-        // A narrow tiled window: 581 surface px at scale 1.6.
-        let (w, scale) = (581.0_f32, 1.6_f32);
-        let l = layout(w, 700.0, scale);
-        let buttons_end = l.auto.right();
-        assert!(buttons_end < w, "buttons overflow a narrow window");
-        let ts = TEXT_SCALE * l.scale * 0.85;
-        let tw = text_width("t = 9999.9999 d", ts);
-        let x = w - 12.0 * l.scale - tw;
-        assert!(
-            x > buttons_end + 10.0 * l.scale,
-            "clock overlaps the buttons"
-        );
     }
 
     #[test]
@@ -741,5 +905,29 @@ mod tests {
             }
         }
         assert!(ink > 0, "'A' glyph should have ink");
+        for (ch, cell) in [('←', ARROW_LEFT_CELL), ('→', ARROW_RIGHT_CELL)] {
+            let uv = glyph_uv(ch as u32);
+            assert_eq!(
+                uv[0],
+                [
+                    (cell % ATLAS_COLS) as f32 / ATLAS_COLS as f32,
+                    (cell / ATLAS_COLS) as f32 / ATLAS_ROWS as f32
+                ]
+            );
+            let mut lit = 0;
+            for y in 0..GLYPH {
+                for x in 0..GLYPH {
+                    if a[(cell / ATLAS_COLS * GLYPH + y) * ATLAS_W + cell % ATLAS_COLS * GLYPH + x]
+                        != 0
+                    {
+                        lit += 1;
+                    }
+                }
+            }
+            assert!(
+                lit > 0 && lit < GLYPH * GLYPH,
+                "arrows must not be missing-glyph blocks"
+            );
+        }
     }
 }

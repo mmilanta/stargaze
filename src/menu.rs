@@ -11,6 +11,19 @@ pub struct Entry {
     pub name: String,
 }
 
+impl Entry {
+    /// Puzzle titles avoid revealing body names, moon counts, or filenames.
+    fn puzzle_title(&self, index: usize) -> String {
+        match self.path.file_stem().and_then(|s| s.to_str()) {
+            Some("puzzle") => "First field study".into(),
+            Some("halo") => "Amber horizon".into(),
+            Some("median-resonance") => "Clockwork sky".into(),
+            Some("solar-system") => "Distant lights".into(),
+            _ => format!("Uncharted map {:02}", index + 1),
+        }
+    }
+}
+
 pub fn discover(dir: &Path) -> Result<Vec<Entry>> {
     #[derive(Deserialize)]
     struct Name {
@@ -70,6 +83,7 @@ pub struct Layout {
     pub rows: Vec<Rect>,
     pub previous: Rect,
     pub next: Rect,
+    pub resume: Rect,
     pub scale: f32,
 }
 
@@ -78,7 +92,7 @@ impl Layout {
         let s = scale.min(w / 360.0).min(h / 300.0);
         let x = (w - (680.0 * s).min(w - 40.0 * s)) * 0.5;
         let width = w - x * 2.0;
-        let count = ((h / s - 240.0) / 64.0).floor().max(1.0) as usize;
+        let count = ((h / s - 240.0) / 64.0).floor().clamp(1.0, 9.0) as usize;
         let rows = (0..count)
             .map(|i| Rect {
                 x,
@@ -101,6 +115,12 @@ impl Layout {
                 y: h - 125.0 * s,
                 w: 120.0 * s,
                 h: 32.0 * s,
+            },
+            resume: Rect {
+                x: x + width - 140.0 * s,
+                y: 28.0 * s,
+                w: 140.0 * s,
+                h: 28.0 * s,
             },
             scale: s,
         }
@@ -133,7 +153,11 @@ pub fn build(
     scale: f32,
     menu: &Menu,
     cursor: (f64, f64),
+    puzzle: bool,
 ) {
+    if puzzle && !menu.open {
+        return;
+    }
     let [w, h] = viewport;
     let l = Layout::new(w, h, scale);
     let s = l.scale;
@@ -160,7 +184,7 @@ pub fn build(
                 h: 24.0 * s,
             },
             2.5 * s,
-            "STARGAZE",
+            if puzzle { "MAPS" } else { "STARGAZE" },
             fg,
         );
         text(
@@ -173,10 +197,32 @@ pub fn build(
                 h: 16.0 * s,
             },
             1.5 * s,
-            "Choose a solar system",
+            if puzzle {
+                "Choose a map to start a new puzzle"
+            } else {
+                "Choose a solar system"
+            },
             fg,
         );
-        for (r, entry) in l.rows.iter().zip(menu.entries.iter().skip(menu.offset)) {
+        button(verts, l.resume);
+        text(
+            verts,
+            viewport,
+            Rect {
+                x: l.resume.x + 10.0 * s,
+                y: l.resume.y + 9.0 * s,
+                ..l.resume
+            },
+            1.1 * s,
+            "Resume [Esc]",
+            fg,
+        );
+        for (i, (r, entry)) in l
+            .rows
+            .iter()
+            .zip(menu.entries.iter().skip(menu.offset))
+            .enumerate()
+        {
             button(verts, *r);
             text(
                 verts,
@@ -188,7 +234,15 @@ pub fn build(
                     h: r.h,
                 },
                 1.7 * s,
-                &entry.name,
+                &format!(
+                    "[{}] {}",
+                    i + 1,
+                    if puzzle {
+                        entry.puzzle_title(menu.offset + i)
+                    } else {
+                        entry.name.clone()
+                    }
+                ),
                 fg,
             );
             text(
@@ -201,15 +255,19 @@ pub fn build(
                     h: r.h,
                 },
                 s,
-                &entry.path.file_name().unwrap_or_default().to_string_lossy(),
+                &if puzzle {
+                    "Start a fresh theory".into()
+                } else {
+                    entry.path.file_name().unwrap_or_default().to_string_lossy()
+                },
                 [0.5, 0.65, 0.8, 1.0],
             );
         }
         for (r, label, enabled) in [
-            (l.previous, "< Previous", menu.offset > 0),
+            (l.previous, "< [PgUp]", menu.offset > 0),
             (
                 l.next,
-                "Next >",
+                "[PgDn] >",
                 menu.offset + l.rows.len() < menu.entries.len(),
             ),
         ] {
@@ -231,6 +289,8 @@ pub fn build(
         }
         let message = menu.error.as_deref().unwrap_or(if menu.entries.is_empty() {
             "No YAML systems found in configs."
+        } else if puzzle {
+            "Choosing a map clears your theory. Resume keeps your current puzzle."
         } else {
             "Esc or home: resume current view"
         });
@@ -253,38 +313,22 @@ pub fn build(
             );
         }
     }
-    button(verts, l.home);
-    // Draw a house silhouette without depending on a Unicode icon font.
-    let r = l.home;
-    let s = r.w / 44.0;
-    for i in 0..10 {
-        push_rect(
-            verts,
-            r.x + (21.0 - i as f32) * s,
-            r.y + (9.0 + i as f32) * s,
-            (2.0 + 2.0 * i as f32) * s,
-            s,
-            fg,
-            viewport,
-        );
+    if puzzle {
+        return;
     }
-    push_rect(
+    button(verts, l.home);
+    let hud_scale = crate::ui::layout(w, h, scale).scale;
+    text(
         verts,
-        r.x + 13.0 * s,
-        r.y + 19.0 * s,
-        18.0 * s,
-        15.0 * s,
+        viewport,
+        Rect {
+            x: l.home.x + 5.0 * hud_scale,
+            y: l.home.y + 12.0 * hud_scale,
+            ..l.home
+        },
+        1.1 * hud_scale,
+        "[M]enu",
         fg,
-        viewport,
-    );
-    push_rect(
-        verts,
-        r.x + 20.0 * s,
-        r.y + 25.0 * s,
-        5.0 * s,
-        9.0 * s,
-        [0.055, 0.10, 0.17, 1.0],
-        viewport,
     );
 }
 
@@ -310,6 +354,20 @@ mod tests {
     }
 
     #[test]
+    fn puzzle_menu_titles_hide_config_names_and_filenames() {
+        let known = Entry {
+            path: PathBuf::from("median-resonance.yaml"),
+            name: "Secret planet and three moons".into(),
+        };
+        assert_eq!(known.puzzle_title(0), "Clockwork sky");
+        let custom = Entry {
+            path: PathBuf::from("three-stars-seven-moons.yaml"),
+            name: "Solution hints".into(),
+        };
+        assert_eq!(custom.puzzle_title(4), "Uncharted map 05");
+    }
+
+    #[test]
     fn menu_controls_fit_small_and_hidpi_windows() {
         for (w, h, scale) in [
             (1280.0, 720.0, 1.0),
@@ -317,10 +375,15 @@ mod tests {
             (320.0, 240.0, 1.0),
         ] {
             let l = Layout::new(w, h, scale);
-            for r in l.rows.iter().chain([&l.home, &l.previous, &l.next]) {
+            for r in l
+                .rows
+                .iter()
+                .chain([&l.home, &l.previous, &l.next, &l.resume])
+            {
                 assert!(r.x >= 0.0 && r.y >= 0.0);
                 assert!(r.x + r.w <= w && r.y + r.h <= h);
             }
+            assert!(l.resume.y + l.resume.h < l.rows[0].y);
             let last = l.rows.last().unwrap();
             assert!(last.y + last.h < l.previous.y);
             let hud = crate::ui::layout(w, h, scale);

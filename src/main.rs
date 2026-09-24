@@ -2,6 +2,7 @@
 
 mod camera;
 mod config;
+mod game;
 mod menu;
 mod pathtracer;
 mod renderer;
@@ -26,9 +27,12 @@ use sim::{BodyKind, Scene};
 use stars::CatalogueStar;
 use ui::Label;
 
-/// Simulation speeds in days per real second.
-const WARPS: [f64; 8] = [0.001, 0.005, 0.02, 0.1, 0.5, 2.0, 10.0, 40.0];
-const START_WARP: usize = 2;
+/// Signed simulation speeds in days per real second, including a true stop.
+const WARPS: [f64; 17] = [
+    -40.0, -10.0, -2.0, -0.5, -0.1, -0.02, -0.005, -0.001, 0.0, 0.001, 0.005, 0.02, 0.1, 0.5, 2.0,
+    10.0, 40.0,
+];
+const STOP_WARP: usize = 8;
 /// Telescope magnification limits and the per-notch zoom factor.
 const MIN_FOV_DEG: f64 = 0.001;
 const MAX_FOV_DEG: f64 = 90.0;
@@ -48,10 +52,11 @@ fn scene_for_startup() -> Result<Option<Scene>> {
         match arg.to_str() {
             Some("--help" | "-h") => {
                 println!(
-                    "Stargaze — an observatory in a configurable star system\n\nUsage: stargaze [--config FILE | --check-config FILE]\n\n--config FILE        Load a YAML system and its camera\n--check-config FILE  Validate without opening a window\n\nDefaults to configs/halo.yaml. STARGAZE_CONFIG also selects a file."
+                    "Stargaze — an observatory in a configurable star system\n\nUsage: stargaze [--game] [--config FILE | --check-config FILE]\n\n--game               Play the anonymous system reconstruction puzzle\n--config FILE        Load a YAML system and its camera\n--check-config FILE  Validate without opening a window\n\nDefaults to configs/halo.yaml, or configs/puzzle.yaml with --game. STARGAZE_CONFIG also selects a file."
                 );
                 return Ok(None);
             }
+            Some("--game") => {}
             Some("--config" | "--check-config") => {
                 anyhow::ensure!(path.is_none(), "specify only one configuration file");
                 check_only = arg == "--check-config";
@@ -69,6 +74,9 @@ fn scene_for_startup() -> Result<Option<Scene>> {
         } else {
             let preset = std::env::var("STARGAZE_SYSTEM").ok();
             match preset.as_deref() {
+                None if game_requested() => {
+                    config::load(concat!(env!("CARGO_MANIFEST_DIR"), "/configs/puzzle.yaml"))?
+                }
                 None | Some("halo" | "binary") => {
                     config::load(concat!(env!("CARGO_MANIFEST_DIR"), "/configs/halo.yaml"))?
                 }
@@ -92,6 +100,10 @@ fn scene_for_startup() -> Result<Option<Scene>> {
     Ok(Some(scene))
 }
 
+fn game_requested() -> bool {
+    std::env::args_os().any(|arg| arg == "--game")
+}
+
 fn scene_for_system(system: Option<&str>) -> Scene {
     match system {
         Some("calyx") => sim::binary_scene(),
@@ -101,19 +113,24 @@ fn scene_for_system(system: Option<&str>) -> Scene {
     }
 }
 
+#[derive(Clone, Copy, Debug, PartialEq)]
+enum ViewLock {
+    Body(usize),
+    /// Fixed inertial direction, independent of the observer's orbit and spin.
+    Background(DVec3),
+}
+
 struct State {
     scene: Scene,
     observer: Observer,
     sim_time: f64,
     warp: usize,
-    paused: bool,
     last: Instant,
     /// True only after a sky press crosses the drag threshold.
     dragging: bool,
     last_cursor: Option<(f64, f64)>,
-    /// Body the view is locked onto, if any. While locked the telescope keeps
-    /// pointing at it even as simulation time advances.
-    tracked: Option<usize>,
+    /// Either a moving scene body or a fixed direction against distant stars.
+    view_lock: Option<ViewLock>,
     /// Cursor position where the current left-button press began (sky only).
     press: Option<(f64, f64)>,
 }
@@ -128,12 +145,11 @@ impl State {
             scene,
             observer,
             sim_time: 0.0,
-            warp: START_WARP,
-            paused: true,
+            warp: STOP_WARP,
             last: Instant::now(),
             dragging: false,
             last_cursor: None,
-            tracked: None,
+            view_lock: None,
             press: None,
         };
         if let Some(t) = state.scene.initial_time_days {
@@ -208,7 +224,7 @@ impl State {
     /// above the horizon, a dark sky, and (for planets and moons) a well-lit
     /// phase. Zooms to fit the body together with its moons.
     fn aim_at(&mut self, target: usize) {
-        self.tracked = None;
+        self.unlock();
         let is_star = self.scene.body(target).kind == BodyKind::Star;
 
         // Park exactly on the requested moment instead of searching.
@@ -271,7 +287,7 @@ impl State {
 
     /// Aim at a body with an explicit field of view.
     fn point_at_fov(&mut self, target: usize, fov: f64) {
-        self.tracked = None;
+        self.unlock();
         let positions = self.scene.positions(self.sim_time);
         let vf = self.observer.frame(&self.scene, self.sim_time, &positions);
         let dir = (positions[target] - vf.position).normalize();
@@ -371,7 +387,7 @@ impl State {
         None
     }
 
-    /// Aim at the k-th entry of the scene's target list (number keys).
+    /// Aim at the k-th entry of the scene's target list (function keys).
     fn aim_target(&mut self, k: usize) {
         if let Some(&target) = self.scene.targets.get(k) {
             self.aim_at(target);
@@ -399,34 +415,121 @@ impl State {
         let now = Instant::now();
         let dt = (now - self.last).as_secs_f64();
         self.last = now;
-        if !self.paused {
-            self.sim_time += dt * WARPS[self.warp];
+        self.advance_by(dt);
+    }
+
+    fn advance_by(&mut self, seconds: f64) {
+        self.sim_time += seconds * WARPS[self.warp];
+    }
+
+    fn change_speed(&mut self, faster: bool) {
+        self.warp = if faster {
+            (self.warp + 1).min(WARPS.len() - 1)
+        } else {
+            self.warp.saturating_sub(1)
+        };
+    }
+
+    fn time_key(&mut self, key: KeyCode) -> bool {
+        match key {
+            KeyCode::ArrowLeft => self.change_speed(false),
+            KeyCode::ArrowRight => self.change_speed(true),
+            KeyCode::Space => self.warp = STOP_WARP,
+            _ => return false,
         }
+        true
     }
 
     fn reset_view(&mut self) {
         self.aim_at(self.scene.default_target);
     }
 
-    /// Keep the telescope pointed at the locked body as time advances.
+    fn unlock(&mut self) {
+        self.view_lock = None;
+    }
+
+    fn toggle_star_orientation(&mut self) {
+        if self.observer.star_orientation.is_some() {
+            self.observer.star_orientation = None;
+        } else {
+            let positions = self.scene.positions(self.sim_time);
+            let frame = self.observer.frame(&self.scene, self.sim_time, &positions);
+            self.observer.star_orientation = Some((frame.forward, frame.up));
+        }
+    }
+
+    fn locked_body(&self) -> Option<usize> {
+        match self.view_lock {
+            Some(ViewLock::Body(i)) => Some(i),
+            _ => None,
+        }
+    }
+
+    fn lock_label(&self, show_names: bool) -> Option<String> {
+        self.view_lock.map(|target| match target {
+            ViewLock::Background(_) => "Background sky".into(),
+            ViewLock::Body(i) if show_names => self.scene.body(i).name.clone(),
+            ViewLock::Body(i) if self.scene.body(i).kind == BodyKind::Star => "Star".into(),
+            ViewLock::Body(_) => "Planet / moon".into(),
+        })
+    }
+
+    /// Update the local telescope angles to maintain the selected world direction.
     fn track(&mut self) {
-        let Some(target) = self.tracked else {
+        let Some(target) = self.view_lock else {
             return;
         };
         let positions = self.scene.positions(self.sim_time);
         let vf = self.observer.frame(&self.scene, self.sim_time, &positions);
-        let dir = (positions[target] - vf.position).normalize();
+        let dir = match target {
+            ViewLock::Body(i) => (positions[i] - vf.position).normalize(),
+            ViewLock::Background(dir) => dir,
+        };
         self.observer.alt = dir.dot(vf.zenith).clamp(-1.0, 1.0).asin();
         self.observer.az = dir.dot(vf.east).atan2(dir.dot(vf.north));
     }
 
+    fn cursor_ray(&self, x: f64, y: f64, width: u32, height: u32) -> Option<DVec3> {
+        if width == 0
+            || height == 0
+            || !(0.0..width as f64).contains(&x)
+            || !(0.0..height as f64).contains(&y)
+        {
+            return None;
+        }
+        let positions = self.scene.positions(self.sim_time);
+        let vf = self.observer.frame(&self.scene, self.sim_time, &positions);
+        let aspect = width as f64 / height as f64;
+        let tan_half = (self.observer.fov_y * 0.5).tan();
+        let ndc_x = 2.0 * x / width as f64 - 1.0;
+        let ndc_y = 1.0 - 2.0 * y / height as f64;
+        Some(
+            (vf.forward + vf.right * (ndc_x * tan_half * aspect) + vf.up * (ndc_y * tan_half))
+                .normalize(),
+        )
+    }
+
+    fn lock_at(&mut self, x: f64, y: f64, width: u32, height: u32) {
+        let Some(dir) = self.cursor_ray(x, y, width, height) else {
+            return;
+        };
+        self.view_lock = match self.pick_body(x, y, width, height) {
+            // The ground occludes the sky, so it is not a background-star target.
+            Some(i) if i == self.scene.host => return,
+            Some(i) => Some(ViewLock::Body(i)),
+            None => Some(ViewLock::Background(dir)),
+        };
+        self.track();
+    }
+
     fn begin_sky_press(&mut self, cursor: (f64, f64)) {
+        self.unlock();
         self.press = Some(cursor);
         self.last_cursor = Some(cursor);
         self.dragging = false;
     }
 
-    /// Do not pan (or unlock) until the cursor leaves the click tolerance.
+    /// Do not pan until the cursor leaves the click tolerance.
     fn drag_sky(&mut self, cursor: (f64, f64), scale: f64, height: u32) {
         let Some(start) = self.press else { return };
         if !self.dragging {
@@ -434,13 +537,23 @@ impl State {
                 return;
             }
             self.dragging = true;
-            self.tracked = None;
+            self.unlock();
         }
         let previous = self.last_cursor.unwrap_or(start);
         let rad_per_px = self.observer.fov_y / height.max(1) as f64;
-        self.observer.az -= (cursor.0 - previous.0) * rad_per_px;
-        self.observer.alt = (self.observer.alt + (cursor.1 - previous.1) * rad_per_px)
-            .clamp(-5.0_f64.to_radians(), 89.0_f64.to_radians());
+        if self.observer.star_orientation.is_some() {
+            let positions = self.scene.positions(self.sim_time);
+            let frame = self.observer.frame(&self.scene, self.sim_time, &positions);
+            let dir = (frame.forward - frame.right * ((cursor.0 - previous.0) * rad_per_px)
+                + frame.up * ((cursor.1 - previous.1) * rad_per_px))
+                .normalize();
+            self.observer.alt = dir.dot(frame.zenith).clamp(-1.0, 1.0).asin();
+            self.observer.az = dir.dot(frame.east).atan2(dir.dot(frame.north));
+        } else {
+            self.observer.az -= (cursor.0 - previous.0) * rad_per_px;
+            self.observer.alt = (self.observer.alt + (cursor.1 - previous.1) * rad_per_px)
+                .clamp(-5.0_f64.to_radians(), 89.0_f64.to_radians());
+        }
         self.last_cursor = Some(cursor);
     }
 
@@ -458,25 +571,12 @@ impl State {
     /// so overlapping bodies resolve to whichever is actually in front.
     /// Ring picking uses the annulus envelope, not its individual ringlets.
     fn pick_body(&self, x: f64, y: f64, width: u32, height: u32) -> Option<usize> {
-        if width == 0
-            || height == 0
-            || !(0.0..width as f64).contains(&x)
-            || !(0.0..height as f64).contains(&y)
-        {
-            return None;
-        }
+        let dir = self.cursor_ray(x, y, width, height)?;
         let positions = self.scene.positions(self.sim_time);
         let vf = self.observer.frame(&self.scene, self.sim_time, &positions);
-        let aspect = width as f64 / height as f64;
-        let tan_half = (self.observer.fov_y * 0.5).tan();
-        let ndc_x = 2.0 * x / width as f64 - 1.0;
-        let ndc_y = 1.0 - 2.0 * y / height as f64;
-        // Ray in telescope space (forward is -Z), then rotated to world space.
-        let view = DVec3::new(ndc_x * tan_half * aspect, ndc_y * tan_half, -1.0).normalize();
-        let dir = (vf.right * view.x + vf.up * view.y - vf.forward * view.z).normalize();
         // The host body is kept as an occluder so a click on the ground cannot
-        // select a body hidden on the far side of the planet, but it is never
-        // itself selectable.
+        // select a body hidden on the far side of the planet. Locking rejects
+        // the host rather than interpreting the ground as background sky.
         let mut best: Option<(f64, usize)> = None;
         for (i, body) in self.scene.bodies.iter().enumerate() {
             if body.kind == BodyKind::Anchor || body.radius <= 0.0 {
@@ -511,10 +611,7 @@ impl State {
                 best = Some((distance, i));
             }
         }
-        match best {
-            Some((_, i)) if i != self.scene.host => Some(i),
-            _ => None,
-        }
+        best.map(|(_, i)| i)
     }
 
     fn build_frame(&self, width: u32, height: u32) -> Frame {
@@ -675,6 +772,7 @@ impl State {
 struct App {
     state: State,
     menu: menu::Menu,
+    game: Option<game::Game>,
     window: Option<Arc<Window>>,
     renderer: Option<Renderer>,
     stars: Vec<CatalogueStar>,
@@ -689,14 +787,86 @@ struct App {
 }
 
 impl App {
+    fn right_click(&mut self) {
+        if self.menu.open {
+            return;
+        }
+        let Some(r) = self.renderer.as_ref() else {
+            return;
+        };
+        let (w, h) = r.size();
+        if w == 0 || h == 0 {
+            return;
+        }
+        if let Some(game) = self.game.as_mut()
+            && game.open
+        {
+            game.right_click(&game.layout(w as f32, h as f32, self.scale), self.cursor);
+            return;
+        }
+        let (x, y) = self.cursor;
+        let hud = ui::layout(w as f32, h as f32, self.scale).with_puzzle(self.game.is_some());
+        if hud.lock.contains(x, y)
+            || (self.show_hud && hud.bar.contains(x, y))
+            || (self.game.is_none() && hud.home.contains(x, y))
+        {
+            return;
+        }
+        self.state.end_sky_press();
+        self.exposure_dragging = false;
+        self.state.lock_at(x, y, w, h);
+    }
+
+    fn toggle_notebook(&mut self) {
+        if let Some(game) = self.game.as_mut() {
+            game.toggle();
+        }
+        self.state.end_sky_press();
+        self.state.last = Instant::now();
+        self.exposure_dragging = false;
+    }
+
     fn toggle_menu(&mut self) {
         self.state.end_sky_press();
+        if let Some(game) = self.game.as_mut() {
+            game.release();
+        }
         self.exposure_dragging = false;
         if self.menu.open {
             self.menu.open = false;
             self.state.last = Instant::now();
         } else {
             self.menu.refresh();
+            if self.game.is_some() {
+                self.menu
+                    .entries
+                    .sort_by_key(|e| e.path.file_stem().is_none_or(|name| name != "puzzle"));
+            }
+        }
+    }
+
+    fn select_map(&mut self, path: &std::path::Path) {
+        // Load successfully before replacing any of the player's current state.
+        match config::load(path) {
+            Ok(scene) => {
+                self.state = State::with_scene(scene);
+                if self.game.is_some() {
+                    self.game = Some(game::Game::default());
+                }
+                self.menu.open = false;
+                self.menu.error = None;
+                self.exposure_dragging = false;
+            }
+            Err(error) => {
+                self.menu.error = Some(if self.game.is_some() {
+                    "Could not load this map. Your current puzzle is unchanged.".into()
+                } else {
+                    format!(
+                        "Could not load {}: {error:#}",
+                        path.file_name().unwrap_or_default().to_string_lossy()
+                    )
+                });
+            }
         }
     }
 
@@ -709,7 +879,25 @@ impl App {
         let Some(layout) = self.menu_layout() else {
             return self.menu.open;
         };
-        if layout.home.contains(cx, cy) {
+        if self.game.as_ref().is_some_and(|g| g.confirm_clear) {
+            return false;
+        }
+        if self.game.as_ref().is_some_and(|g| g.open) && !self.menu.open {
+            if let Some(r) = self.renderer.as_ref() {
+                let (w, h) = r.size();
+                if game::Layout::new(w as f32, h as f32, self.scale)
+                    .maps
+                    .contains(cx, cy)
+                {
+                    self.toggle_menu();
+                    return true;
+                }
+            }
+            return false;
+        }
+        if (!self.menu.open && layout.home.contains(cx, cy))
+            || (self.menu.open && layout.resume.contains(cx, cy))
+        {
             self.toggle_menu();
             return true;
         }
@@ -725,19 +913,39 @@ impl App {
         } else if let Some(row) = layout.rows.iter().position(|r| r.contains(cx, cy))
             && let Some(entry) = self.menu.entries.get(self.menu.offset + row)
         {
-            match config::load(&entry.path) {
-                Ok(scene) => {
-                    self.state = State::with_scene(scene);
-                    self.menu.open = false;
-                    self.menu.error = None;
-                }
-                Err(error) => {
-                    self.menu.error = Some(format!(
-                        "Could not load {}: {error:#}",
-                        entry.path.file_name().unwrap_or_default().to_string_lossy()
-                    ));
-                }
-            }
+            let path = entry.path.clone();
+            self.select_map(&path);
+        }
+        true
+    }
+
+    /// UI clicks preserve tracking, except the explicit lock/unlock button.
+    fn hud_click(&mut self, layout: &ui::Layout, x: f64, y: f64) -> bool {
+        if layout.lock.contains(x, y) {
+            self.state.unlock();
+            return true;
+        }
+        if !self.show_hud || !layout.bar.contains(x, y) {
+            return false;
+        }
+        if layout.orientation.contains(x, y) {
+            self.state.toggle_star_orientation();
+        } else if layout.slower.contains(x, y) {
+            self.state.change_speed(false);
+        } else if layout.faster.contains(x, y) {
+            self.state.change_speed(true);
+        } else if layout.stop.contains(x, y) {
+            self.state.warp = STOP_WARP;
+        } else if self.game.is_some() && layout.draw.contains(x, y) {
+            self.toggle_notebook();
+        } else if self.game.is_none() && layout.toggle.contains(x, y) {
+            self.show_labels = !self.show_labels;
+        } else if layout.exposure.contains(x, y) {
+            self.exposure_dragging = true;
+            self.adjust_exposure(layout, x);
+        } else if layout.auto.contains(x, y) {
+            self.auto_exposure = !self.auto_exposure;
+            self.sync_exposure();
         }
         true
     }
@@ -759,7 +967,7 @@ impl App {
         if w == 0 || h == 0 {
             return None;
         }
-        Some(ui::layout(w as f32, h as f32, self.scale))
+        Some(ui::layout(w as f32, h as f32, self.scale).with_puzzle(self.game.is_some()))
     }
 }
 
@@ -805,18 +1013,22 @@ impl ApplicationHandler for App {
                 }
             }
             WindowEvent::RedrawRequested => {
-                if self.menu.open {
+                if self.menu.open || self.game.as_ref().is_some_and(|g| g.open) {
                     self.state.last = Instant::now();
                 } else {
                     self.state.advance();
                     self.state.track();
                 }
+                let lock_label = self
+                    .state
+                    .lock_label(self.show_labels && self.show_hud && self.game.is_none());
                 if let (Some(r), Some(window)) = (self.renderer.as_mut(), self.window.as_ref()) {
                     let (w, h) = r.size();
                     if w > 0 && h > 0 {
                         let mut frame = self.state.build_frame(w, h);
                         if self.show_hud && !self.menu.open {
-                            let layout = ui::layout(w as f32, h as f32, self.scale);
+                            let layout = ui::layout(w as f32, h as f32, self.scale)
+                                .with_puzzle(self.game.is_some());
                             ui::build(
                                 &mut frame.ui,
                                 &layout,
@@ -824,14 +1036,53 @@ impl ApplicationHandler for App {
                                 h as f32,
                                 ui::HudState {
                                     labels: ui::LabelOptions {
-                                        show: self.show_labels,
-                                        locked: self.state.tracked,
+                                        show: self.show_labels && self.game.is_none(),
+                                        locked: self.state.locked_body(),
                                     },
+                                    lock_label: lock_label.as_deref(),
                                     sim_time: self.state.sim_time,
                                     auto_exposure: self.auto_exposure,
                                     ev_bias: self.ev_bias,
+                                    steady_stars: self.state.observer.star_orientation.is_some(),
+                                    minutes_per_second: WARPS[self.state.warp] * 1440.0,
                                 },
                                 &frame.labels,
+                            );
+                        }
+                        if !self.show_hud
+                            && !self.menu.open
+                            && !self.game.as_ref().is_some_and(|g| g.open)
+                        {
+                            let layout = ui::layout(w as f32, h as f32, self.scale)
+                                .with_puzzle(self.game.is_some());
+                            ui::build_lock(
+                                &mut frame.ui,
+                                &layout,
+                                [w as f32, h as f32],
+                                lock_label.as_deref(),
+                            );
+                        }
+                        if let Some(game) = &self.game {
+                            game::build(
+                                &mut frame.ui,
+                                [w as f32, h as f32],
+                                self.scale,
+                                game,
+                                self.cursor,
+                                &format!(
+                                    "{} | {:+.1} min/s{}",
+                                    if self.state.warp == STOP_WARP {
+                                        "STOPPED"
+                                    } else {
+                                        "PLAYING"
+                                    },
+                                    WARPS[self.state.warp] * 1440.0,
+                                    if self.state.view_lock.is_some() {
+                                        " | View locked"
+                                    } else {
+                                        ""
+                                    }
+                                ),
                             );
                         }
                         menu::build(
@@ -840,28 +1091,27 @@ impl ApplicationHandler for App {
                             self.scale,
                             &self.menu,
                             self.cursor,
+                            self.game.is_some(),
                         );
                         r.render(&frame);
                     }
-                    let rate = if self.state.paused {
-                        "paused".to_string()
-                    } else {
-                        format!("{:.3} day/s", WARPS[self.state.warp])
-                    };
-                    let lock = match self.state.tracked {
-                        Some(i) => format!("  ·  locked: {}", self.state.scene.body(i).name),
-                        None => String::new(),
-                    };
+                    let rate = format!("{:+.3} day/s", WARPS[self.state.warp]);
+                    let lock = lock_label
+                        .as_ref()
+                        .map_or_else(String::new, |label| format!("  ·  locked: {label}"));
                     let exposure = if self.auto_exposure {
                         format!("auto exp {:+.2} EV", self.ev_bias)
                     } else {
                         format!("exp {:.3} {:+.2} EV", r.manual_exposure(), self.ev_bias)
                     };
-                    let title = if self.menu.open {
+                    let title = if self.game.is_some() {
+                        "stargaze · Reconstruction puzzle · M: menu · Tab: diagram · Space: stop"
+                            .into()
+                    } else if self.menu.open {
                         "stargaze  ·  Solar systems".to_string()
                     } else {
                         format!(
-                            "stargaze  ·  t = {:.2} d ({:.3} yr)  ·  {}  ·  {} spp  ·  {exposure}{lock}  ·  click body=lock  drag=look  scroll=zoom  space=play/pause  , . =exposure  A=auto  [ ]=speed  R=reset  E=eclipse  T=transit  H=hud  L=labels",
+                            "stargaze  ·  t = {:.2} d ({:.3} yr)  ·  {}  ·  {} spp  ·  {exposure}{lock}  ·  right click=lock  left click=unlock  drag=look  scroll=zoom  space=stop  , . =exposure  A=auto  arrows=speed  R=reset  E=eclipse  T=transit  H=hud  L=labels",
                             self.state.sim_time,
                             self.state.sim_time / 365.256,
                             rate,
@@ -875,6 +1125,12 @@ impl ApplicationHandler for App {
                 }
             }
             WindowEvent::MouseInput { state, button, .. } => {
+                if button == MouseButton::Right {
+                    if state == ElementState::Pressed {
+                        self.right_click();
+                    }
+                    return;
+                }
                 if button != MouseButton::Left {
                     return;
                 }
@@ -885,36 +1141,20 @@ impl ApplicationHandler for App {
                             self.state.end_sky_press();
                             return;
                         }
-                        let mut consumed = false;
-                        if self.show_hud
-                            && let Some(layout) = self.ui_layout()
+                        if let (Some(game), Some(r)) = (self.game.as_mut(), self.renderer.as_ref())
                         {
-                            if layout.toggle.contains(cx, cy) {
-                                self.show_labels = !self.show_labels;
-                                consumed = true;
-                            } else if layout.exposure.contains(cx, cy) {
-                                self.exposure_dragging = true;
-                                self.adjust_exposure(&layout, cx);
-                                consumed = true;
-                            } else if layout.auto.contains(cx, cy) {
-                                self.auto_exposure = !self.auto_exposure;
-                                self.sync_exposure();
-                                consumed = true;
-                            } else {
-                                for (rect, (_, delta)) in
-                                    layout.buttons.iter().zip(ui::TIME_BUTTONS.iter())
-                                {
-                                    if rect.contains(cx, cy) {
-                                        self.state.sim_time += delta;
-                                        consumed = true;
-                                        break;
-                                    }
-                                }
-                                if !consumed && layout.bar.contains(cx, cy) {
-                                    consumed = true;
-                                }
+                            let (w, h) = r.size();
+                            let layout = game.layout(w.max(1) as f32, h.max(1) as f32, self.scale);
+                            if game.open && game.click(&layout, self.cursor, &self.state.scene) {
+                                self.state.end_sky_press();
+                                self.exposure_dragging = false;
+                                self.state.last = Instant::now();
+                                return;
                             }
                         }
+                        let consumed = self
+                            .ui_layout()
+                            .is_some_and(|layout| self.hud_click(&layout, cx, cy));
                         if consumed {
                             self.state.end_sky_press();
                         } else {
@@ -922,21 +1162,29 @@ impl ApplicationHandler for App {
                         }
                     }
                     ElementState::Released => {
-                        self.exposure_dragging = false;
-                        // A press that barely moved is a click: lock the body
-                        // under the cursor (or unlock when the sky was hit).
-                        if self.state.end_sky_press() {
-                            let picked = self.renderer.as_ref().and_then(|r| {
-                                let (w, h) = r.size();
-                                self.state.pick_body(self.cursor.0, self.cursor.1, w, h)
-                            });
-                            self.state.tracked = picked;
+                        if let Some(game) = self.game.as_mut() {
+                            game.release();
                         }
+                        self.exposure_dragging = false;
+                        self.state.end_sky_press();
                     }
                 }
             }
             WindowEvent::CursorMoved { position, .. } => {
                 self.cursor = (position.x, position.y);
+                if self.menu.open {
+                    return;
+                }
+                if let (Some(game), Some(r)) = (self.game.as_mut(), self.renderer.as_ref())
+                    && game.open
+                {
+                    let (w, h) = r.size();
+                    game.motion(
+                        &game.layout(w.max(1) as f32, h.max(1) as f32, self.scale),
+                        self.cursor,
+                    );
+                    return;
+                }
                 if self.exposure_dragging {
                     if let Some(layout) = self.ui_layout() {
                         self.adjust_exposure(&layout, position.x);
@@ -947,6 +1195,9 @@ impl ApplicationHandler for App {
                 }
             }
             WindowEvent::Focused(false) | WindowEvent::CursorLeft { .. } => {
+                if let Some(game) = self.game.as_mut() {
+                    game.release();
+                }
                 // A release outside the window may never reach us.
                 self.exposure_dragging = false;
                 self.state.end_sky_press();
@@ -967,6 +1218,9 @@ impl ApplicationHandler for App {
                     }
                     return;
                 }
+                if self.game.as_ref().is_some_and(|g| g.open) {
+                    return;
+                }
                 let fov = self.state.observer.fov_y * ZOOM_STEP.powf(y);
                 self.state.observer.fov_y =
                     fov.clamp(MIN_FOV_DEG.to_radians(), MAX_FOV_DEG.to_radians());
@@ -975,25 +1229,126 @@ impl ApplicationHandler for App {
                 if event.state != ElementState::Pressed {
                     return;
                 }
-                if self.menu.open {
-                    if event.physical_key == PhysicalKey::Code(KeyCode::Escape) {
+                let PhysicalKey::Code(key) = event.physical_key else {
+                    return;
+                };
+                if self.game.as_ref().is_some_and(|g| g.confirm_clear) {
+                    if !event.repeat
+                        && let (Some(game), Some(r)) = (self.game.as_mut(), self.renderer.as_ref())
+                    {
+                        let (w, h) = r.size();
+                        game.key(
+                            key,
+                            &game.layout(w as f32, h as f32, self.scale),
+                            self.cursor,
+                            &self.state.scene,
+                        );
+                    }
+                    return;
+                }
+                if matches!(key, KeyCode::Escape | KeyCode::KeyM) {
+                    if !event.repeat {
                         self.toggle_menu();
                     }
                     return;
                 }
+                if self.menu.open {
+                    if let Some(layout) = self.menu_layout() {
+                        let page = layout.rows.len();
+                        match key {
+                            KeyCode::PageUp => {
+                                self.menu.offset = self.menu.offset.saturating_sub(page)
+                            }
+                            KeyCode::PageDown
+                                if self.menu.offset + page < self.menu.entries.len() =>
+                            {
+                                self.menu.offset += page
+                            }
+                            _ => {
+                                let keys = [
+                                    KeyCode::Digit1,
+                                    KeyCode::Digit2,
+                                    KeyCode::Digit3,
+                                    KeyCode::Digit4,
+                                    KeyCode::Digit5,
+                                    KeyCode::Digit6,
+                                    KeyCode::Digit7,
+                                    KeyCode::Digit8,
+                                    KeyCode::Digit9,
+                                ];
+                                if let Some(row) =
+                                    keys.iter().position(|&k| k == key).filter(|&i| i < page)
+                                    && let Some(entry) =
+                                        self.menu.entries.get(self.menu.offset + row)
+                                {
+                                    let path = entry.path.clone();
+                                    if !event.repeat {
+                                        self.select_map(&path);
+                                    }
+                                }
+                            }
+                        }
+                    }
+                    return;
+                }
+                if self.game.is_some() {
+                    if key == KeyCode::Tab {
+                        if !event.repeat {
+                            self.toggle_notebook();
+                        }
+                        return;
+                    }
+                    if self.game.as_ref().is_some_and(|g| g.open) {
+                        if !event.repeat
+                            && let (Some(game), Some(r)) =
+                                (self.game.as_mut(), self.renderer.as_ref())
+                        {
+                            let (w, h) = r.size();
+                            game.key(
+                                key,
+                                &game.layout(w as f32, h as f32, self.scale),
+                                self.cursor,
+                                &self.state.scene,
+                            );
+                        }
+                        return;
+                    }
+                    // Named target and event shortcuts bypass the observation puzzle.
+                    if matches!(
+                        key,
+                        KeyCode::KeyL
+                            | KeyCode::KeyE
+                            | KeyCode::KeyT
+                            | KeyCode::F1
+                            | KeyCode::F2
+                            | KeyCode::F3
+                            | KeyCode::F4
+                            | KeyCode::F5
+                            | KeyCode::F6
+                            | KeyCode::F7
+                            | KeyCode::F8
+                            | KeyCode::F9
+                    ) {
+                        return;
+                    }
+                    if key == KeyCode::KeyR {
+                        self.state.point_at_fov(
+                            self.state.scene.default_target,
+                            self.state.scene.default_fov_deg.to_radians(),
+                        );
+                        return;
+                    }
+                }
+                if self.state.time_key(key) {
+                    return;
+                }
                 match event.physical_key {
-                    PhysicalKey::Code(KeyCode::Escape) => event_loop.exit(),
-                    PhysicalKey::Code(KeyCode::Space) => {
-                        self.state.paused = !self.state.paused;
+                    PhysicalKey::Code(KeyCode::KeyS | KeyCode::KeyO) => {
+                        if !event.repeat {
+                            self.state.toggle_star_orientation();
+                        }
                     }
-                    PhysicalKey::Code(KeyCode::BracketRight) => {
-                        self.state.warp = (self.state.warp + 1).min(WARPS.len() - 1);
-                        self.state.paused = false;
-                    }
-                    PhysicalKey::Code(KeyCode::BracketLeft) => {
-                        self.state.warp = self.state.warp.saturating_sub(1);
-                        self.state.paused = false;
-                    }
+                    PhysicalKey::Code(KeyCode::KeyU) => self.state.unlock(),
                     PhysicalKey::Code(KeyCode::KeyR) => self.state.reset_view(),
                     PhysicalKey::Code(KeyCode::KeyE) => {
                         if let Some(what) = self.state.next_eclipse() {
@@ -1022,15 +1377,15 @@ impl ApplicationHandler for App {
                         self.ev_bias = (self.ev_bias + 0.25).clamp(ui::MIN_EV, ui::MAX_EV);
                         self.sync_exposure();
                     }
-                    PhysicalKey::Code(KeyCode::Digit1) => self.state.aim_target(0),
-                    PhysicalKey::Code(KeyCode::Digit2) => self.state.aim_target(1),
-                    PhysicalKey::Code(KeyCode::Digit3) => self.state.aim_target(2),
-                    PhysicalKey::Code(KeyCode::Digit4) => self.state.aim_target(3),
-                    PhysicalKey::Code(KeyCode::Digit5) => self.state.aim_target(4),
-                    PhysicalKey::Code(KeyCode::Digit6) => self.state.aim_target(5),
-                    PhysicalKey::Code(KeyCode::Digit7) => self.state.aim_target(6),
-                    PhysicalKey::Code(KeyCode::Digit8) => self.state.aim_target(7),
-                    PhysicalKey::Code(KeyCode::Digit9) => self.state.aim_target(8),
+                    PhysicalKey::Code(KeyCode::F1) => self.state.aim_target(0),
+                    PhysicalKey::Code(KeyCode::F2) => self.state.aim_target(1),
+                    PhysicalKey::Code(KeyCode::F3) => self.state.aim_target(2),
+                    PhysicalKey::Code(KeyCode::F4) => self.state.aim_target(3),
+                    PhysicalKey::Code(KeyCode::F5) => self.state.aim_target(4),
+                    PhysicalKey::Code(KeyCode::F6) => self.state.aim_target(5),
+                    PhysicalKey::Code(KeyCode::F7) => self.state.aim_target(6),
+                    PhysicalKey::Code(KeyCode::F8) => self.state.aim_target(7),
+                    PhysicalKey::Code(KeyCode::F9) => self.state.aim_target(8),
                     PhysicalKey::Code(KeyCode::Equal) | PhysicalKey::Code(KeyCode::NumpadAdd) => {
                         let fov = self.state.observer.fov_y * ZOOM_STEP;
                         self.state.observer.fov_y = fov.max(MIN_FOV_DEG.to_radians());
@@ -1069,6 +1424,7 @@ fn main() -> Result<()> {
     let mut app = App {
         state: State::with_scene(scene),
         menu: menu::Menu::default(),
+        game: game_requested().then(game::Game::default),
         window: None,
         renderer: None,
         stars,
@@ -1082,17 +1438,23 @@ fn main() -> Result<()> {
         exposure_dragging: false,
     };
 
-    log::info!(
-        "system: {}",
-        app.state
-            .scene
-            .bodies
-            .iter()
-            .map(|b| format!("{} ({:.3} d)", b.name, b.period_days))
-            .collect::<Vec<_>>()
-            .join(", ")
-    );
-    if std::env::var("STARGAZE_DEBUG").is_ok() {
+    if app.game.is_some() {
+        app.toggle_menu();
+    }
+
+    if app.game.is_none() {
+        log::info!(
+            "system: {}",
+            app.state
+                .scene
+                .bodies
+                .iter()
+                .map(|b| format!("{} ({:.3} d)", b.name, b.period_days))
+                .collect::<Vec<_>>()
+                .join(", ")
+        );
+    }
+    if app.game.is_none() && std::env::var("STARGAZE_DEBUG").is_ok() {
         let frame = app.state.build_frame(1280, 720);
         log::info!("forward={:?}", frame.globals.cam_forward);
         log::info!(
@@ -1127,6 +1489,125 @@ mod app_tests {
     use super::*;
 
     #[test]
+    fn time_controls_and_menus_preserve_lock_but_lock_button_releases_it() {
+        let mut app = App {
+            state: State::with_scene(sim::default_scene()),
+            menu: menu::Menu::default(),
+            game: None,
+            window: None,
+            renderer: None,
+            stars: vec![],
+            last_title: String::new(),
+            scale: 1.0,
+            cursor: (0.0, 0.0),
+            show_labels: true,
+            show_hud: true,
+            auto_exposure: true,
+            ev_bias: 0.0,
+            exposure_dragging: false,
+        };
+        let layout = ui::layout(1280.0, 720.0, 1.0);
+        let click = |app: &mut App, r: ui::Rect| {
+            assert!(app.hud_click(&layout, (r.x + r.w * 0.5) as f64, (r.y + r.h * 0.5) as f64));
+        };
+        for lock in [ViewLock::Body(2), ViewLock::Background(DVec3::X)] {
+            app.state.view_lock = Some(lock);
+            let time = app.state.sim_time;
+            app.state.warp = STOP_WARP;
+            click(&mut app, layout.faster);
+            assert_eq!(app.state.warp, STOP_WARP + 1);
+            click(&mut app, layout.slower);
+            assert_eq!(app.state.warp, STOP_WARP);
+            assert_eq!(WARPS[app.state.warp], 0.0);
+            click(&mut app, layout.faster);
+            click(&mut app, layout.stop);
+            assert_eq!(WARPS[app.state.warp], 0.0);
+            assert_eq!(app.state.sim_time, time);
+            assert_eq!(app.state.view_lock, Some(lock));
+            for r in [layout.toggle, layout.exposure, layout.auto] {
+                click(&mut app, r);
+                assert_eq!(app.state.view_lock, Some(lock));
+            }
+            app.toggle_menu();
+            app.toggle_menu();
+            assert_eq!(app.state.view_lock, Some(lock));
+            app.game = Some(game::Game::default());
+            app.toggle_notebook();
+            app.toggle_notebook();
+            assert_eq!(app.state.view_lock, Some(lock));
+            app.game = None;
+            app.show_hud = false;
+            click(&mut app, layout.lock);
+            assert_eq!(app.state.view_lock, None);
+            app.show_hud = true;
+        }
+    }
+
+    #[test]
+    fn speed_controls_cross_into_reverse_and_respect_bounds() {
+        let mut state = State::with_scene(sim::default_scene());
+        state.view_lock = Some(ViewLock::Body(2));
+        let start = state.sim_time;
+        assert_eq!(WARPS[state.warp], 0.0);
+        assert!(state.time_key(KeyCode::ArrowLeft));
+        assert_eq!(WARPS[state.warp], -0.001);
+        assert_eq!(state.sim_time, start, "speed changes must not jump time");
+        assert!(state.time_key(KeyCode::ArrowRight));
+        assert_eq!(WARPS[state.warp], 0.0);
+        assert!(state.time_key(KeyCode::ArrowRight));
+        assert_eq!(WARPS[state.warp], 0.001);
+        for _ in 0..30 {
+            state.time_key(KeyCode::ArrowLeft);
+        }
+        assert_eq!(state.warp, 0);
+        assert_eq!(WARPS[state.warp], -40.0);
+        for _ in 0..30 {
+            state.time_key(KeyCode::ArrowRight);
+        }
+        assert_eq!(state.warp, WARPS.len() - 1);
+        assert_eq!(WARPS[state.warp], 40.0);
+        assert_eq!(state.view_lock, Some(ViewLock::Body(2)));
+        assert!(!state.time_key(KeyCode::Digit1));
+        assert!(!state.time_key(KeyCode::Digit2));
+    }
+
+    #[test]
+    fn reverse_playback_retraces_orbits_keeps_target_centered_and_stops_at_zero() {
+        let mut state = State::with_scene(sim::default_scene());
+        state.sim_time = 0.0;
+        state.view_lock = Some(ViewLock::Body(2));
+        let initial_positions = state.scene.positions(state.sim_time);
+        state.warp = 7; // slowest reverse speed
+        state.advance_by(10.0);
+        state.track();
+        assert!(
+            (state.sim_time + 0.01).abs() < 1e-12,
+            "reverse can cross time zero"
+        );
+        let positions = state.scene.positions(state.sim_time);
+        let frame = state
+            .observer
+            .frame(&state.scene, state.sim_time, &positions);
+        assert!(
+            frame
+                .forward
+                .dot((positions[2] - frame.position).normalize())
+                > 1.0 - 1e-12
+        );
+        assert!(state.time_key(KeyCode::Space));
+        assert_eq!(WARPS[state.warp], 0.0);
+        assert!(state.time_key(KeyCode::Space)); // stopping again never resumes
+        assert_eq!(WARPS[state.warp], 0.0);
+        state.advance_by(10.0);
+        assert!((state.sim_time + 0.01).abs() < 1e-12);
+        state.change_speed(true); // first positive speed from zero
+        state.advance_by(10.0);
+        assert!(state.sim_time.abs() < 1e-12);
+        assert_eq!(state.scene.positions(state.sim_time), initial_positions);
+        assert_eq!(state.view_lock, Some(ViewLock::Body(2)));
+    }
+
+    #[test]
     fn halo_faces_calyx_without_tracking_and_clears_its_rings() {
         for system in [None, Some("halo"), Some("binary")] {
             let mut state = State::with_scene(scene_for_system(system));
@@ -1143,7 +1624,7 @@ mod app_tests {
                 - rings.outer_radius * planet.radius;
             assert!(clearance * sim::AU_KM > 4_000.0);
             assert!(!state.scene.targets.contains(&host));
-            assert_eq!(state.tracked, None);
+            assert_eq!(state.view_lock, None);
             assert_eq!(state.pick_body(400.0, 300.0, 800, 600), Some(target));
             let start = state.sim_time;
             let period = moon.period_days;
@@ -1266,11 +1747,12 @@ mod app_tests {
             Some(2),
             "centre click should pick Luna"
         );
-        // A far-off corner is empty sky (the host planet is never pickable).
+        // A far-off corner is empty sky, suitable for an inertial direction lock.
         assert_eq!(state.pick_body(1.0, 1.0, 800, 600), None);
 
-        // Lock it, advance time, and re-track: the body stays centred.
-        state.tracked = Some(2);
+        // Right-click it, advance time, and re-track: the body stays centred.
+        state.lock_at(400.0, 300.0, 800, 600);
+        assert_eq!(state.view_lock, Some(ViewLock::Body(2)));
         state.sim_time += 37.0;
         state.track();
         let positions = state.scene.positions(state.sim_time);
@@ -1285,9 +1767,122 @@ mod app_tests {
     }
 
     #[test]
-    fn sky_click_jitter_does_not_pan_or_unlock() {
+    fn background_lock_keeps_clicked_world_direction_across_time_and_rotation() {
         let mut state = State::with_scene(sim::default_scene());
-        state.tracked = Some(2);
+        state.point_at(2);
+        let ray = state.cursor_ray(1.0, 1.0, 800, 600).unwrap();
+        assert_eq!(state.pick_body(1.0, 1.0, 800, 600), None);
+        let start = state.sim_time;
+        state.lock_at(1.0, 1.0, 800, 600);
+        assert_eq!(state.view_lock, Some(ViewLock::Background(ray)));
+        for offset in [0.0, 0.25, 7.0, 91.0, -4.0] {
+            state.sim_time = start + offset;
+            state.track();
+            let positions = state.scene.positions(state.sim_time);
+            let vf = state
+                .observer
+                .frame(&state.scene, state.sim_time, &positions);
+            assert!(
+                vf.forward.dot(ray) > 1.0 - 1e-12,
+                "fixed star direction moved at {offset} days"
+            );
+            assert!(vf.right.is_finite() && vf.up.is_finite());
+        }
+        state.begin_sky_press((100.0, 100.0));
+        assert_eq!(state.view_lock, None);
+        state.end_sky_press();
+        state.sim_time += 0.1;
+        state.track();
+        let p = state.scene.positions(state.sim_time);
+        let vf = state.observer.frame(&state.scene, state.sim_time, &p);
+        assert!(
+            vf.forward.dot(ray) < 0.99,
+            "unlocked telescope should follow the host again"
+        );
+    }
+
+    #[test]
+    fn steady_stars_hold_background_roll_and_leave_the_lock_unchanged() {
+        let mut state = State::with_scene(sim::default_scene());
+        state.point_at(2);
+        state.lock_at(1.0, 1.0, 800, 600);
+        let lock = state.view_lock;
+        let start = state.sim_time;
+        let p = state.scene.positions(start);
+        let before = state.observer.frame(&state.scene, start, &p);
+        state.toggle_star_orientation();
+        for offset in [0.0, 0.25, 0.5, 5.0, -1.0, 0.0] {
+            state.sim_time = start + offset;
+            state.track();
+            let p = state.scene.positions(state.sim_time);
+            let frame = state.observer.frame(&state.scene, state.sim_time, &p);
+            assert!(frame.forward.dot(before.forward) > 1.0 - 1e-12);
+            assert!(frame.up.dot(before.up) > 1.0 - 1e-12);
+            assert!(frame.right.dot(before.right) > 1.0 - 1e-12);
+            assert_eq!(state.view_lock, lock);
+        }
+        state.toggle_star_orientation();
+        assert!(state.observer.star_orientation.is_none());
+        assert_eq!(state.view_lock, lock);
+    }
+
+    #[test]
+    fn steady_stars_follow_planet_without_roll_or_changing_position_or_zoom() {
+        let mut state = State::with_scene(sim::default_scene());
+        state.point_at(3); // Mars: the roll toggle also works with a planet lock.
+        state.view_lock = Some(ViewLock::Body(3));
+        state.track();
+        let p = state.scene.positions(state.sim_time);
+        let before = state.observer.frame(&state.scene, state.sim_time, &p);
+        let fov = state.observer.fov_y;
+        state.toggle_star_orientation();
+        let start = state.sim_time;
+        for offset in [0.0, 0.25, 7.0, 90.0, -10.0] {
+            state.sim_time = start + offset;
+            state.track();
+            let p = state.scene.positions(state.sim_time);
+            let frame = state.observer.frame(&state.scene, state.sim_time, &p);
+            let direction = (p[3] - frame.position).normalize();
+            assert!(frame.forward.dot(direction) > 1.0 - 1e-12);
+            // Minimal transport back to the initial aim must show no accumulated roll.
+            let back = glam::DQuat::from_rotation_arc(frame.forward, before.forward);
+            assert!((back * frame.up).dot(before.up) > 1.0 - 1e-10);
+            assert!((frame.right.cross(frame.up) + frame.forward).length() < 1e-10);
+            assert_eq!(state.observer.fov_y, fov);
+            let reference = state.observer.star_orientation.take();
+            let natural = state.observer.frame(&state.scene, state.sim_time, &p);
+            assert!((frame.position - natural.position).length() < 1e-12);
+            state.observer.star_orientation = reference;
+        }
+    }
+
+    #[test]
+    fn lock_descriptions_hide_names_when_labels_are_off() {
+        let mut state = State::with_scene(sim::default_scene());
+        state.view_lock = Some(ViewLock::Body(2));
+        assert_eq!(
+            state.lock_label(true).as_deref(),
+            Some(state.scene.body(2).name.as_str())
+        );
+        assert_eq!(state.lock_label(false).as_deref(), Some("Planet / moon"));
+        state.view_lock = Some(ViewLock::Body(0));
+        assert_eq!(state.lock_label(false).as_deref(), Some("Star"));
+        state.view_lock = Some(ViewLock::Background(DVec3::X));
+        for show_names in [false, true] {
+            assert_eq!(
+                state.lock_label(show_names).as_deref(),
+                Some("Background sky")
+            );
+        }
+        state.unlock();
+        assert_eq!(state.lock_label(true), None);
+        assert_eq!(state.locked_body(), None);
+    }
+
+    #[test]
+    fn sky_click_unlocks_immediately_but_jitter_does_not_pan() {
+        let mut state = State::with_scene(sim::default_scene());
+        state.view_lock = Some(ViewLock::Body(2));
         let angles = (state.observer.az, state.observer.alt);
         state.begin_sky_press((400.0, 300.0));
         // Travel can accumulate indefinitely without ever leaving the click
@@ -1297,14 +1892,18 @@ mod app_tests {
             state.drag_sky((400.0, 300.0), 1.0, 600);
         }
         assert_eq!((state.observer.az, state.observer.alt), angles);
-        assert_eq!(state.tracked, Some(2));
+        assert_eq!(state.view_lock, None);
         assert!(state.end_sky_press());
 
         state.begin_sky_press((400.0, 300.0));
         state.drag_sky((407.0, 300.0), 2.0, 600);
-        assert_eq!(state.tracked, Some(2), "threshold scales with DPI");
+        assert_eq!(
+            (state.observer.az, state.observer.alt),
+            angles,
+            "threshold scales with DPI"
+        );
         state.drag_sky((410.0, 300.0), 2.0, 600);
-        assert_eq!(state.tracked, None);
+        assert_eq!(state.view_lock, None);
         assert!(
             (state.observer.az - (angles.0 - 10.0 * state.observer.fov_y / 600.0)).abs() < 1e-12
         );
@@ -1342,7 +1941,12 @@ mod app_tests {
             state.sim_time = step as f64 * 0.01;
             state.point_at(2);
             if state.observer.alt < -0.1 {
-                assert_eq!(state.pick_body(400.0, 300.0, 800, 600), None);
+                assert_eq!(
+                    state.pick_body(400.0, 300.0, 800, 600),
+                    Some(state.scene.host)
+                );
+                state.lock_at(400.0, 300.0, 800, 600);
+                assert_eq!(state.view_lock, None, "ground must not lock background sky");
                 return;
             }
         }
@@ -1365,9 +1969,9 @@ mod app_tests {
     #[test]
     fn reset_uses_the_scenes_default_target_and_releases_tracking() {
         let mut state = State::with_scene(sim::binary_scene());
-        state.tracked = Some(1);
+        state.view_lock = Some(ViewLock::Body(1));
         state.reset_view();
-        assert_eq!(state.tracked, None);
+        assert_eq!(state.view_lock, None);
         let positions = state.scene.positions(state.sim_time);
         let vf = state
             .observer

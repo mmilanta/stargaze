@@ -1,0 +1,61 @@
+# Small fictional observation puzzle. Names are hidden in --game mode.
+version: 1
+name: Reconstruction - first field study
+time_days: 0
+camera:
+  body: lookout
+  latitude_deg: 15
+  longitude_deg: 180
+  height_m: 2
+  look_at: giant
+  fov_deg: 35
+targets: [giant, sun, inner, middle]
+bodies:
+  - id: sun
+    kind: star
+    radius_km: 696340
+    luminosity: 1
+    emission: [1, 0.94, 0.85]
+  - id: giant
+    kind: planet
+    parent: sun
+    radius_km: 45000
+    albedo: [0.62, 0.43, 0.25]
+    orbit:
+      semi_major_axis_au: 1
+      period_days: 365.25
+      mean_anomaly_deg: 180
+    rotation:
+      mode: free
+      period_days: 0.45
+      obliquity_deg: 15
+  - id: inner
+    kind: moon
+    parent: giant
+    radius_km: 2200
+    albedo: [0.75, 0.65, 0.40]
+    orbit:
+      semi_major_axis_km: 100000
+      period_days: 1.39754249
+      mean_anomaly_deg: 145
+    rotation: {mode: tidal_lock}
+  - id: middle
+    kind: moon
+    parent: giant
+    radius_km: 3200
+    albedo: [0.40, 0.55, 0.72]
+    orbit:
+      semi_major_axis_km: 170000
+      period_days: 3.097693
+      mean_anomaly_deg: 215
+    rotation: {mode: tidal_lock}
+  - id: lookout
+    kind: moon
+    parent: giant
+    radius_km: 1600
+    albedo: [0.32, 0.34, 0.36]
+    orbit:
+      semi_major_axis_km: 320000
+      period_days: 8
+      mean_anomaly_deg: 0
+    rotation: {mode: tidal_lock}

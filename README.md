@@ -1,13 +1,14 @@
 # stargaze
 
 An observatory on a planet, looking out at a star system. Stand still and watch
-Keplerian orbits through an alt-azimuth telescope—or pause time and let the
+Keplerian orbits through an alt-azimuth telescope—or stop time and let the
 **progressive, fully ray-traced image** converge.
 
 The default observatory is back on **Halo**, the tidally locked inner moon
 of **Calyx** in the fictional binary-star system. The telescope faces Calyx
 and its rings, which end about **10,256 km before Halo's nearest surface**.
 Halo now orbits 29,920 km from Calyx's centre (25% farther out).
+The Amber horizon camera sits beneath an Earth-like atmosphere on Halo.
 Halo's circular orbit and matching rotation keep Calyx fixed in the sky,
 without camera tracking. The observatory is two metres above the surface at
 35° N on the planet-facing hemisphere, with an initial 80° field of view.
@@ -67,7 +68,7 @@ All scene visibility and illumination are traced in a WGSL compute shader:
   rays and adds single-scattered light from finite stellar discs. Visibility
   rays account for the host horizon and eclipsing bodies. Earth and Calyx
   use an Earth-like 8.5 km scale height and 80 km atmosphere top; the Saturn
-  observatory and airless Halo omit atmospheric scattering. Integration
+  observatory omits atmospheric scattering. Halo (Amber horizon) uses Earth-like scattering. Integration
   uses 24 view steps and 12 light-path steps; it is an approximation, not a
   multiple-scattering volumetric path tracer. Surface lighting and secondary
   bounces still use vacuum transport. There is no refraction, artificial
@@ -84,7 +85,7 @@ distant planet, so a global percentile would expose for the starfield and
 leave the observed body black.
 
 Each frame adds fresh Monte Carlo samples to a linear HDR running average.
-The window title shows **samples per pixel (spp)**. Pause time and stop moving
+The window title shows **samples per pixel (spp)**. Stop time and stop moving
 for convergence; motion/time changes reset the average. HUD and label toggles
 preserve it. Resize, material, camera, or integrator changes invalidate it.
 At low sample counts, noise is expected, particularly in indirect lighting.
@@ -134,12 +135,12 @@ runtime. The second config contains the Sun, all eight planets and selected
 moons, with the camera on Earth looking at the Moon. Edit either file or
 create your own; changes take effect when selected from the menu or on the next launch without rebuilding.
 
-Click the house icon in the bottom bar, left of the Labels checkbox, to open the
+Click **[M]enu** in the bottom bar (or press M / Esc) to open the
 solar-system menu. It lists every `.yaml` and `.yml` file in `configs`, using
 the system name and filename, and refreshes each time you open it. Click a
-system to load its scene and camera. Use Previous/Next or the mouse wheel to
+system (or its shown number key) to load its scene and camera. Use Page Up/Page Down or the mouse wheel to
 browse longer lists. Time is suspended while the menu is open; press Escape
-or click the house again to resume your current view. The house remains
+or click Resume to return to your current view. The menu button remains
 available when the HUD is hidden. Invalid configs show an error in the menu.
 `STARGAZE_CONFIG=/path/to/system.yaml` also selects a file; an explicit
 `--config` takes precedence. `--check-config` validates without a display or GPU.
@@ -184,18 +185,18 @@ parent's tilted equator where appropriate. The Earth observatory remains
 available with `STARGAZE_SYSTEM=earth`, with its atmosphere enabled.
 
 The shortcuts below describe the Saturn observatory. In the Earth preset,
-key `7` aims at Saturn (body index `8`).
+key `F7` aims at Saturn (body index `8`).
 
 | Key | Target | `STARGAZE_AIM` body index |
 | --- | --- | --- |
-| `1` | Moon | `2` |
+| `F1` | Moon | `F2` |
 | `2` | Sun | `0` |
-| `3` | Mercury | `5` |
-| `4` | Venus | `6` |
+| `F3` | Mercury | `F5` |
+| `F4` | Venus | `F6` |
 | `5` | Mars | `3` |
-| `6` | Jupiter | `7` |
+| `6` | Jupiter | `F7` |
 | `7` | S/2009 S 1 (inner rings) | `19` |
-| `8` | Uranus | `9` |
+| `F8` | Uranus | `F9` |
 | `9` | Neptune | `10` |
 
 For example, `STARGAZE_SYSTEM=solar STARGAZE_AIM=7 cargo run --release`
@@ -241,17 +242,19 @@ sequence is deterministic for a given pixel and sample index.
 
 | Input | Action |
 | --- | --- |
-| Home icon (left of Labels) | open solar-system menu; click again to resume |
+| Menu / `M` / `Esc` | open the menu or resume the current view |
 | left-drag (sky) | look around |
-| left-click (body) | lock the telescope onto that body; click empty sky or start a drag to release |
+| right-click (sky) | track the clicked body, or hold a fixed direction against the background stars |
+| left-click (sky) | release the view lock |
+| Lock indicator / `U` | show the target and release the lock |
+| Stars / `S` | toggle compensation for star-field rotation; keep the locked target centered |
 | scroll / `=` / `-` | zoom, down to 0.001° |
-| `-1d` `-1h` `-1m` `+1m` `+1h` `+1d` (bar) | step simulation time |
 | Labels toggle (bar) | show / hide names |
-| Exposure slider (right of time buttons) | brightness compensation, −8 to +8 EV in quarter stops, in either mode |
+| Exposure slider (right of playback controls) | brightness compensation, −8 to +8 EV in quarter stops, in either mode |
 | Auto checkbox (bar) | enable / disable automatic exposure metering |
-| space | play / pause; pause to accumulate a clean image |
-| `[` `]` | slower / faster time |
-| `1`–`9` | aim at scene targets (`9` is solar-only) |
+| Stop / Space | set playback speed to 0; pressing again leaves it at 0 |
+| Left / Right arrow (bar) | decrease / increase signed speed through negative values, 0, and positive values |
+| `F1`–`F9` | aim at scene targets (`F9` is solar-only) |
 | `E` | search up to ten model years for a visible eclipse |
 | `T` | search for a moon transit (e.g. Phobos/Mars or Io/Jupiter) |
 | `R` | reset view |
@@ -259,12 +262,25 @@ sequence is deterministic for a given pixel and sample index.
 | `A` | toggle automatic exposure metering (on by default) |
 | `H` | show / hide HUD |
 | `L` | toggle labels |
-| esc | close menu, or quit while observing |
+| Menu: `1`–`9`, `PgUp` / `PgDn` | load a displayed map / change pages |
 
-Clicking a body locks the view to it: as simulation time advances the
-telescope keeps pointing at that body, so it stays framed while its phase and
-position change. The locked body's label is bracketed in the sky. Clicking
-empty sky, dragging, aiming with a number key, or resetting releases the lock.
+Right-clicking a body locks the telescope onto it as time advances. Right-clicking
+empty sky holds the clicked direction fixed against the background stars,
+compensating for the observer's rotation. The selected target is centred without
+changing zoom. The ground is not a lock target.
+
+The bottom bar shows **Locked [U]** with the target name when labels are visible. With labels
+hidden, including in game mode, it shows **Star**, **Planet / moon**, or
+**Background sky** instead. The lock indicator remains available when the HUD
+is hidden. Left-clicking the observation view or the lock indicator releases it.
+Menus, playback controls, exposure controls, and the diagram preserve the lock.
+Aiming with a target shortcut, resetting, or loading a different system releases it.
+
+**[S]tars** holds the camera's roll against the orientation captured when enabled.
+It compensates for the observer's spin without changing the locked target, position,
+or zoom. When tracking a planet, the stars can translate as the view follows it;
+the camera transports its orientation without adding roll. Turning the toggle off
+restores the usual surface-relative orientation.
 
 Startup helpers (body indices depend on the selected system):
 
@@ -284,11 +300,11 @@ STARGAZE_DEBUG=1 cargo run
 ./scripts/vantus-eclipse.sh
 ```
 
-Starts paused at **day 444.478**, aimed tightly at **Vantus** from Calyx, about
+Starts at speed 0 on **day 444.478**, aimed tightly at **Vantus** from Calyx, about
 **2.72 AU (407 million km)** away. Its moon **Iri** casts a visible shadow by
 blocking **Aur**; the second star still illuminates the shadowed surface.
-Leave the view stationary to converge, or step time with the HUD's minute
-buttons. The launcher fixes the time, target and field of view without changing
+Leave the view stationary to converge, or use the HUD's signed playback speed
+controls. The launcher fixes the time, target and field of view without changing
 the ordinary startup defaults.
 
 ## Implementation
@@ -352,3 +368,75 @@ extreme exposure presentation, solar-system scales and rotation,
 all seven planets observable from Earth, resize, presentation, and all
 observatory presets (including Halo facing ringed Calyx, Saturn at 20° N,
 and the Vantus eclipse).
+
+## Reconstruction game (v0)
+
+```sh
+cargo run --release -- --game
+# Play any existing system as an anonymous puzzle:
+cargo run --release -- --game --config configs/halo.yaml
+```
+
+The default game loads a small fictional system from `configs/puzzle.yaml`.
+Observe the sky, infer the orbital hierarchy, and identify which object you
+are standing on. Body labels, named tracking titles, function-key targets, and
+automatic eclipse/transit searches are unavailable in this mode. Ordinary observatory mode retains those shortcuts.
+
+Game mode starts in the map menu. The drawing toolbar shares the observing
+toolbar's panel, centered buttons, and vertical group separators, with Menu and
+Observe on the left.
+
+- **[M]enu** opens the map selector from the sky or diagram. **Resume [Esc]** or **M**
+  returns without changing the theory or telescope lock. Selecting a different
+  map starts a fresh puzzle; progress is kept in memory, not saved across restarts.
+  Failed loads preserve the current puzzle. Map names remain anonymous.
+- Vertical separators divide the bottom bar into **[M]enu / Draw [Tab]**, **Time**,
+  camera (lock and **[S]tars**), and exposure groups. Exposure is last; its readout
+  and slider turn gray while Auto is selected. Compensation remains adjustable.
+  The **← / →** time buttons match the Left / Right arrow keys; **Stop [Spc]** stays alongside them.
+  **Left / Right arrow** decreases/increases signed playback speed. Negative values
+  run backward, positive values run forward, and **0** stops time. **Stop [Space]**
+  sets speed to 0; it does not toggle or restore a previous speed. From zero, press
+  Right to move forward or Left to move backward. The speed (min/s) and minute counter
+  are shown alongside the controls.
+  Drag the sky to look, scroll to zoom, and right-click a body to track it anonymously.
+  Right-click empty sky to hold its direction; left-click the sky or press **U** to unlock.
+  **[S]tars** compensates for rotation while preserving the locked target.
+- **Draw [Tab]** in the bottom bar opens the full-page diagram and suspends time.
+  **Observe [Tab]** returns to the sky; **Esc** opens the menu.
+- Select a parent, then **right-click empty canvas** to add an orbiting object.
+  **N** adds at the cursor as a keyboard alternative. The new object becomes selected,
+  so select its parent again to add another sibling.
+- Drag objects to set orbit order. The number inside each object is its rank among
+  siblings: **1** is innermost. A planet and its first moon can both display **1**.
+  The center is marked **C**. Distances retain their proportions on resize.
+- **Star [S]** and **Has rings [R]** toggle the selected object's traits. Stars have
+  gold rays; rings are drawn as an oval. These are guesses, not revealed information.
+- Dashed circles show orbits, and connecting lines show parent-child relationships.
+  The center may represent a body or an invisible shared barycenter.
+- **Viewer here [V]** places the observer on the selected planet or moon.
+- **Delete [Del]** removes the selected branch. **Undo [Z]** and **Redo [Y]** restore
+  edits, including whole drags, traits, viewer placement, and branch deletion.
+- **Clear all [X]** opens a confirmation. **Enter** clears the theory; **Esc** cancels.
+  Clearing is also undoable. The center remains as the starting point for a new theory.
+- **Check [Enter]** scores the theory without revealing the solution.
+
+Ordered structure contributes 60 points, star/ring traits contribute 20, and
+viewer placement contributes 20. Starting at the root, each child is matched to
+the child at the same inner-to-outer rank; this repeats for every parent. Missing
+or extra objects and misplaced satellite families reduce structural credit.
+Trait credit counts correct star and ring flags at matched positions, with
+missing or extra nodes also losing credit. Viewer credit requires the same
+complete sequence of orbital ranks from the root: standing on the first moon
+is different from standing on the third, even if those moons have no satellites.
+
+Names, physical radii, and exact orbital distances are not scored. Diagram
+distances determine the relative ordering; absolute map scale does not matter. Orbital **order** is scored, using semi-major axes from the scene;
+equal-sized orbits retain their configuration order. Invisible barycentres
+count as nodes and should have Star and Has rings turned off.
+
+V0 supports 64 diagram nodes and keeps the current theory in memory only; closing
+the application discards it. The observer remains on the configured surface.
+This is an inference prototype: an arbitrary loaded system may contain objects
+that are difficult to discover, and a finite observation cannot always distinguish
+all physically possible systems. Scores compare against the configured hierarchy.

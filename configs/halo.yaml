@@ -1,7 +1,7 @@
 # Stargaze system format v1. Distances and angles use explicit units.
 # Omit time_days to search for a suitable night view; set it for an exact epoch.
 # Orbit angles are measured in the shared ecliptic frame, including moon orbits.
-# Halo: 29,919.574 km from Calyx, synchronous rotation, airless near-side camera.
+# Halo: 29,919.574 km from Calyx, synchronous rotation, near-side camera with Earth-like atmospheric scattering.
 # Calyx rings end at 18,164 km; clearance to Halo's near surface is 10,255.574 km.
 version: 1
 name: Calyx and Halo
@@ -12,6 +12,7 @@ camera:
   height_m: 2.0
   look_at: calyx
   fov_deg: 80.0
+  atmosphere: earthlike
 targets:
   - calyx
   - aur

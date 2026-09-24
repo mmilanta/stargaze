@@ -1,6 +1,6 @@
 //! The telescope: an observer anchored to a point on a planet's surface.
 
-use glam::DVec3;
+use glam::{DQuat, DVec3};
 
 use crate::sim::Scene;
 
@@ -17,6 +17,8 @@ pub struct Observer {
     /// Vertical field of view (rad).
     pub fov_y: f64,
     pub height_m: f64,
+    /// Inertial reference orientation; transport without roll as the aim changes.
+    pub star_orientation: Option<(DVec3, DVec3)>,
 }
 
 impl Observer {
@@ -24,6 +26,7 @@ impl Observer {
         Self {
             body,
             height_m: 2.0,
+            star_orientation: None,
             lat: 35.0_f64.to_radians(),
             lon: 0.0,
             az: 0.0,
@@ -85,8 +88,18 @@ impl Observer {
         let forward = (calt * (caz * north + saz * east) + salt * zenith).normalize();
         // Derive right from azimuth, not forward × zenith: a tracked body
         // can pass through the zenith, where that cross product vanishes.
-        let right = (caz * east - saz * north).normalize();
-        let up = right.cross(forward);
+        let mut right = (caz * east - saz * north).normalize();
+        let mut up = right.cross(forward);
+        if let Some((reference_forward, reference_up)) = self.star_orientation {
+            let rotation = if reference_forward.dot(forward) < -1.0 + 1.0e-10 {
+                DQuat::from_axis_angle(reference_up, std::f64::consts::PI)
+            } else {
+                DQuat::from_rotation_arc(reference_forward, forward)
+            };
+            let transported_up = rotation * reference_up;
+            right = forward.cross(transported_up).normalize();
+            up = right.cross(forward).normalize();
+        }
 
         // `sun_altitude` refers to the primary (first) star; used only for "is
         // it day" heuristics in the aiming and event searches.
