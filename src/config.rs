@@ -31,6 +31,14 @@ struct Camera {
     fov_deg: f64,
     #[serde(default)]
     atmosphere: Option<AtmosphereDef>,
+    #[serde(default)]
+    direction: Option<Direction>,
+}
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
+struct Direction {
+    azimuth_deg: f64,
+    altitude_deg: f64,
 }
 fn camera_height() -> f64 {
     2.0
@@ -39,6 +47,7 @@ fn camera_height() -> f64 {
 #[serde(rename_all = "snake_case")]
 enum AtmosphereDef {
     Earthlike,
+    Dense,
 }
 #[derive(Clone, Copy, Deserialize)]
 #[serde(rename_all = "snake_case")]
@@ -271,13 +280,28 @@ impl System {
             c.fov_deg.is_finite() && (0.001..=90.0).contains(&c.fov_deg),
             "camera.fov_deg must be in [0.001, 90]"
         );
+        if let Some(direction) = &c.direction {
+            ensure!(
+                direction.azimuth_deg.is_finite() && (0.0..360.0).contains(&direction.azimuth_deg),
+                "camera.direction.azimuth_deg must be in [0, 360)"
+            );
+            ensure!(
+                direction.altitude_deg.is_finite()
+                    && (-90.0..=90.0).contains(&direction.altitude_deg),
+                "camera.direction.altitude_deg must be in [-90, 90]"
+            );
+        }
         Ok(Scene {
             bodies,
             host,
             default_target,
             targets,
-            atmosphere: c.atmosphere.map(|_| Atmosphere::earthlike()),
+            atmosphere: c.atmosphere.map(|preset| match preset {
+                AtmosphereDef::Earthlike => Atmosphere::earthlike(),
+                AtmosphereDef::Dense => Atmosphere::dense(),
+            }),
             default_fov_deg: c.fov_deg,
+            initial_direction_deg: c.direction.map(|d| [d.azimuth_deg, d.altitude_deg]),
             observer_lat_deg: c.latitude_deg,
             observer_lon_deg: c.longitude_deg,
             observer_height_m: c.height_m,
@@ -492,6 +516,59 @@ mod tests {
                 > 10_000.0
         );
     }
+    #[test]
+    fn bundled_levels_have_atmospheres_and_airless_configs_still_load() {
+        for yaml in [
+            HALO,
+            SOLAR,
+            include_str!("../configs/puzzle.yaml"),
+            include_str!("../configs/median-resonance.yaml"),
+            include_str!("../configs/vesper.yaml"),
+        ] {
+            assert!(parse(yaml).unwrap().atmosphere.is_some());
+        }
+        let dense = parse(include_str!("../configs/median-resonance.yaml"))
+            .unwrap()
+            .atmosphere
+            .unwrap();
+        assert!(dense.mie > Atmosphere::earthlike().mie);
+        let airless = HALO.replace("  atmosphere: earthlike\n", "");
+        assert!(parse(&airless).unwrap().atmosphere.is_none());
+        assert!(parse(&HALO.replace("earthlike", "unknown")).is_err());
+    }
+    #[test]
+    fn validates_optional_camera_direction() {
+        assert!(parse(HALO).unwrap().initial_direction_deg.is_none());
+        assert_eq!(
+            parse(include_str!("../configs/vesper.yaml"))
+                .unwrap()
+                .initial_direction_deg,
+            Some([0.0, 25.0])
+        );
+        for azimuth in [-1.0, 360.0, f64::NAN] {
+            rejected(
+                |s| {
+                    s.camera.direction = Some(Direction {
+                        azimuth_deg: azimuth,
+                        altitude_deg: 25.0,
+                    })
+                },
+                "direction.azimuth_deg",
+            );
+        }
+        for altitude in [-91.0, 91.0, f64::INFINITY] {
+            rejected(
+                |s| {
+                    s.camera.direction = Some(Direction {
+                        azimuth_deg: 0.0,
+                        altitude_deg: altitude,
+                    })
+                },
+                "direction.altitude_deg",
+            );
+        }
+    }
+
     #[test]
     fn rejects_bad_structure_and_references() {
         rejected(|s| s.version = 2, "unsupported version");

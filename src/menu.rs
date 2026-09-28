@@ -19,6 +19,7 @@ impl Entry {
             Some("halo") => "Amber horizon".into(),
             Some("median-resonance") => "Clockwork sky".into(),
             Some("solar-system") => "Distant lights".into(),
+            Some("vesper") => "Bright wanderers".into(),
             _ => format!("Uncharted map {:02}", index + 1),
         }
     }

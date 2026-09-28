@@ -59,19 +59,31 @@ All scene visibility and illumination are traced in a WGSL compute shader:
   every intervening ring without ever passing through an opaque sphere.
 - **Background stars:** fixed angular emissive discs at infinity, intersected
   by miss-ray directions. A conservative spherical grid accelerates catalogue
-  lookup. There is no artificial Sun-altitude fade or minimum pixel size.
+  lookup. Scattered sky light smoothly suppresses the decorative catalogue
+  in daylight and restores it as the sky darkens, including during eclipses.
+  There is no minimum pixel size.
   Camera-visible stars are capped to a three-pixel-radius dot in the tangent
   projection. The procedural catalogue is a visual backdrop and does not
   illuminate surfaces, avoiding bright random speckles on dark ground. Finite
   scene stars, planets, moons and rings retain their light transport.
 - **Host atmosphere:** an exponential Rayleigh + Mie shell attenuates camera
-  rays and adds single-scattered light from finite stellar discs. Visibility
-  rays account for the host horizon and eclipsing bodies. Earth and Calyx
-  use an Earth-like 8.5 km scale height and 80 km atmosphere top; the Saturn
-  observatory omits atmospheric scattering. Halo (Amber horizon) uses Earth-like scattering. Integration
-  uses 24 view steps and 12 light-path steps; it is an approximation, not a
-  multiple-scattering volumetric path tracer. Surface lighting and secondary
-  bounces still use vacuum transport. There is no refraction, artificial
+  rays and adds single-scattered light from finite stellar discs and sunlight
+  reflected by other planets and moons. Reflected haze follows each body's
+  apparent size, surface color, illuminated phase, and eclipses. Visibility
+  rays account for the host horizon, intervening bodies, and ring shadows on
+  both legs of the reflected path. All bundled levels
+  have atmospheres with an 8.5 km scale height and 80 km top. Earth, Calyx,
+  Halo, the puzzle lookout, and the legacy Saturn observatory use Earth-like
+  scattering. Median's Cadence observatory uses the `dense` preset, with
+  three times the scattering coefficients and a daylight sky that hides
+  background stars. Integration uses 24 view steps and 12 light-path steps.
+  One external reflecting body is sampled per camera path, weighted by its
+  apparent size and albedo; its visible surface is sampled at each view step.
+  This models one surface reflection followed by one atmospheric scattering,
+  not multiple scattering. Ground and rings do not illuminate the air.
+  Surface lighting and secondary bounces still use vacuum transport.
+  The haze produces a soft glow, without droplet corona rings or ice-crystal
+  halos. There is no refraction, artificial
   ambient light, or red lunar-eclipse glow. `Scene::atmosphere = None` disables
   the shell. Surfaces retain energy-conserving procedural diffuse albedos.
 
@@ -135,6 +147,19 @@ runtime. The second config contains the Sun, all eight planets and selected
 moons, with the camera on Earth looking at the Moon. Edit either file or
 create your own; changes take effect when selected from the menu or on the next launch without rebuilding.
 
+`configs/vesper.yaml` adds **Vesper and the bright wanderers**: a surface
+observatory under an Earth-like atmosphere, with two moons in a 2:1 orbital
+resonance (5 and 10 days). The inner rocky planet Cinder has a moon one
+quarter its diameter; the outer planet Aureole has three moons and compact
+rings. Its authored night view keeps both planets above the horizon, with
+bright reflected surfaces that outshine the background star dots when resolved.
+The camera starts with a wide, 60° view of open sky, pointing north at 25°
+altitude, so the planets must be found by observing. Reset returns to this view.
+Select it in the menu or run `cargo run --release -- --config configs/vesper.yaml`.
+In game mode, select **Bright wanderers**, or launch it directly with
+`cargo run --release -- --game --config configs/vesper.yaml` and choose Resume.
+Outside game mode, F1 and F2 target Aureole and Cinder; F3 and F4 target Vesper's moons.
+
 Click **[M]enu** in the bottom bar (or press M / Esc) to open the
 solar-system menu. It lists every `.yaml` and `.yml` file in `configs`, using
 the system name and filename, and refreshes each time you open it. Click a
@@ -170,8 +195,8 @@ STARGAZE_SYSTEM=solar cargo run --release
 Starts on **Saturn at 20° N, longitude 0°**, looking toward the inner B ring.
 The camera follows Saturn's rotation and stays two metres above the modeled
 spherical surface. Saturn's gaseous atmosphere and cloud layers are not yet
-modeled; this view uses the existing spherical surface without the Earth-like
-atmospheric shell.
+modeled; this view uses the existing spherical surface with an illustrative
+Earth-like atmospheric shell.
 
 The initial aiming target is **S/2009 S 1**, the small moonlet inside the B
 ring, approximately 117,000 km from Saturn's centre. Its 150 m radius,
@@ -253,6 +278,7 @@ sequence is deterministic for a given pixel and sample index.
 | Exposure slider (right of playback controls) | brightness compensation, −8 to +8 EV in quarter stops, in either mode |
 | Auto checkbox (bar) | enable / disable automatic exposure metering |
 | Stop / Space | set playback speed to 0; pressing again leaves it at 0 |
+| −1 day / Page Down; +1 day / Page Up | jump backward / forward by one local solar day, preserving speed and tracking |
 | Left / Right arrow (bar) | decrease / increase signed speed through negative values, 0, and positive values |
 | `F1`–`F9` | aim at scene targets (`F9` is solar-only) |
 | `E` | search up to ten model years for a visible eclipse |
@@ -263,6 +289,18 @@ sequence is deterministic for a given pixel and sample index.
 | `H` | show / hide HUD |
 | `L` | toggle labels |
 | Menu: `1`–`9`, `PgUp` / `PgDn` | load a displayed map / change pages |
+
+**−1 day / +1 day** follows a full revolution of the system center in the
+observer's rotating sky (local solar hour angle). The center is the root
+star, or the central anchor of a binary system. The jump accounts for spin,
+orbital motion, axial tilt, and eccentricity; it is not a fixed 1,440 minutes.
+For example, a day on Vesper is about 1,444.63 minutes. Playback speed and
+target tracking stay unchanged, and backward jumps can pass day zero.
+If no full revolution is found, the clock shows **No day found** and time
+stays unchanged. This includes worlds permanently locked toward the root;
+the search is bounded to 512 of the shortest resolved spin/orbit cycles.
+Page Down / Page Up perform these jumps while observing, once per key press.
+In the map menu they continue to turn pages.
 
 Right-clicking a body locks the telescope onto it as time advances. Right-clicking
 empty sky holds the clicked direction fixed against the background stars,

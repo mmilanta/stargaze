@@ -380,6 +380,14 @@ fn gpu_scene_smoke() {
         ("saturn-surface", crate::sim::saturn_scene()),
         ("binary", crate::sim::binary_scene()),
         ("halo", crate::sim::halo_scene()),
+        (
+            "puzzle",
+            crate::config::parse(include_str!("../configs/puzzle.yaml")).unwrap(),
+        ),
+        (
+            "median",
+            crate::config::parse(include_str!("../configs/median-resonance.yaml")).unwrap(),
+        ),
         ("horizon", crate::sim::binary_scene()),
         ("vantus", crate::sim::binary_scene()),
         ("vantus_eclipse", crate::sim::binary_scene()),
@@ -634,6 +642,240 @@ fn gpu_atmosphere() {
         sample(&device, &queue, &mut tracer, &scene, 1)[0],
         [0.0, 0.0, 0.0, 1.0]
     );
+
+    // Dense haze must hide even the brightest catalogue dots during the day,
+    // while keeping them visible at night and when an eclipse shadows the air.
+    let dense = crate::sim::Atmosphere::dense();
+    scene.globals.atmo_rayleigh = [
+        dense.rayleigh[0] as f32,
+        dense.rayleigh[1] as f32,
+        dense.rayleigh[2] as f32,
+        dense.mie as f32,
+    ];
+    let mut with_stars = PathTracer::new(
+        &device,
+        wgpu::TextureFormat::Rgba8UnormSrgb,
+        (1, 1),
+        &[CatalogueStar {
+            bright: 1.62,
+            ..background
+        }],
+        options,
+    );
+    let night = sample(&device, &queue, &mut with_stars, &scene, 4)[0];
+    assert!(night[0] > 0.1, "night stars must remain visible: {night:?}");
+    // Similar irradiance to Lumen at Median: luminosity 8 at about 6 AU.
+    scene.bodies[1] = body([1.0, 0.0, -1.0], 0.005, [44_444.0; 3], true);
+    let sky = sample(&device, &queue, &mut tracer, &scene, 4)[0];
+    let day_stars = sample(&device, &queue, &mut with_stars, &scene, 4)[0];
+    eprintln!("dense atmosphere: night {night:?}, day sky {sky:?}, day stars {day_stars:?}");
+    for c in 0..3 {
+        assert!(
+            (day_stars[c] - sky[c]).abs() < 0.001,
+            "daytime catalogue should disappear: {day_stars:?} vs {sky:?}"
+        );
+    }
+    scene
+        .bodies
+        .push(body([0.5, 0.0, -0.5], 0.05, [0.0; 3], false));
+    let eclipse = sample(&device, &queue, &mut with_stars, &scene, 4)[0];
+    for c in 0..3 {
+        assert!(
+            (eclipse[c] - night[c]).abs() < 0.001,
+            "eclipse should restore star visibility: {eclipse:?} vs {night:?}"
+        );
+    }
+}
+
+#[test]
+#[ignore = "requires a GPU"]
+fn gpu_reflected_atmosphere() {
+    let (device, queue) = gpu();
+    let mut tracer = PathTracer::new(
+        &device,
+        wgpu::TextureFormat::Rgba8UnormSrgb,
+        (1, 1),
+        &[],
+        Options {
+            samples_per_frame: 64,
+            max_bounces: 1,
+            ..Options::default()
+        },
+    );
+    let mut scene = frame();
+    let a = crate::sim::Atmosphere::earthlike();
+    let radius = (6_371.0 / crate::sim::AU_KM) as f32;
+    let center = [0.0, 0.0, radius + (0.002 / crate::sim::AU_KM) as f32];
+    scene.globals.atmo_center = [center[0], center[1], center[2], radius];
+    scene.globals.atmo_rayleigh = [
+        a.rayleigh[0] as f32,
+        a.rayleigh[1] as f32,
+        a.rayleigh[2] as f32,
+        a.mie as f32,
+    ];
+    scene.globals.atmo_params = [
+        a.mie_g as f32,
+        a.scale_height as f32,
+        a.thickness as f32,
+        1.0,
+    ];
+    // A large moon lies just outside the zenith ray. The sun is below the
+    // host's horizon, but illuminates the moon without a lunar eclipse.
+    scene.bodies = vec![
+        body(center, radius, [0.0; 3], false),
+        body([0.0004, 0.0, -0.002], 0.00015, [0.8; 3], false),
+        body([0.3, 0.0, 1.0], 0.005, [100_000.0; 3], true),
+    ];
+    let glow = |scene: &mut Frame, tracer: &mut PathTracer| {
+        let color = scene.bodies[1].color;
+        scene.bodies[1].color = [0.0; 3];
+        let background = sample(&device, &queue, tracer, scene, 32)[0];
+        scene.bodies[1].color = color;
+        let lit = sample(&device, &queue, tracer, scene, 32)[0];
+        std::array::from_fn::<_, 3, _>(|c| lit[c] - background[c])
+    };
+    let full = glow(&mut scene, &mut tracer);
+    eprintln!("reflected atmosphere full: {full:?}");
+    assert!(
+        full.iter().all(|v| v.is_finite() && *v > 1e-4),
+        "moon must illuminate nearby air"
+    );
+
+    scene.bodies[1].color = [0.4, 0.2, 0.1];
+    let tinted = glow(&mut scene, &mut tracer);
+    for c in 0..3 {
+        let expected = full[c] * [0.5, 0.25, 0.125][c];
+        assert!(
+            (tinted[c] - expected).abs() < expected * 0.02,
+            "albedo and tint: {tinted:?}"
+        );
+    }
+    scene.bodies[1].color = [0.8; 3];
+    scene.bodies[1].radius *= 0.5;
+    let small = glow(&mut scene, &mut tracer);
+    assert!(
+        small[0] > full[0] * 0.15 && small[0] < full[0] * 0.35,
+        "smaller apparent disc must give less glow: {small:?} vs {full:?}"
+    );
+    scene.bodies[1].radius *= 2.0;
+
+    scene.bodies[2].center = [1.0, 0.0, 0.0];
+    let quarter = glow(&mut scene, &mut tracer);
+    scene.bodies[2].center = [-0.3, 0.0, -1.0];
+    let new = glow(&mut scene, &mut tracer);
+    eprintln!("quarter: {quarter:?}, new: {new:?}");
+    assert!(quarter[0] > full[0] * 0.1 && quarter[0] < full[0] * 0.6);
+    assert!(new[0].abs() < full[0] * 0.02, "unlit face must not glow");
+
+    scene.bodies[2].center = [0.3, 0.0, 1.0];
+    // Block starlight on its way to the moon, leaving the moon visible.
+    scene
+        .bodies
+        .push(body([0.1502, 0.0, 0.499], 0.01, [0.0; 3], false));
+    let eclipsed = glow(&mut scene, &mut tracer);
+    assert!(
+        eclipsed.iter().all(|v| v.abs() < 1e-6),
+        "eclipsed moon: {eclipsed:?}"
+    );
+    scene.bodies.pop();
+    // Block moonlight on its way to the air, leaving the moon sunlit.
+    scene
+        .bodies
+        .push(body([0.0002, 0.0, -0.001], 0.00012, [0.0; 3], false));
+    let hidden = glow(&mut scene, &mut tracer);
+    assert!(
+        hidden.iter().all(|v| v.abs() < 1e-6),
+        "occluded moon: {hidden:?}"
+    );
+    scene.bodies.pop();
+    scene.globals.atmo_params[3] = 0.0;
+    let airless = glow(&mut scene, &mut tracer);
+    assert!(
+        airless.iter().all(|v| v.abs() < 1e-6),
+        "airless view must have no aura"
+    );
+}
+
+#[test]
+#[ignore = "requires a GPU"]
+fn gpu_dense_level_daylight() {
+    let (device, queue) = gpu();
+    let scene = crate::config::parse(include_str!("../configs/median-resonance.yaml")).unwrap();
+    let mut state = crate::State::with_scene(scene);
+    let lumen = state
+        .scene
+        .bodies
+        .iter()
+        .position(|b| b.name == "Lumen")
+        .unwrap();
+    // Find local noon for the bright sun over one Cadence rotation.
+    let noon = (0..120)
+        .map(|step| {
+            let t = step as f64 * 0.01;
+            let positions = state.scene.positions(t);
+            let view = state.observer.frame(&state.scene, t, &positions);
+            (
+                t,
+                view.zenith
+                    .dot((positions[lumen] - view.position).normalize()),
+            )
+        })
+        .max_by(|a, b| a.1.total_cmp(&b.1))
+        .unwrap()
+        .0;
+    let options = Options {
+        samples_per_frame: 64,
+        max_bounces: 1,
+        ..Options::default()
+    };
+    let mut sky_tracer = PathTracer::new(
+        &device,
+        wgpu::TextureFormat::Rgba8UnormSrgb,
+        (1, 1),
+        &[],
+        options,
+    );
+    for (time, altitude, azimuth) in [
+        (noon, 90.0_f64, 0.0_f64),
+        (noon, 45.0, 0.0),
+        (noon, 45.0, 90.0),
+        (noon, 45.0, 180.0),
+        (noon, 45.0, 270.0),
+        (noon + 0.6, 90.0, 0.0),
+    ] {
+        state.sim_time = time;
+        state.observer.alt = altitude.to_radians();
+        state.observer.az = azimuth.to_radians();
+        state.observer.fov_y = 1e-7;
+        let frame = state.build_frame(1, 1);
+        let star = CatalogueStar {
+            dir: frame.globals.cam_forward[..3].try_into().unwrap(),
+            color: [1.0; 3],
+            bright: 1.62,
+            angular_radius: 0.01,
+        };
+        let mut star_tracer = PathTracer::new(
+            &device,
+            wgpu::TextureFormat::Rgba8UnormSrgb,
+            (1, 1),
+            &[star],
+            options,
+        );
+        let sky = sample(&device, &queue, &mut sky_tracer, &frame, 4)[0];
+        let stars = sample(&device, &queue, &mut star_tracer, &frame, 4)[0];
+        let contrast = (stars[0] - sky[0]).abs();
+        eprintln!(
+            "Median t={time:.2} alt={altitude} az={azimuth}: sky={sky:?}, star contrast={contrast}"
+        );
+        if time == noon {
+            assert!(
+                contrast < 0.001,
+                "daytime stars should disappear across the sky"
+            );
+        } else {
+            assert!(contrast > 0.1, "stars should return on the faint-sun side");
+        }
+    }
 }
 
 #[test]

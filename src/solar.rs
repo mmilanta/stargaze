@@ -99,8 +99,8 @@ pub fn saturn_observatory() -> Scene {
     let moon_index = scene.bodies.len();
     scene.bodies.push(moon);
     scene.host = saturn;
-    // Saturn's atmosphere is not modeled by the Earth-like scattering shell.
-    scene.atmosphere = None;
+    // Keep the shared Earth-like shell as an illustrative atmosphere here;
+    // Saturn's actual gas and cloud layers are not modeled.
     scene.default_target = moon_index;
     // Key 7 looks toward the inner rings instead of aiming into the host.
     scene.targets[6] = moon_index;

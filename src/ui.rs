@@ -77,6 +77,7 @@ pub struct HudState<'a> {
     pub labels: LabelOptions,
     pub lock_label: Option<&'a str>,
     pub sim_time: f64,
+    pub day_step_failed: bool,
     pub auto_exposure: bool,
     pub ev_bias: f32,
     pub steady_stars: bool,
@@ -94,6 +95,8 @@ pub struct Layout {
     pub orientation: Rect,
     pub draw: Rect,
     pub stop: Rect,
+    pub previous_day: Rect,
+    pub next_day: Rect,
     pub slower: Rect,
     pub faster: Rect,
     pub speed: Rect,
@@ -124,7 +127,7 @@ pub fn layout(w: f32, h: f32, scale: f32) -> Layout {
 }
 
 fn layout_mode(w: f32, h: f32, scale: f32, puzzle: bool) -> Layout {
-    let s = scale.min(w / 1316.0).min(h / 100.0);
+    let s = scale.min(w / 1552.0).min(h / 100.0);
     let bar = Rect {
         x: 0.0,
         y: h - 52.0 * s,
@@ -151,6 +154,8 @@ fn layout_mode(w: f32, h: f32, scale: f32, puzzle: bool) -> Layout {
     let speed = control(112.0, 0.0);
     let faster = control(34.0, 0.0);
     let stop = control(98.0, 0.0);
+    let previous_day = control(112.0, 0.0);
+    let next_day = control(112.0, 0.0);
     let clock = control(164.0, 0.0);
     let lock = control(122.0, 18.0);
     let orientation = control(84.0, 0.0);
@@ -164,6 +169,8 @@ fn layout_mode(w: f32, h: f32, scale: f32, puzzle: bool) -> Layout {
         toggle,
         draw,
         stop,
+        previous_day,
+        next_day,
         slower,
         speed,
         time_label,
@@ -639,6 +646,8 @@ fn build_bar(verts: &mut Vec<UiVertex>, layout: &Layout, w: f32, h: f32, state: 
     );
     button(verts, layout.slower, "←", false);
     button(verts, layout.faster, "→", false);
+    button(verts, layout.previous_day, "-1d [PgDn]", false);
+    button(verts, layout.next_day, "+1d [PgUp]", false);
     let speed_text = if state.minutes_per_second == 0.0 {
         "0 min/s".into()
     } else {
@@ -655,7 +664,11 @@ fn build_bar(verts: &mut Vec<UiVertex>, layout: &Layout, w: f32, h: f32, state: 
         [w, h],
     );
     let clock = layout.clock;
-    let time_text = format!("{:.1} min", sim_time * 1440.0);
+    let time_text = if state.day_step_failed {
+        "No day found".into()
+    } else {
+        format!("{:.1} min", sim_time * 1440.0)
+    };
     let clock_scale = ts.min((clock.w - 8.0 * s) / (time_text.len() as f32 * 8.0));
     push_text(
         verts,
@@ -780,11 +793,11 @@ mod tests {
             (l.toggle.y + l.toggle.h * 0.5) as f64,
         );
         assert!(l.toggle.contains(tc.0, tc.1));
-        for b in [l.stop, l.slower, l.faster] {
+        for b in [l.stop, l.slower, l.faster, l.previous_day, l.next_day] {
             assert!(!b.contains(tc.0, tc.1), "toggle must not overlap a button");
         }
 
-        for b in [l.stop, l.slower, l.faster] {
+        for b in [l.stop, l.slower, l.faster, l.previous_day, l.next_day] {
             let c = ((b.x + b.w * 0.5) as f64, (b.y + b.h * 0.5) as f64);
             assert!(b.contains(c.0, c.1));
             assert!(!l.toggle.contains(c.0, c.1));
@@ -792,7 +805,7 @@ mod tests {
         }
 
         // Buttons must not run into each other.
-        for pair in [l.slower, l.faster, l.stop].windows(2) {
+        for pair in [l.slower, l.faster, l.stop, l.previous_day, l.next_day].windows(2) {
             assert!(pair[0].right() <= pair[1].x);
         }
 
@@ -841,6 +854,8 @@ mod tests {
                     l.speed,
                     l.faster,
                     l.stop,
+                    l.previous_day,
+                    l.next_day,
                     l.clock,
                     l.lock,
                     l.orientation,
@@ -866,6 +881,7 @@ mod tests {
                             labels: LabelOptions::default(),
                             lock_label: Some(&"Long name ".repeat(20)),
                             sim_time: time,
+                            day_step_failed: time < 0.0,
                             auto_exposure: true,
                             ev_bias: MAX_EV,
                             steady_stars: true,

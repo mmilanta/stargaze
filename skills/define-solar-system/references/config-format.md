@@ -12,7 +12,7 @@ cargo run --release -- --check-config configs/halo.yaml
 
 `--check-config` exits with status 0 for a valid file and nonzero with a contextual error otherwise; it needs no window or GPU. `--config FILE` takes precedence over `STARGAZE_CONFIG`, which takes precedence over `STARGAZE_SYSTEM`. With none set, the application reads `configs/halo.yaml` from its build-time project directory. Edits take effect on the next launch, without recompilation. Arbitrary config paths may be absolute or relative to the current working directory.
 
-The bundled `halo.yaml` defines the fictional Aur/Igni binary with Calyx, rings, and the airless Halo observatory. `solar-system.yaml` defines the Sun, all eight planets and selected moons, with an Earth observatory looking at the Moon. Its fixed, approximate J2000 elements and illustrative moon phases are not a current ephemeris. Legacy `STARGAZE_SYSTEM=solar` still selects the Saturn surface view, `earth` selects the solar YAML, and `calyx` selects the historical planet-side binary view.
+The bundled `halo.yaml` defines the fictional Aur/Igni binary with Calyx, rings, and an Earth-like atmosphere on the Halo observatory. `solar-system.yaml` defines the Sun, all eight planets and selected moons, with an Earth observatory looking at the Moon. Its fixed, approximate J2000 elements and illustrative moon phases are not a current ephemeris. `puzzle.yaml` uses an Earth-like atmosphere; `median-resonance.yaml` uses dense haze on Cadence. Legacy `STARGAZE_SYSTEM=solar` still selects the Saturn surface view, `earth` selects the solar YAML, and `calyx` selects the historical planet-side binary view.
 
 ## Top level
 
@@ -37,13 +37,20 @@ Body ordering is arbitrary; the loader resolves parents before children and reje
 | `latitude_deg` | Required, −90 to +90 |
 | `longitude_deg` | Required, −180 to +180, increasing toward body-local east |
 | `height_m` | Optional, default `2`; must be at least `0.1` above the modeled sphere |
-| `look_at` | Required visible body ID, different from the host; sets initial pointing without enabling tracking |
+| `look_at` | Required visible body ID, different from the host; default target and initial pointing unless `direction` is supplied |
+| `direction` | Optional `{azimuth_deg: 0, altitude_deg: 25}` for a fixed initial sky direction; overrides pointing at `look_at` |
 | `fov_deg` | Required vertical FOV, 0.001–90 |
-| `atmosphere` | Optional `earthlike`; omission/null gives an airless view |
+| `atmosphere` | Optional `earthlike` or `dense`; omission/null gives an airless view |
 
-The atmosphere is only rendered around the camera host: an 8.5 km exponential scale height and 80 km top with Earth-like Rayleigh/Mie scattering. Custom atmospheres are not supported by version 1. The camera is attached to a spherical surface, including on gas giants; clouds and gas layers are not modeled.
+The atmosphere is only rendered around the camera host: an 8.5 km exponential scale height and 80 km top with Rayleigh/Mie scattering. `earthlike` uses Earth-like coefficients; `dense` triples both scattering coefficients for thicker haze. Scattered sky light suppresses the decorative background stars in daylight; stars return as the sky darkens. Finite system suns remain visible through physical atmospheric extinction. Custom coefficients are not supported by version 1. The camera is attached to a spherical surface, including on gas giants; clouds and gas layers are not modeled.
 
 A target may be below the horizon at `time_days`; the validator does not change explicit time. If omitted, startup searches for the target above the horizon and, unless aiming at a star, all stars below it, and falls back to day 0 if no suitable view is found. Click a body in the running app to track it. Exposure is controlled with the HUD slider (−8 to +8 EV in quarter stops) and Auto checkbox, immediately after the time buttons; exposure settings are not part of scene YAML.
+
+`direction.azimuth_deg` must be in [0, 360), measured eastward from north;
+`direction.altitude_deg` must be in [-90, 90], measured above the horizon.
+Both are required within `direction`. Reset restores this direction and the
+configured FOV at the current time. Omit `direction` to retain body-targeted
+startup. `STARGAZE_AIM` still overrides the initial pointing.
 
 ## Bodies
 

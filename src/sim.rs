@@ -170,6 +170,14 @@ pub struct Atmosphere {
 }
 
 impl Atmosphere {
+    /// A denser fictional atmosphere for a hazy observing level.
+    pub fn dense() -> Self {
+        let mut atmosphere = Self::earthlike();
+        atmosphere.rayleigh = atmosphere.rayleigh.map(|beta| beta * 3.0);
+        atmosphere.mie *= 3.0;
+        atmosphere
+    }
+
     /// Earth-like Rayleigh scattering plus a light forward-scattering haze.
     pub fn earthlike() -> Self {
         // Convert sea-level coefficients from 1/m to 1/AU.
@@ -196,6 +204,8 @@ pub struct Scene {
     pub default_target: usize,
     /// Field of view, in degrees, for the startup view.
     pub default_fov_deg: f64,
+    /// Optional fixed initial mount direction [azimuth, altitude], in degrees.
+    pub initial_direction_deg: Option<[f64; 2]>,
     /// Bodies the number keys jump to, in order.
     pub targets: Vec<usize>,
     /// Observatory latitude and longitude on the host body (degrees).
@@ -217,6 +227,81 @@ impl Scene {
 
     pub fn body(&self, index: usize) -> &Body {
         &self.bodies[index]
+    }
+
+    /// Longitude of the system root in the host's rotating equatorial frame.
+    /// The root is the central star or invisible binary-system anchor, not a
+    /// moon's immediate parent. Latitude does not affect this hour angle.
+    fn root_longitude(&self, t: f64) -> Option<f64> {
+        let mut position = DVec3::ZERO;
+        let mut index = self.host;
+        while let Some(parent) = self.bodies[index].parent {
+            position += self.bodies[index].relative_position(t);
+            index = parent;
+        }
+        let direction = self.body(self.host).spin_quat(t).conjugate() * -position;
+        if !direction.is_finite() || direction.x.hypot(direction.y) <= 1e-12 * direction.length() {
+            return None; // The root lies on the spin axis: no daily circuit.
+        }
+        Some(direction.y.atan2(direction.x))
+    }
+
+    /// Find the next/previous full circuit of the root in the local sky.
+    /// Unwrap longitude rather than looking for an equal azimuth, which could
+    /// select a partial libration. This includes eccentric orbits, tilted and
+    /// retrograde spins, and the host moon's motion about its planet.
+    pub fn step_local_day(&self, time: f64, forward: bool) -> Option<f64> {
+        use std::f64::consts::{PI, TAU};
+        let host = self.body(self.host);
+        let spin = if host.tidally_locked {
+            host.period_days
+        } else {
+            host.spin_period.abs()
+        };
+        let mut shortest = spin;
+        let mut index = self.host;
+        while let Some(parent) = self.bodies[index].parent {
+            let b = self.body(index);
+            // Resolve even the maximum angular speed at periapsis.
+            let fastest =
+                b.period_days * (1.0 - b.elements.e).powf(1.5) / (1.0 + b.elements.e).sqrt();
+            shortest = shortest.min(fastest);
+            index = parent;
+        }
+        let step = shortest / 64.0 * if forward { 1.0 } else { -1.0 };
+        if !time.is_finite() || !step.is_finite() || time + step == time {
+            return None;
+        }
+        let wrap = |angle: f64| (angle + PI).rem_euclid(TAU) - PI;
+        let mut previous_time = time;
+        let mut previous_angle = self.root_longitude(time)?;
+        let mut phase = 0.0;
+        // A synchronous world may never complete a circuit. Bound the search
+        // to 512 of the shortest resolved cycles rather than hanging the UI.
+        for i in 1..=32_768 {
+            let next_time = time + i as f64 * step;
+            let next_angle = self.root_longitude(next_time)?;
+            let next_phase = phase + wrap(next_angle - previous_angle);
+            if next_phase.abs() >= TAU {
+                let sign = next_phase.signum();
+                let mut lo = previous_time;
+                let mut hi = next_time;
+                for _ in 0..48 {
+                    let mid = lo + (hi - lo) * 0.5;
+                    let mid_phase = phase + wrap(self.root_longitude(mid)? - previous_angle);
+                    if mid_phase * sign < TAU {
+                        lo = mid;
+                    } else {
+                        hi = mid;
+                    }
+                }
+                return Some(lo + (hi - lo) * 0.5);
+            }
+            previous_time = next_time;
+            previous_angle = next_angle;
+            phase = next_phase;
+        }
+        None
     }
 
     pub fn star_indices(&self) -> Vec<usize> {
@@ -543,6 +628,7 @@ pub fn binary_scene() -> Scene {
         atmosphere: Some(Atmosphere::earthlike()),
         default_target: 6, // Halo
         default_fov_deg: 20.0,
+        initial_direction_deg: None,
         targets: vec![6, 1, 2, 7, 3, 8, 4, 9],
         observer_lat_deg: 35.0,
         observer_lon_deg: 0.0,
@@ -567,6 +653,66 @@ mod tests {
             .iter()
             .position(|b| b.name == name)
             .unwrap_or_else(|| panic!("no body named {name}"))
+    }
+
+    #[test]
+    fn local_day_includes_orbital_motion_and_retrograde_rotation() {
+        let mut scene = default_scene();
+        let host = &mut scene.bodies[scene.host];
+        host.obliquity = 0.0;
+        host.elements = Elements::circular(1.0, 0.0);
+        host.period_days = 365.0;
+        host.spin_period = 1.0;
+        for (spin, expected) in [(1.0, 365.0 / 364.0), (-1.0, 365.0 / 366.0)] {
+            scene.bodies[scene.host].spin_period = spin;
+            for start in [-12.0, 0.0, 1234.5] {
+                let next = scene.step_local_day(start, true).unwrap();
+                let previous = scene.step_local_day(start, false).unwrap();
+                assert!((next - start - expected).abs() < 1e-9);
+                assert!((start - previous - expected).abs() < 1e-9);
+                assert!((scene.step_local_day(next, false).unwrap() - start).abs() < 1e-9);
+            }
+        }
+        let vesper = crate::config::parse(include_str!("../configs/vesper.yaml")).unwrap();
+        let year = vesper.body(vesper.host).period_days;
+        assert!((vesper.step_local_day(0.0, true).unwrap() - year / (year - 1.0)).abs() < 1e-9);
+    }
+
+    #[test]
+    fn local_day_returns_root_longitude_on_tilted_eccentric_worlds_and_moons() {
+        for mut scene in [default_scene(), halo_scene()] {
+            if scene.body(scene.host).kind == BodyKind::Planet {
+                scene.bodies[scene.host].elements.e = 0.3;
+            }
+            for start in [0.0, 33.0, -17.0] {
+                let next = scene.step_local_day(start, true).unwrap();
+                let difference =
+                    scene.root_longitude(next).unwrap() - scene.root_longitude(start).unwrap();
+                assert!(difference.sin().abs() < 1e-9);
+                assert!(difference.cos() > 0.999999);
+                assert!((scene.step_local_day(next, false).unwrap() - start).abs() < 1e-8);
+                // Halo is locked to its parent but still has a solar day about
+                // the binary root. It must not be treated as permanent noon.
+                if scene.body(scene.host).kind == BodyKind::Moon {
+                    assert!((next - start - scene.body(scene.host).period_days).abs() < 0.05);
+                }
+            }
+        }
+    }
+
+    #[test]
+    fn local_day_handles_long_cycles_and_rejects_synchronous_libration() {
+        let mut scene = default_scene();
+        let host = &mut scene.bodies[scene.host];
+        host.obliquity = 0.0;
+        host.elements = Elements::circular(1.0, 0.0);
+        host.period_days = 2.01;
+        host.spin_period = 2.0;
+        assert!((scene.step_local_day(0.0, true).unwrap() - 402.0).abs() < 1e-7);
+        scene.bodies[scene.host].tidally_locked = true;
+        assert!(scene.step_local_day(0.0, true).is_none());
+        scene.bodies[scene.host].elements.e = 0.2;
+        assert!(scene.step_local_day(0.0, false).is_none());
     }
 
     #[test]

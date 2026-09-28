@@ -1,0 +1,148 @@
+# Fictional bright-neighbour observing level, viewed from a planet's surface.
+# Chime and Echo have a 2:1 mean-motion resonance: periods 5 and 10 days,
+# and axes in the Keplerian ratio 2^(2/3). No N-body stability is implied.
+# A luminous sun and reflective planets make their resolved night-time views
+# brighter than the decorative star field, without making planets emissive.
+# Day 0: Solis is below -23 degrees; Cinder and Aureole are both above the horizon.
+version: 1
+name: Vesper and the bright wanderers
+time_days: 0
+camera:
+  body: vesper
+  latitude_deg: 20
+  longitude_deg: 65
+  height_m: 2
+  look_at: aureole
+  # Begin with open sky; the planets must be found by observing.
+  direction: {azimuth_deg: 0, altitude_deg: 25}
+  fov_deg: 60
+  atmosphere: earthlike
+targets: [aureole, cinder, chime, echo, shard, mica, opal, flint, solis]
+bodies:
+  - id: solis
+    name: Solis
+    kind: star
+    radius_km: 1100000
+    luminosity: 6
+    emission: [1.0, 0.97, 0.92]
+    rotation: {mode: free, period_days: 18}
+
+  # Inner rocky world; Shard's radius (and diameter) is exactly 1/4 Cinder's.
+  - id: cinder
+    name: Cinder
+    kind: planet
+    parent: solis
+    radius_km: 9000
+    albedo: [0.72, 0.62, 0.48]
+    orbit:
+      semi_major_axis_au: 0.62
+      period_days: 178.313774
+      mean_anomaly_deg: 45
+    rotation: {mode: free, period_days: 1.7, obliquity_deg: 12}
+  - id: shard
+    name: Shard
+    kind: moon
+    parent: cinder
+    radius_km: 2250
+    albedo: [0.65, 0.67, 0.70]
+    orbit:
+      semi_major_axis_km: 120000
+      period_days: 3.2
+      inclination_deg: 8
+      ascending_node_deg: 30
+      mean_anomaly_deg: 155
+    rotation: {mode: tidal_lock}
+
+  # The observer's home planet and its two resonant moons.
+  - id: vesper
+    name: Vesper
+    kind: planet
+    parent: solis
+    radius_km: 7000
+    albedo: [0.23, 0.36, 0.48]
+    orbit:
+      semi_major_axis_au: 0.9
+      period_days: 311.861040
+    rotation: {mode: free, period_days: 1.0}
+  - id: chime
+    name: Chime
+    kind: moon
+    parent: vesper
+    radius_km: 1400
+    albedo: [0.45, 0.42, 0.36]
+    orbit:
+      semi_major_axis_km: 150000
+      period_days: 5
+      inclination_deg: 3
+      mean_anomaly_deg: 100
+    rotation: {mode: tidal_lock}
+  - id: echo
+    name: Echo
+    kind: moon
+    parent: vesper
+    radius_km: 1100
+    albedo: [0.38, 0.44, 0.52]
+    orbit:
+      semi_major_axis_km: 238110.157795
+      period_days: 10
+      inclination_deg: 3
+      mean_anomaly_deg: 35
+    rotation: {mode: tidal_lock}
+
+  # Compact rings: 64,960–81,200 km from the centre, well inside Mica's orbit.
+  - id: aureole
+    name: Aureole
+    kind: planet
+    parent: solis
+    radius_km: 56000
+    albedo: [0.85, 0.78, 0.62]
+    orbit:
+      semi_major_axis_au: 1.28
+      period_days: 528.947189
+      mean_anomaly_deg: 20
+    rotation: {mode: free, period_days: 0.55, obliquity_deg: 32}
+    rings:
+      inner_radius: 1.16
+      outer_radius: 1.45
+      optical_depth: 0.8
+      albedo: [0.87, 0.83, 0.73]
+      banded: true
+  - id: mica
+    name: Mica
+    kind: moon
+    parent: aureole
+    radius_km: 1800
+    albedo: [0.62, 0.59, 0.52]
+    orbit:
+      semi_major_axis_km: 160000
+      period_days: 1.4
+      inclination_deg: -32
+      ascending_node_deg: -90
+      mean_anomaly_deg: 65
+    rotation: {mode: tidal_lock}
+  - id: opal
+    name: Opal
+    kind: moon
+    parent: aureole
+    radius_km: 2700
+    albedo: [0.72, 0.78, 0.84]
+    orbit:
+      semi_major_axis_km: 300000
+      period_days: 3.594430
+      inclination_deg: -32
+      ascending_node_deg: -90
+      mean_anomaly_deg: 195
+    rotation: {mode: tidal_lock}
+  - id: flint
+    name: Flint
+    kind: moon
+    parent: aureole
+    radius_km: 2100
+    albedo: [0.57, 0.49, 0.41]
+    orbit:
+      semi_major_axis_km: 520000
+      period_days: 8.202629
+      inclination_deg: -32
+      ascending_node_deg: -90
+      mean_anomaly_deg: 310
+    rotation: {mode: tidal_lock}

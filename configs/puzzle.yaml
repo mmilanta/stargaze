@@ -9,6 +9,7 @@ camera:
   height_m: 2
   look_at: giant
   fov_deg: 35
+  atmosphere: earthlike
 targets: [giant, sun, inner, middle]
 bodies:
   - id: sun

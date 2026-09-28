@@ -10,7 +10,7 @@ struct Globals {
     // Host-atmosphere shell, in telescope space.
     atmo_center: vec4<f32>, // xyz = host centre, w = host radius
     atmo_rayleigh: vec4<f32>, // rgb = Rayleigh coefficients (1/AU), w = Mie
-    atmo_params: vec4<f32>, // x = Mie g, y = scale height (AU), z = top altitude, w = enabled
+    atmo_params: vec4<f32>, // x = Mie g, y = scale height (AU), z = top altitude, w = host index + 1 (0 off)
 };
 struct Settings {
     g: Globals,
@@ -313,6 +313,66 @@ fn mie_phase(cos_theta: f32, g: f32) -> f32 {
     return (1.0 - g2) / (4.0 * PI * pow(1.0 + g2 - 2.0 * g * cos_theta, 1.5));
 }
 
+struct ReflectorSample {
+    index: u32,
+    inverse_probability: f32,
+};
+
+// Select one external reflecting sphere per camera path, weighted by its
+// apparent solid angle and albedo. Reusing this choice along the air column
+// bounds the extra shadow-ray work independently of the number of planets.
+// The local ground and ring scattering are not atmospheric light sources.
+fn sample_reflector(origin: vec3<f32>, rng: ptr<function, u32>) -> ReflectorSample {
+    let ray = Ray(origin, vec3<f32>(0.0, 0.0, -1.0), MISS);
+    let host = u32(settings.g.atmo_params.w) - 1u;
+    var selected = MISS;
+    var selected_weight = 0.0;
+    var total = 0.0;
+    for (var b = 0u; b < settings.counts.x; b += 1u) {
+        let body = bodies[b];
+        if (b == host || body.material.w > 0.5) {
+            continue;
+        }
+        let weight = cone_width(ray, b) * max(body.material.r, max(body.material.g, body.material.b));
+        if (weight <= 0.0) {
+            continue;
+        }
+        total += weight;
+        if (random(rng) * total < weight) {
+            selected = b;
+            selected_weight = weight;
+        }
+    }
+    return ReflectorSample(selected, total / max(selected_weight, 1.0e-30));
+}
+
+// One stellar reflection at the sampled, observer-facing surface. The same
+// finite-star sampling and ring/sphere shadows as surface transport resolve
+// phases, eclipses, albedo and multiple suns without an independent glow gain.
+fn reflected_radiance(ray: Ray, index: u32, rng: ptr<function, u32>) -> vec3<f32> {
+    let hit = sphere_hit(ray, index);
+    if (hit.index == MISS) {
+        return vec3<f32>(0.0);
+    }
+    let body = bodies[index];
+    let albedo = surface_albedo(body, hit.normal);
+    var outgoing = Ray(hit.normal * (body.center.w * (1.0 + 2.0e-6)), hit.normal, index);
+    var radiance = vec3<f32>(0.0);
+    for (var s = 0u; s < settings.counts.x; s += 1u) {
+        if (bodies[s].material.w < 0.5) {
+            continue;
+        }
+        let light = sample_light(outgoing, s, rng);
+        let cosine = max(dot(hit.normal, light.direction), 0.0);
+        if (cosine > 0.0) {
+            outgoing.direction = light.direction;
+            radiance += albedo * bodies[s].material.rgb
+                * (cosine * light_visibility(outgoing, s) / (PI * light.pdf));
+        }
+    }
+    return radiance;
+}
+
 // Single scattering along a camera ray, up to `limit` (a surface hit) or the
 // top of the shell. Returns the view transmittance and the in-scattered light
 // accumulated in front of whatever the ray reaches.
@@ -332,6 +392,10 @@ fn atmosphere(origin: vec3<f32>, dir: vec3<f32>, limit: f32, rng: ptr<function, 
     let g = settings.g.atmo_params.x;
     let r = host_radius();
     let dt = t_max / f32(ATMO_VIEW_STEPS);
+
+    // Separate random stream keeps direct starlight sampling unchanged.
+    var reflected_rng = hash(*rng ^ 0xa511e9b3u);
+    let reflector = sample_reflector(origin, &reflected_rng);
 
     var t_view = vec3<f32>(1.0);
     var inscatter = vec3<f32>(0.0);
@@ -370,6 +434,21 @@ fn atmosphere(origin: vec3<f32>, dir: vec3<f32>, limit: f32, rng: ptr<function, 
                 + vec3<f32>(beta_m) * mie_phase(cos_theta, g);
             inscatter += t_view * segment * beta_phase * e_sun * sun_t;
         }
+        if (reflector.index != MISS) {
+            var reflected_ray = Ray(p, dir, MISS);
+            let light = sample_light(reflected_ray, reflector.index, &reflected_rng);
+            reflected_ray.direction = light.direction;
+            let visibility = light_visibility(reflected_ray, reflector.index);
+            if (visibility > 0.0) {
+                let incident = reflected_radiance(reflected_ray, reflector.index, &reflected_rng)
+                    * (visibility * reflector.inverse_probability / light.pdf);
+                let light_t = exp(-beta_ext * density_integral(p, light.direction, ATMO_SUN_STEPS));
+                let cos_theta = dot(dir, light.direction);
+                let beta_phase = beta_r * rayleigh_phase(cos_theta)
+                    + vec3<f32>(beta_m) * mie_phase(cos_theta, g);
+                inscatter += t_view * segment * beta_phase * incident * light_t;
+            }
+        }
         t_view *= step_t;
     }
     result.transmittance = t_view;
@@ -387,6 +466,7 @@ fn trace(initial: Ray, rng: ptr<function, u32>) -> vec3<f32> {
     var previous_vertex = initial;
     var depth = 0u;
     var camera_segment = true;
+    var catalogue_visibility = 1.0;
     var null_crossings = 0u;
     loop {
         let hit = closest_hit(ray);
@@ -405,6 +485,13 @@ fn trace(initial: Ray, rng: ptr<function, u32>) -> vec3<f32> {
             let atmo = atmosphere(ray.offset, ray.direction, limit, rng);
             radiance += throughput * atmo.inscatter;
             throughput *= atmo.transmittance;
+            // The decorative catalogue is boosted for night observing. Model
+            // its loss of contrast against illuminated air separately from
+            // physical extinction. Actual in-scatter includes twilight and
+            // eclipses, so stars return as the sky darkens. Finite suns and
+            // reflected bodies retain their normal light transport.
+            let sky_luminance = dot(atmo.inscatter, vec3<f32>(0.2126, 0.7152, 0.0722));
+            catalogue_visibility = 1.0 - smoothstep(0.001, 0.01, sky_luminance);
         }
         if (ring.index != MISS) {
             let n = bodies[ring.index].ring_plane.xyz;
@@ -465,7 +552,7 @@ fn trace(initial: Ray, rng: ptr<function, u32>) -> vec3<f32> {
         if (hit.index == MISS) {
             // Background stars are visible along unscattered camera paths,
             // including straight-through ring crossings.
-            radiance += throughput * environment(ray.direction, depth == 0u);
+            radiance += throughput * environment(ray.direction, depth == 0u) * catalogue_visibility;
             break;
         }
         let body = bodies[hit.index];

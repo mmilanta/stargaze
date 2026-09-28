@@ -89,11 +89,16 @@ fn scene_for_startup() -> Result<Option<Scene>> {
             }
         };
     if check_only {
+        let pointing = match scene.initial_direction_deg {
+            Some([azimuth, altitude]) => {
+                format!("pointing at azimuth {azimuth}°, altitude {altitude}°")
+            }
+            None => format!("looking at {}", scene.body(scene.default_target).name),
+        };
         println!(
-            "Valid system: {} bodies; camera on {}, looking at {}",
+            "Valid system: {} bodies; camera on {}, {pointing}",
             scene.bodies.len(),
             scene.body(scene.host).name,
-            scene.body(scene.default_target).name
         );
         return Ok(None);
     }
@@ -125,6 +130,7 @@ struct State {
     observer: Observer,
     sim_time: f64,
     warp: usize,
+    day_step_failed: bool,
     last: Instant,
     /// True only after a sky press crosses the drag threshold.
     dragging: bool,
@@ -146,6 +152,7 @@ impl State {
             observer,
             sim_time: 0.0,
             warp: STOP_WARP,
+            day_step_failed: false,
             last: Instant::now(),
             dragging: false,
             last_cursor: None,
@@ -167,11 +174,7 @@ impl State {
             .and_then(|s| s.parse::<usize>().ok());
         match aim_env {
             Some(target) => state.aim_at(target),
-            None => {
-                let target = state.scene.default_target;
-                let fov = state.scene.default_fov_deg.to_radians();
-                state.point_at_fov(target, fov);
-            }
+            None => state.point_initial_view(),
         }
         if let Ok(f) = std::env::var("STARGAZE_FOV")
             && let Ok(v) = f.parse::<f64>()
@@ -420,6 +423,20 @@ impl State {
 
     fn advance_by(&mut self, seconds: f64) {
         self.sim_time += seconds * WARPS[self.warp];
+        if seconds * WARPS[self.warp] != 0.0 {
+            self.day_step_failed = false;
+        }
+    }
+
+    fn step_local_day(&mut self, forward: bool) {
+        if let Some(time) = self.scene.step_local_day(self.sim_time, forward) {
+            self.sim_time = time;
+            self.day_step_failed = false;
+            self.track();
+        } else {
+            self.day_step_failed = true;
+        }
+        self.last = Instant::now();
     }
 
     fn change_speed(&mut self, faster: bool) {
@@ -435,13 +452,33 @@ impl State {
             KeyCode::ArrowLeft => self.change_speed(false),
             KeyCode::ArrowRight => self.change_speed(true),
             KeyCode::Space => self.warp = STOP_WARP,
+            KeyCode::PageDown => self.step_local_day(false),
+            KeyCode::PageUp => self.step_local_day(true),
             _ => return false,
         }
         true
     }
 
     fn reset_view(&mut self) {
-        self.aim_at(self.scene.default_target);
+        if self.scene.initial_direction_deg.is_some() {
+            self.point_initial_view();
+        } else {
+            self.aim_at(self.scene.default_target);
+        }
+    }
+
+    fn point_initial_view(&mut self) {
+        if let Some([azimuth, altitude]) = self.scene.initial_direction_deg {
+            self.unlock();
+            self.observer.az = azimuth.to_radians();
+            self.observer.alt = altitude.to_radians();
+            self.observer.fov_y = self.scene.default_fov_deg.to_radians();
+        } else {
+            self.point_at_fov(
+                self.scene.default_target,
+                self.scene.default_fov_deg.to_radians(),
+            );
+        }
     }
 
     fn unlock(&mut self) {
@@ -622,9 +659,13 @@ impl State {
         let tan_half = (self.observer.fov_y * 0.5).tan();
 
         let mut bodies = Vec::new();
+        let mut atmosphere_host = 0;
         for (i, body) in self.scene.bodies.iter().enumerate() {
             if body.kind == BodyKind::Anchor {
                 continue; // invisible orbit anchors, not the observer's planet
+            }
+            if i == self.scene.host {
+                atmosphere_host = bodies.len();
             }
             let relative = positions[i] - vf.position;
             // Rotate in f64 as well as subtracting the camera. In telescope
@@ -695,7 +736,7 @@ impl State {
                     a.mie_g as f32,
                     a.scale_height as f32,
                     a.thickness as f32,
-                    1.0,
+                    (atmosphere_host + 1) as f32,
                 ],
             ),
             None => ([0.0; 4], [0.0; 4], [0.0; 4]),
@@ -936,6 +977,10 @@ impl App {
             self.state.change_speed(true);
         } else if layout.stop.contains(x, y) {
             self.state.warp = STOP_WARP;
+        } else if layout.previous_day.contains(x, y) {
+            self.state.step_local_day(false);
+        } else if layout.next_day.contains(x, y) {
+            self.state.step_local_day(true);
         } else if self.game.is_some() && layout.draw.contains(x, y) {
             self.toggle_notebook();
         } else if self.game.is_none() && layout.toggle.contains(x, y) {
@@ -1041,6 +1086,7 @@ impl ApplicationHandler for App {
                                     },
                                     lock_label: lock_label.as_deref(),
                                     sim_time: self.state.sim_time,
+                                    day_step_failed: self.state.day_step_failed,
                                     auto_exposure: self.auto_exposure,
                                     ev_bias: self.ev_bias,
                                     steady_stars: self.state.observer.star_orientation.is_some(),
@@ -1332,12 +1378,12 @@ impl ApplicationHandler for App {
                         return;
                     }
                     if key == KeyCode::KeyR {
-                        self.state.point_at_fov(
-                            self.state.scene.default_target,
-                            self.state.scene.default_fov_deg.to_radians(),
-                        );
+                        self.state.point_initial_view();
                         return;
                     }
+                }
+                if event.repeat && matches!(key, KeyCode::PageUp | KeyCode::PageDown) {
+                    return;
                 }
                 if self.state.time_key(key) {
                     return;
@@ -1524,6 +1570,23 @@ mod app_tests {
             assert_eq!(WARPS[app.state.warp], 0.0);
             assert_eq!(app.state.sim_time, time);
             assert_eq!(app.state.view_lock, Some(lock));
+            for speed in [STOP_WARP, STOP_WARP + 1] {
+                app.state.warp = speed;
+                click(&mut app, layout.next_day);
+                assert!(app.state.sim_time > time + 0.99);
+                assert_eq!(app.state.view_lock, Some(lock));
+                assert_eq!(app.state.warp, speed);
+                click(&mut app, layout.previous_day);
+                assert!((app.state.sim_time - time).abs() < 1e-8);
+                assert_eq!(app.state.view_lock, Some(lock));
+                assert_eq!(app.state.warp, speed);
+            }
+            assert!(app.state.time_key(KeyCode::PageDown));
+            assert!(app.state.sim_time < time - 0.99);
+            assert!(app.state.time_key(KeyCode::PageUp));
+            assert!((app.state.sim_time - time).abs() < 1e-8);
+            assert_eq!(app.state.view_lock, Some(lock));
+            assert_eq!(app.state.warp, STOP_WARP + 1);
             for r in [layout.toggle, layout.exposure, layout.auto] {
                 click(&mut app, r);
                 assert_eq!(app.state.view_lock, Some(lock));
@@ -1541,6 +1604,46 @@ mod app_tests {
             assert_eq!(app.state.view_lock, None);
             app.show_hud = true;
         }
+    }
+
+    #[test]
+    fn vesper_starts_and_resets_to_open_sky() {
+        let scene = config::parse(include_str!("../configs/vesper.yaml")).unwrap();
+        let mut state = State::with_scene(scene);
+        assert_eq!(state.observer.az, 0.0);
+        assert_eq!(state.observer.alt, 25_f64.to_radians());
+        assert_eq!(state.observer.fov_y, 60_f64.to_radians());
+        let positions = state.scene.positions(state.sim_time);
+        let view = state
+            .observer
+            .frame(&state.scene, state.sim_time, &positions);
+        for (i, position) in positions.iter().enumerate() {
+            if i != state.scene.host {
+                assert!(
+                    view.forward.dot((*position - view.position).normalize())
+                        < 30_f64.to_radians().cos()
+                );
+            }
+        }
+        state.view_lock = Some(ViewLock::Body(state.scene.default_target));
+        state.sim_time = 1.25;
+        state.track();
+        state.reset_view();
+        assert_eq!(state.sim_time, 1.25);
+        assert_eq!(state.view_lock, None);
+        assert_eq!(state.observer.az, 0.0);
+        assert_eq!(state.observer.alt, 25_f64.to_radians());
+    }
+
+    #[test]
+    fn failed_day_step_preserves_time_and_reports_no_cycle() {
+        let mut scene = sim::default_scene();
+        scene.bodies[scene.host].tidally_locked = true;
+        let mut state = State::with_scene(scene);
+        let start = state.sim_time;
+        state.step_local_day(true);
+        assert_eq!(state.sim_time, start);
+        assert!(state.day_step_failed);
     }
 
     #[test]
@@ -1608,6 +1711,18 @@ mod app_tests {
     }
 
     #[test]
+    fn atmosphere_host_uses_gpu_index_after_invisible_anchors_are_removed() {
+        for scene in [sim::default_scene(), sim::halo_scene(), sim::binary_scene()] {
+            let state = State::with_scene(scene);
+            let frame = state.build_frame(32, 32);
+            let index = frame.globals.atmo_params[3] as usize - 1;
+            let host = &frame.bodies[index];
+            assert_eq!(host.radius, frame.globals.atmo_center[3]);
+            assert_eq!(host.center, frame.globals.atmo_center[..3]);
+        }
+    }
+
+    #[test]
     fn halo_faces_calyx_without_tracking_and_clears_its_rings() {
         for system in [None, Some("halo"), Some("binary")] {
             let mut state = State::with_scene(scene_for_system(system));
@@ -1651,7 +1766,7 @@ mod app_tests {
             assert_eq!(state.observer.body, host);
             assert_eq!(state.scene.body(host).name, "Saturn");
             assert_eq!(state.observer.lat.to_degrees(), 20.0);
-            assert!(state.scene.atmosphere.is_none());
+            assert!(state.scene.atmosphere.is_some());
             assert!(!state.scene.targets.contains(&host));
             assert!(
                 state.observer.alt > 0.2,

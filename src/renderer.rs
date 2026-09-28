@@ -18,7 +18,8 @@ pub struct Globals {
     // Host-atmosphere shell, in telescope space.
     pub atmo_center: [f32; 4],   // xyz = host centre, w = host radius
     pub atmo_rayleigh: [f32; 4], // rgb = Rayleigh coefficients (1/AU), w = Mie
-    // x = Mie g, y = scale height (AU), z = top altitude (AU), w = enabled
+    // x = Mie g, y = scale height (AU), z = top altitude (AU),
+    // w = GPU host body index + 1 (0 disables atmosphere)
     pub atmo_params: [f32; 4],
 }
 
