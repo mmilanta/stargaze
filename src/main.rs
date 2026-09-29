@@ -3,6 +3,7 @@
 mod camera;
 mod config;
 mod game;
+mod ground;
 mod menu;
 mod pathtracer;
 mod renderer;
@@ -459,6 +460,14 @@ impl State {
         true
     }
 
+    fn ground_view(&mut self) {
+        self.unlock();
+        self.observer.star_orientation = None;
+        self.observer.az = 0.0;
+        self.observer.alt = 5_f64.to_radians();
+        self.observer.fov_y = 60_f64.to_radians();
+    }
+
     fn reset_view(&mut self) {
         if self.scene.initial_direction_deg.is_some() {
             self.point_initial_view();
@@ -742,6 +751,22 @@ impl State {
             None => ([0.0; 4], [0.0; 4], [0.0; 4]),
         };
 
+        let ground_enabled = std::env::var("STARGAZE_GROUND")
+            .map(|v| {
+                !matches!(
+                    v.trim().to_ascii_lowercase().as_str(),
+                    "0" | "off" | "false"
+                )
+            })
+            .unwrap_or(true);
+        let ground = if ground_enabled {
+            ground::landscape(host.radius * sim::AU_KM * 1000.0)
+        } else {
+            Vec::new()
+        };
+        let east = vf.world_to_view(vf.east);
+        let up = vf.world_to_view(vf.zenith);
+        let north = vf.world_to_view(vf.north);
         let globals = Globals {
             cam_right: [vf.right.x as f32, vf.right.y as f32, vf.right.z as f32, 0.0],
             cam_up: [vf.up.x as f32, vf.up.y as f32, vf.up.z as f32, 0.0],
@@ -755,6 +780,29 @@ impl State {
             atmo_center,
             atmo_rayleigh,
             atmo_params,
+            ground_east: [
+                east.x as f32,
+                east.y as f32,
+                east.z as f32,
+                self.observer.height_m as f32,
+            ],
+            ground_up: [
+                up.x as f32,
+                up.y as f32,
+                up.z as f32,
+                (host.radius * sim::AU_KM * 1000.0) as f32,
+            ],
+            ground_north: [
+                north.x as f32,
+                north.y as f32,
+                north.z as f32,
+                if ground_enabled {
+                    (atmosphere_host + 1) as f32
+                } else {
+                    0.0
+                },
+            ],
+            ground_counts: [ground.len() as u32, 0, 0, 0],
         };
 
         // Screen-space anchors for the optional name labels.
@@ -803,6 +851,7 @@ impl State {
         Frame {
             globals,
             bodies,
+            ground,
             scene_time: self.sim_time,
             labels,
             ui: Vec::new(),
@@ -1396,6 +1445,7 @@ impl ApplicationHandler for App {
                     }
                     PhysicalKey::Code(KeyCode::KeyU) => self.state.unlock(),
                     PhysicalKey::Code(KeyCode::KeyR) => self.state.reset_view(),
+                    PhysicalKey::Code(KeyCode::KeyG) => self.state.ground_view(),
                     PhysicalKey::Code(KeyCode::KeyE) => {
                         if let Some(what) = self.state.next_eclipse() {
                             log::info!("found {what} at t = {:.3} d", self.state.sim_time);

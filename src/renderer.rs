@@ -21,6 +21,11 @@ pub struct Globals {
     // x = Mie g, y = scale height (AU), z = top altitude (AU),
     // w = GPU host body index + 1 (0 disables atmosphere)
     pub atmo_params: [f32; 4],
+    // Local landscape frame in telescope space; lengths in metres.
+    pub ground_east: [f32; 4],   // w = observer height
+    pub ground_up: [f32; 4],     // w = host radius
+    pub ground_north: [f32; 4],  // w = host GPU index + 1 (0 disables)
+    pub ground_counts: [u32; 4], // x = local primitive count
 }
 
 #[repr(C)]
@@ -39,6 +44,7 @@ pub struct Sphere {
 pub struct Frame {
     pub globals: Globals,
     pub bodies: Vec<Sphere>,
+    pub ground: Vec<crate::ground::Primitive>,
     pub scene_time: f64,
     pub labels: Vec<Label>,
     pub ui: Vec<UiVertex>,

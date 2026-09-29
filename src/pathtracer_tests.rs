@@ -3,6 +3,9 @@ use super::*;
 #[path = "ring_tests.rs"]
 mod rings;
 
+#[path = "ground_tests.rs"]
+mod ground;
+
 fn frame() -> Frame {
     let mut globals = Globals::zeroed();
     globals.cam_right = [1.0, 0.0, 0.0, 0.0];
@@ -12,6 +15,7 @@ fn frame() -> Frame {
     Frame {
         globals,
         bodies: vec![],
+        ground: vec![],
         scene_time: 0.0,
         labels: vec![],
         ui: vec![],
@@ -49,6 +53,7 @@ fn validate_shaders_and_buffer_layouts() {
             let expected = match ty.name.as_deref() {
                 Some("Settings") => Some(std::mem::size_of::<Settings>()),
                 Some("Globals") => Some(std::mem::size_of::<Globals>()),
+                Some("Primitive") => Some(std::mem::size_of::<crate::ground::Primitive>()),
                 Some("Body") => Some(std::mem::size_of::<Sphere>()),
                 Some("CatalogueStar") => Some(std::mem::size_of::<stars::RayStar>()),
                 Some("Exposure") | Some("ExposureState") => Some(std::mem::size_of::<Exposure>()),
@@ -516,6 +521,10 @@ fn gpu_surface_observer() {
     host.emissive = 1.0;
     scene.bodies = vec![host];
     scene.globals.atmo_params[3] = 0.0;
+    // Isolate the planetary sphere: props intentionally rise above its horizon.
+    scene.ground.clear();
+    scene.globals.ground_counts = [0; 4];
+    scene.globals.ground_north[3] = 0.0;
     let pixels = sample(&device, &queue, &mut tracer, &scene, 1);
     let zenith = -glam::DVec3::from_array(host.center.map(f64::from)).normalize();
     let mut false_sky_hits = 0;

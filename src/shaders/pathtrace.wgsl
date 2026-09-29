@@ -1,5 +1,5 @@
 // Path tracer with a camera-ray single-scattering atmosphere.
-// All scene visibility uses analytic spheres and equatorial ring annuli.
+// Scene visibility uses analytic bodies, rings, and metre-scale landscape primitives.
 // Direct light: one solid-angle sample per stellar disc, with power-heuristic MIS.
 // Indirect light: cosine-weighted Lambertian bounces and Russian roulette.
 struct Globals {
@@ -11,6 +11,10 @@ struct Globals {
     atmo_center: vec4<f32>, // xyz = host centre, w = host radius
     atmo_rayleigh: vec4<f32>, // rgb = Rayleigh coefficients (1/AU), w = Mie
     atmo_params: vec4<f32>, // x = Mie g, y = scale height (AU), z = top altitude, w = host index + 1 (0 off)
+    ground_east: vec4<f32>,
+    ground_up: vec4<f32>,
+    ground_north: vec4<f32>,
+    ground_counts: vec4<u32>,
 };
 struct Settings {
     g: Globals,
@@ -150,11 +154,14 @@ fn sphere_hit(ray: Ray, index: u32) -> Hit {
 fn closest_hit(ray: Ray) -> Hit {
     var closest = Hit(1.0e30, MISS, vec3<f32>(0.0));
     for (var i = 0u; i < settings.counts.x; i += 1u) {
+        if (settings.g.ground_north.w == f32(i + 1u)) { continue; }
         let hit = sphere_hit(ray, i);
         if (hit.distance < closest.distance) {
             closest = hit;
         }
     }
+    let local = landscape_hit(ray);
+    if (local.distance < closest.distance) { closest = local; }
     return closest;
 }
 
@@ -555,8 +562,11 @@ fn trace(initial: Ray, rng: ptr<function, u32>) -> vec3<f32> {
             radiance += throughput * environment(ray.direction, depth == 0u) * catalogue_visibility;
             break;
         }
-        let body = bodies[hit.index];
-        if (body.material.w > 0.5) {
+        let local = hit.index >= LOCAL_BASE;
+        // Local IDs never index the astronomical body buffer.
+        var body: Body;
+        if (!local) { body = bodies[hit.index]; }
+        if (!local && body.material.w > 0.5) {
             var weight = 1.0;
             if (depth > 0u) {
                 let light_pdf = 1.0 / (TAU * cone_width(previous_vertex, hit.index));
@@ -566,11 +576,18 @@ fn trace(initial: Ray, rng: ptr<function, u32>) -> vec3<f32> {
             break;
         }
         let normal = hit.normal;
-        let albedo = surface_albedo(body, normal);
-        // Radius-relative offset is evaluated locally, not added to a huge
-        // world coordinate. About 12 m on Terra, much smaller on its moons.
-        let origin = normal * (body.center.w * (1.0 + 2.0e-6));
-        var outgoing = Ray(origin, normal, hit.index);
+        var albedo: vec3<f32>;
+        var outgoing: Ray;
+        if (local) {
+            albedo = landscape_albedo(ray, hit);
+            outgoing = landscape_outgoing(ray, hit);
+        } else {
+            albedo = surface_albedo(body, normal);
+            // Celestial surfaces retain their body-relative origin; local
+            // ground and props instead use a five-millimetre offset.
+            let origin = normal * (body.center.w * (1.0 + 2.0e-6));
+            outgoing = Ray(origin, normal, hit.index);
+        }
         let last_vertex = depth + 1u == settings.counts.w;
         for (var i = 0u; i < settings.counts.x; i += 1u) {
             if (bodies[i].material.w < 0.5) {

@@ -23,8 +23,8 @@ Press `1` to aim at Calyx. Run `cargo run --release` to start here.
 
 All scene visibility and illumination are traced in a WGSL compute shader:
 
-- **Primary rays**, jittered within each pixel, intersect analytic spheres.
-  There are no rasterized body meshes, minimum-size planet impostors, shadow
+- **Primary rays**, jittered within each pixel, intersect analytic spheres,
+  boxes and ellipsoids. There are no rasterized body meshes, minimum-size planet impostors, shadow
   maps, or screen-space eclipse masks.
 - **Finite stars:** emissive spheres appear as discs. At each diffuse surface
   hit, the integrator samples a direction uniformly over each star's apparent
@@ -44,6 +44,15 @@ All scene visibility and illumination are traced in a WGSL compute shader:
   the star's decreasing solid angle, not an additional falloff multiplier.
 - **Real ground:** the observer's planet is included in intersections. The
   camera stands at the configured height above its surface (two metres by default); the horizon is not a sky mask.
+  A first landscape adds a grassy plain, a sparse tree line 100–175 metres
+  away, and a small cottage to the northeast. Boxes, rotated roof slabs and
+  ellipsoidal foliage share the same finite-star lighting, shadow rays and
+  diffuse bounces as the planets. The local frame rotates with the host;
+  turning the telescope leaves the scenery fixed. Metre-based intersections
+  preserve observer height and a 5 mm bounce offset on the curved host sphere.
+  This is an illustrative landscape on every host, including airless worlds
+  and the Saturn observatory; it is not a biome model. Set `STARGAZE_GROUND=0`
+  to restore the original planetary material and omit the scenery.
 - **Rings:** an analytic, zero-thickness equatorial annulus around a body.
   Rays intersect the ring plane and are kept between the inner and outer
   radius. The sheet is a plane-parallel particulate slab: ray and shadow rays
@@ -106,6 +115,36 @@ The average stops at 16,777,216 spp to avoid counter/float precision loss.
 Only tone-mapped presentation and the HUD use ordinary rasterization. No
 hardware ray-tracing extension or RT-capable GPU is needed: a native wgpu
 compute-capable Metal, Vulkan or DX12 device is sufficient.
+
+### Ground prototype
+
+Press `G` for a wide view facing north, with the cottage on the right; `R`
+returns to the configured observing view. `G` releases tracking and restores
+surface-relative roll, preserving time and playback speed. The scenery uses
+real stellar lighting, so choose daylight to see it clearly and pause for
+convergence. Trees and windows are opaque diffuse primitives for now; there
+are no leaf meshes, glass transmission, terrain elevation, or walking controls.
+Atmospheric scattering remains camera-only, so diffuse surfaces receive
+sunlight and surface bounces rather than sky illumination.
+
+![Ray-traced meadow, distant trees and a cottage](docs/pathtraced-ground.png)
+
+For the daylight view above, run this command and press `G`:
+
+```sh
+STARGAZE_SYSTEM=earth STARGAZE_TIME=0.599 cargo run --release
+```
+
+The image above is an actual 64 spp compute render. Reproduce it headlessly:
+
+```sh
+STARGAZE_TEST_IMAGE_DIR=/tmp/stargaze-ground cargo test gpu_ground_preview -- --ignored --nocapture
+```
+
+The test writes `ground.ppm`, verifies finite pixels and unlit night surfaces,
+and checks the landscape binding after resize. `gpu_local_ground_shadows`
+checks box, rotated-box and foliage shadows on Earth-sized and moon-sized
+hosts, including a blocker only two centimetres above the surface.
 
 ### Sample renders
 
@@ -249,6 +288,7 @@ STARGAZE_SYSTEM=solar STARGAZE_AIM=0 STARGAZE_AUTO_EXPOSURE=0 STARGAZE_EXPOSURE=
 
 | Variable | Default | Meaning |
 | --- | --- | --- |
+| `STARGAZE_GROUND` | on | Set `0`, `false` or `off` to disable the meadow, trees and cottage |
 | `STARGAZE_SPP` | `1` | Samples per pixel per frame, clamped to 1–64 |
 | `STARGAZE_BOUNCES` | `8` | Maximum surface vertices per path, clamped to 1–64; `1` gives direct-only lighting |
 | `STARGAZE_AUTO_EXPOSURE` | on | Meter exposure automatically; `0`, `false` or `off` selects the manual value |
@@ -284,6 +324,7 @@ sequence is deterministic for a given pixel and sample index.
 | `E` | search up to ten model years for a visible eclipse |
 | `T` | search for a moon transit (e.g. Phobos/Mars or Io/Jupiter) |
 | `R` | reset view |
+| `G` | wide ground view, facing north with the cottage to the right |
 | `,` `.` | exposure compensation down / up by 0.25 EV |
 | `A` | toggle automatic exposure metering (on by default) |
 | `H` | show / hide HUD |

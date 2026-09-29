@@ -14,6 +14,8 @@ const TRACE_SHADER: &str = concat!(
     include_str!("shaders/pathtrace.wgsl"),
     "\n",
     include_str!("shaders/rings.wgsl"),
+    "\n",
+    include_str!("shaders/ground.wgsl"),
 );
 const HISTOGRAM_BINS: usize = 256;
 const HISTOGRAM_ZEROS: [u8; HISTOGRAM_BINS * 4] = [0; HISTOGRAM_BINS * 4];
@@ -127,6 +129,7 @@ impl History {
     fn update(&mut self, frame: &Frame, options: Options) {
         let mut key = bytemuck::bytes_of(&frame.globals).to_vec();
         key.extend_from_slice(bytemuck::cast_slice(&frame.bodies));
+        key.extend_from_slice(bytemuck::cast_slice(&frame.ground));
         // Time is kept in f64: even changes smaller than the GPU's position
         // precision must invalidate history when the simulation is running.
         key.extend_from_slice(&frame.scene_time.to_le_bytes());
@@ -148,6 +151,7 @@ pub struct PathTracer {
     display_group: wgpu::BindGroup,
     settings: wgpu::Buffer,
     bodies: wgpu::Buffer,
+    ground: wgpu::Buffer,
     catalogue: wgpu::Buffer,
     cells: wgpu::Buffer,
     accumulation: wgpu::Buffer,
@@ -252,6 +256,11 @@ impl PathTracer {
                 buffer_entry(
                     4,
                     wgpu::BufferBindingType::Storage { read_only: false },
+                    wgpu::ShaderStages::COMPUTE,
+                ),
+                buffer_entry(
+                    5,
+                    wgpu::BufferBindingType::Storage { read_only: true },
                     wgpu::ShaderStages::COMPUTE,
                 ),
             ],
@@ -390,6 +399,13 @@ impl PathTracer {
             usage: wgpu::BufferUsages::STORAGE | wgpu::BufferUsages::COPY_DST,
             mapped_at_creation: false,
         });
+        let ground = device.create_buffer(&wgpu::BufferDescriptor {
+            label: Some("local-landscape"),
+            size: (crate::ground::CAPACITY * std::mem::size_of::<crate::ground::Primitive>())
+                as u64,
+            usage: wgpu::BufferUsages::STORAGE | wgpu::BufferUsages::COPY_DST,
+            mapped_at_creation: false,
+        });
         let (catalogue_data, cells_data) = stars::ray_catalogue(stars);
         let catalogue = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
             label: Some("angular-star-discs"),
@@ -419,7 +435,14 @@ impl PathTracer {
         let trace_group = group(
             device,
             &trace_layout,
-            &[&settings, &bodies, &catalogue, &cells, &accumulation],
+            &[
+                &settings,
+                &bodies,
+                &catalogue,
+                &cells,
+                &accumulation,
+                &ground,
+            ],
         );
         let display_group = group(
             device,
@@ -440,6 +463,7 @@ impl PathTracer {
             display_group,
             settings,
             bodies,
+            ground,
             catalogue,
             cells,
             accumulation,
@@ -468,6 +492,7 @@ impl PathTracer {
                 &self.catalogue,
                 &self.cells,
                 &self.accumulation,
+                &self.ground,
             ],
         );
         self.display_group = group(
@@ -514,6 +539,11 @@ impl PathTracer {
         frame: &Frame,
     ) {
         assert!(frame.bodies.len() <= BODY_CAPACITY, "too many scene bodies");
+        assert!(
+            frame.ground.len() <= crate::ground::CAPACITY,
+            "too many local primitives"
+        );
+        assert_eq!(frame.globals.ground_counts[0] as usize, frame.ground.len());
         self.history.update(frame, self.options);
         // Avoid counter wrap and loss of integer resolution in f32 weights.
         let count = self
@@ -559,6 +589,9 @@ impl PathTracer {
         if count > 0 {
             if !frame.bodies.is_empty() {
                 queue.write_buffer(&self.bodies, 0, bytemuck::cast_slice(&frame.bodies));
+            }
+            if !frame.ground.is_empty() {
+                queue.write_buffer(&self.ground, 0, bytemuck::cast_slice(&frame.ground));
             }
             let mut pass = encoder.begin_compute_pass(&wgpu::ComputePassDescriptor {
                 label: Some("pathtrace"),

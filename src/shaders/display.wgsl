@@ -7,6 +7,10 @@ struct Globals {
     atmo_center: vec4<f32>,
     atmo_rayleigh: vec4<f32>,
     atmo_params: vec4<f32>,
+    ground_east: vec4<f32>,
+    ground_up: vec4<f32>,
+    ground_north: vec4<f32>,
+    ground_counts: vec4<u32>,
 };
 struct Settings {
     g: Globals,
