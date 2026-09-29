@@ -101,7 +101,10 @@ The window title shows **samples per pixel (spp)**. Stop time and stop moving
 for convergence; motion/time changes reset the average. HUD and label toggles
 preserve it. Resize, material, camera, or integrator changes invalidate it.
 At low sample counts, noise is expected, particularly in indirect lighting.
-The average stops at 16,777,216 spp to avoid counter/float precision loss.
+Still views stop refining at the graphics setting's sample limit (256 spp by
+default), then sleep once automatic exposure has settled. Moving the camera,
+zooming, or advancing time starts refinement again. Continuous refinement is
+available in Graphics; its hard limit is 16,777,216 spp to avoid precision loss.
 
 Only tone-mapped presentation and the HUD use ordinary rasterization. No
 hardware ray-tracing extension or RT-capable GPU is needed: a native wgpu
@@ -167,6 +170,10 @@ system (or its shown number key) to load its scene and camera. Use Page Up/Page 
 browse longer lists. Time is suspended while the menu is open; press Escape
 or click Resume to return to your current view. The menu button remains
 available when the HUD is hidden. Invalid configs show an error in the menu.
+Menus and the drawing screen render only their UI: world path tracing and
+exposure metering pause until you return to observation. These screens redraw
+on input or window changes and sleep while idle. Resizing them defers the HDR
+accumulation buffer allocation until observation resumes.
 `STARGAZE_CONFIG=/path/to/system.yaml` also selects a file; an explicit
 `--config` takes precedence. `--check-config` validates without a display or GPU.
 
@@ -239,6 +246,36 @@ is attached to Saturn and to Calyx in the Halo preset; any body may carry one. T
 
 ### Quality settings
 
+Open **Menu → Graphics** (M, then G) in either game or observatory mode.
+Choose **Eco**, **Balanced**, or **High**, or use the arrows to customize:
+
+| Setting | Eco | Balanced (default) | High |
+| --- | --- | --- | --- |
+| Frame rate limit | 15 FPS | 30 FPS | 60 FPS |
+| Render resolution | 50% | 75% | 100% |
+| Light detail | 2 bounces | 4 bounces | 8 bounces |
+| Samples per frame | 1 | 1 | 1 |
+| Still image limit | 128 spp | 256 spp | 1024 spp |
+
+The frame cap also applies while dragging the camera, and the event loop sleeps
+between frames. Lower resolution reduces ray tracing and HDR memory use: 50%
+in each dimension traces one quarter of the pixels. The world is smoothly
+upscaled; text, labels, controls, and picking remain at the window's resolution.
+Light detail controls indirect lighting; atmosphere quality remains unchanged.
+Still image limits let a stationary, stopped scene finish refining and rest.
+Lower limits converge sooner but can leave more noise. Select Continuous for
+long exposures. A frame cap cannot guarantee spare GPU capacity when a single
+frame is expensive; reduce resolution or choose Eco if usage remains high.
+
+Settings apply to all maps and save automatically to
+`$XDG_CONFIG_HOME/stargaze/graphics.yaml` (normally
+`~/.config/stargaze/graphics.yaml`). `STARGAZE_SETTINGS` overrides that file path.
+The settings screen supports Up/Down to select a row, Left/Right to adjust,
+1/2/3 for presets, and Esc to return to the map menu. Changing resolution or
+light detail restarts accumulation; frame rate, batch size, and sample limits
+preserve valid samples. Existing `STARGAZE_SPP` and `STARGAZE_BOUNCES` overrides
+take precedence at startup; the Graphics controls remain adjustable afterward.
+
 ```sh
 # Eight new samples per pixel per frame; up to 12 surface vertices per path.
 STARGAZE_SPP=8 STARGAZE_BOUNCES=12 cargo run --release
@@ -250,7 +287,7 @@ STARGAZE_SYSTEM=solar STARGAZE_AIM=0 STARGAZE_AUTO_EXPOSURE=0 STARGAZE_EXPOSURE=
 | Variable | Default | Meaning |
 | --- | --- | --- |
 | `STARGAZE_SPP` | `1` | Samples per pixel per frame, clamped to 1–64 |
-| `STARGAZE_BOUNCES` | `8` | Maximum surface vertices per path, clamped to 1–64; `1` gives direct-only lighting |
+| `STARGAZE_BOUNCES` | Graphics setting (`4` in Balanced) | Maximum surface vertices per path, clamped to 1–64; `1` gives direct-only lighting |
 | `STARGAZE_AUTO_EXPOSURE` | on | Meter exposure automatically; `0`, `false` or `off` selects the manual value |
 | `STARGAZE_EXPOSURE` | `1` | Manual exposure multiplier, applied after accumulation when automatic metering is off |
 | `STARGAZE_EV_BIAS` | `0` | Exposure compensation in stops, applied to either mode |
@@ -388,7 +425,7 @@ cargo fmt --check
 cargo clippy --all-targets -- -D warnings
 cargo test
 # Opt-in, actual shader execution on a GPU; no window required:
-cargo test gpu_ -- --ignored --nocapture
+cargo test gpu_ -- --ignored --nocapture --test-threads=1
 # Also save small reference renders as PPM images:
 STARGAZE_TEST_IMAGE_DIR=/tmp/stargaze-renders cargo test gpu_scene_smoke -- --ignored --nocapture
 ```
@@ -403,6 +440,8 @@ fireflies, near-surface horizon intersections, ring geometry and Beer-Lambert
 transmission, ring scattering, energy conservation and shadows, MIS through
 transparent rings, exposure at small viewport sizes and after convergence,
 extreme exposure presentation, solar-system scales and rotation,
+graphics persistence and controls, frame pacing, sample limits and resuming
+refinement, HDR upscaling and edge/orientation correctness,
 all seven planets observable from Earth, resize, presentation, and all
 observatory presets (including Halo facing ringed Calyx, Saturn at 20° N,
 and the Vantus eclipse).

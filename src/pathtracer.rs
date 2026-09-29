@@ -51,6 +51,7 @@ struct ExposureTail {
 pub struct Options {
     pub samples_per_frame: u32,
     pub max_bounces: u32,
+    pub sample_limit: u32,
     /// Manual exposure, used when automatic metering is disabled.
     pub exposure: f32,
     pub auto_exposure: bool,
@@ -66,6 +67,7 @@ impl Default for Options {
         Self {
             samples_per_frame: 1,
             max_bounces: 8,
+            sample_limit: crate::graphics::MAX_SAMPLES,
             exposure: 1.0,
             auto_exposure: false,
             ev_bias: 0.0,
@@ -94,6 +96,7 @@ impl Options {
         Self {
             samples_per_frame: integer("STARGAZE_SPP", defaults.samples_per_frame),
             max_bounces: integer("STARGAZE_BOUNCES", defaults.max_bounces),
+            sample_limit: defaults.sample_limit,
             exposure: positive("STARGAZE_EXPOSURE", defaults.exposure),
             // The application meters automatically unless explicitly disabled.
             auto_exposure: std::env::var("STARGAZE_AUTO_EXPOSURE")
@@ -162,6 +165,7 @@ pub struct PathTracer {
     dimensions: (u32, u32),
     history: History,
     options: Options,
+    exposure_idle_frames: u32,
 }
 
 fn buffer_entry(
@@ -453,10 +457,14 @@ impl PathTracer {
             dimensions,
             history: History::default(),
             options,
+            exposure_idle_frames: 0,
         }
     }
 
     pub fn resize(&mut self, device: &wgpu::Device, dimensions: (u32, u32)) {
+        if dimensions == self.dimensions {
+            return;
+        }
         self.dimensions = dimensions;
         self.accumulation = accumulation(device, dimensions);
         self.trace_group = group(
@@ -486,9 +494,29 @@ impl PathTracer {
             ],
         );
         self.history = History::default();
+        self.exposure_idle_frames = 0;
     }
     pub fn samples(&self) -> u32 {
         self.history.samples
+    }
+    pub fn size(&self) -> (u32, u32) {
+        self.dimensions
+    }
+
+    pub fn needs_redraw(&self) -> bool {
+        self.history.samples < self.options.sample_limit
+            || (self.options.auto_exposure && self.exposure_idle_frames < 60)
+    }
+
+    pub fn set_quality(&mut self, samples: u32, bounces: u32, limit: u32) {
+        let bounces = bounces.clamp(1, 64);
+        if self.options.max_bounces != bounces {
+            self.history = History::default();
+            self.exposure_idle_frames = 0;
+        }
+        self.options.samples_per_frame = samples.clamp(1, 64);
+        self.options.max_bounces = bounces;
+        self.options.sample_limit = limit.clamp(1, crate::graphics::MAX_SAMPLES);
     }
 
     /// Switch between automatic metering and the manual exposure, and set the
@@ -496,6 +524,7 @@ impl PathTracer {
     pub fn set_exposure_controls(&mut self, auto: bool, bias: f32) {
         self.options.auto_exposure = auto;
         self.options.ev_bias = bias;
+        self.exposure_idle_frames = 0;
     }
     pub fn auto_exposure(&self) -> bool {
         self.options.auto_exposure
@@ -516,11 +545,16 @@ impl PathTracer {
         assert!(frame.bodies.len() <= BODY_CAPACITY, "too many scene bodies");
         self.history.update(frame, self.options);
         // Avoid counter wrap and loss of integer resolution in f32 weights.
-        let count = self
-            .options
-            .samples_per_frame
-            .min(16_777_216 - self.history.samples);
+        let count = self.options.samples_per_frame.min(
+            self.options
+                .sample_limit
+                .saturating_sub(self.history.samples),
+        );
         let mut globals = frame.globals;
+        // Keep projection aspect tied to the window, including at odd sizes.
+        globals.viewport[3] = globals.viewport[0] / globals.viewport[1].max(1.0);
+        globals.viewport[0] = self.dimensions.0 as f32;
+        globals.viewport[1] = self.dimensions.1 as f32;
         globals.viewport[2] = self.options.exposure;
         let settings = Settings {
             globals,
@@ -597,6 +631,11 @@ impl PathTracer {
             pass.dispatch_workgroups(1, 1, 1);
         }
         self.history.samples += count;
+        self.exposure_idle_frames = if count > 0 {
+            0
+        } else {
+            self.exposure_idle_frames.saturating_add(1)
+        };
     }
     pub fn display(&self, pass: &mut wgpu::RenderPass<'_>) {
         pass.set_pipeline(&self.display);

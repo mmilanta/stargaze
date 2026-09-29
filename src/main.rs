@@ -3,6 +3,7 @@
 mod camera;
 mod config;
 mod game;
+mod graphics;
 mod menu;
 mod pathtracer;
 mod renderer;
@@ -440,6 +441,11 @@ impl State {
     }
 
     fn change_speed(&mut self, faster: bool) {
+        if self.warp == STOP_WARP {
+            // A converged observation can sleep for minutes. Starting playback
+            // must not apply that stopped wall time at the new speed.
+            self.last = Instant::now();
+        }
         self.warp = if faster {
             (self.warp + 1).min(WARPS.len() - 1)
         } else {
@@ -805,7 +811,6 @@ impl State {
             bodies,
             scene_time: self.sim_time,
             labels,
-            ui: Vec::new(),
         }
     }
 }
@@ -825,9 +830,113 @@ struct App {
     auto_exposure: bool,
     ev_bias: f32,
     exposure_dragging: bool,
+    occluded: bool,
+    graphics: graphics::Menu,
+    pacer: graphics::FramePacer,
 }
 
 impl App {
+    fn world_visible(&self) -> bool {
+        !self.graphics.open && !self.menu.open && !self.game.as_ref().is_some_and(|game| game.open)
+    }
+
+    fn continuous_redraw(&self, size: (u32, u32)) -> bool {
+        self.world_visible()
+            && !self.occluded
+            && size.0 > 0
+            && size.1 > 0
+            && (self.state.warp != STOP_WARP
+                || self.renderer.as_ref().is_none_or(Renderer::needs_redraw))
+    }
+
+    /// Build only the visible screen; opaque UI screens need no orbit or camera
+    /// calculations, body uploads, labels, or hidden HUD geometry.
+    fn build_frame(&self, w: u32, h: u32) -> (Option<Frame>, Vec<ui::UiVertex>) {
+        if self.graphics.open {
+            let mut vertices = Vec::new();
+            graphics::build(
+                &mut vertices,
+                [w as f32, h as f32],
+                self.scale,
+                &self.graphics,
+                self.cursor,
+            );
+            return (None, vertices);
+        }
+        let frame = self.world_visible().then(|| self.state.build_frame(w, h));
+        let mut vertices = Vec::new();
+        if let Some(frame) = &frame {
+            let lock_label = self
+                .state
+                .lock_label(self.show_labels && self.show_hud && self.game.is_none());
+            let layout =
+                ui::layout(w as f32, h as f32, self.scale).with_puzzle(self.game.is_some());
+            if self.show_hud {
+                ui::build(
+                    &mut vertices,
+                    &layout,
+                    w as f32,
+                    h as f32,
+                    ui::HudState {
+                        labels: ui::LabelOptions {
+                            show: self.show_labels && self.game.is_none(),
+                            locked: self.state.locked_body(),
+                        },
+                        lock_label: lock_label.as_deref(),
+                        sim_time: self.state.sim_time,
+                        day_step_failed: self.state.day_step_failed,
+                        auto_exposure: self.auto_exposure,
+                        ev_bias: self.ev_bias,
+                        steady_stars: self.state.observer.star_orientation.is_some(),
+                        minutes_per_second: WARPS[self.state.warp] * 1440.0,
+                    },
+                    &frame.labels,
+                );
+            } else {
+                ui::build_lock(
+                    &mut vertices,
+                    &layout,
+                    [w as f32, h as f32],
+                    lock_label.as_deref(),
+                );
+            }
+        }
+        if !self.menu.open
+            && let Some(game) = &self.game
+        {
+            game::build(
+                &mut vertices,
+                [w as f32, h as f32],
+                self.scale,
+                game,
+                self.cursor,
+                &format!(
+                    "{} | {:+.1} min/s{}",
+                    if self.state.warp == STOP_WARP {
+                        "STOPPED"
+                    } else {
+                        "PLAYING"
+                    },
+                    WARPS[self.state.warp] * 1440.0,
+                    if self.state.view_lock.is_some() {
+                        " | View locked"
+                    } else {
+                        ""
+                    }
+                ),
+            );
+        }
+        menu::build(
+            &mut vertices,
+            [w as f32, h as f32],
+            self.scale,
+            &self.menu,
+            self.cursor,
+            self.game.is_some(),
+        );
+        (frame, vertices)
+    }
+
     fn right_click(&mut self) {
         if self.menu.open {
             return;
@@ -868,6 +977,10 @@ impl App {
     }
 
     fn toggle_menu(&mut self) {
+        if self.graphics.open {
+            self.graphics.open = false;
+            return;
+        }
         self.state.end_sky_press();
         if let Some(game) = self.game.as_mut() {
             game.release();
@@ -917,6 +1030,21 @@ impl App {
     }
 
     fn menu_click(&mut self, cx: f64, cy: f64) -> bool {
+        if self.graphics.open {
+            if let Some(r) = &self.renderer {
+                let (w, h) = r.size();
+                if w > 0
+                    && h > 0
+                    && self.graphics.click(
+                        &graphics::Layout::new(w as f32, h as f32, self.scale),
+                        (cx, cy),
+                    )
+                {
+                    self.sync_graphics();
+                }
+            }
+            return true;
+        }
         let Some(layout) = self.menu_layout() else {
             return self.menu.open;
         };
@@ -944,6 +1072,10 @@ impl App {
         }
         if !self.menu.open {
             return false;
+        }
+        if layout.graphics.contains(cx, cy) {
+            self.graphics.open = true;
+            return true;
         }
         let page = layout.rows.len();
         if layout.previous.contains(cx, cy) {
@@ -1006,6 +1138,14 @@ impl App {
         }
     }
 
+    fn sync_graphics(&mut self) {
+        if let Some(r) = &mut self.renderer {
+            r.set_graphics(self.graphics.settings);
+        }
+        self.graphics.persist();
+        self.pacer.request();
+    }
+
     fn ui_layout(&self) -> Option<ui::Layout> {
         let r = self.renderer.as_ref()?;
         let (w, h) = r.size();
@@ -1030,13 +1170,14 @@ impl ApplicationHandler for App {
                 .expect("failed to create window"),
         );
 
-        match Renderer::new(window.clone(), &self.stars) {
+        match Renderer::new(window.clone(), &self.stars, self.graphics.settings) {
             Ok(renderer) => {
                 log::info!("renderer ready: {:?}", window.inner_size());
                 self.scale = window.scale_factor() as f32;
                 self.auto_exposure = renderer.auto_exposure();
                 self.ev_bias = renderer.ev_bias();
                 self.renderer = Some(renderer);
+                window.request_redraw();
                 self.window = Some(window);
             }
             Err(err) => {
@@ -1047,6 +1188,25 @@ impl ApplicationHandler for App {
     }
 
     fn window_event(&mut self, event_loop: &ActiveEventLoop, _id: WindowId, event: WindowEvent) {
+        // Request before handling input so early returns still repaint hover,
+        // menu navigation, diagram edits, and confirmation dialogs. Winit
+        // coalesces requests when several input events arrive together.
+        if matches!(
+            event,
+            WindowEvent::MouseInput { .. }
+                | WindowEvent::CursorMoved { .. }
+                | WindowEvent::CursorLeft { .. }
+                | WindowEvent::MouseWheel { .. }
+                | WindowEvent::KeyboardInput { .. }
+                | WindowEvent::ScaleFactorChanged { .. }
+                | WindowEvent::Resized(_)
+                | WindowEvent::Occluded(false)
+                | WindowEvent::Focused(true)
+        ) && let Some(window) = &self.window
+        {
+            self.pacer.request();
+            window.request_redraw();
+        }
         match event {
             WindowEvent::CloseRequested => event_loop.exit(),
             WindowEvent::ScaleFactorChanged { scale_factor, .. } => {
@@ -1054,108 +1214,69 @@ impl ApplicationHandler for App {
             }
             WindowEvent::Resized(size) => {
                 if let Some(r) = self.renderer.as_mut() {
+                    let old_size = r.size();
                     r.resize(size.width, size.height);
+                    if old_size.0 == 0 || old_size.1 == 0 || size.width == 0 || size.height == 0 {
+                        self.state.last = Instant::now();
+                    }
                 }
             }
+            WindowEvent::Occluded(occluded) => {
+                self.occluded = occluded;
+                self.state.last = Instant::now();
+            }
             WindowEvent::RedrawRequested => {
-                if self.menu.open || self.game.as_ref().is_some_and(|g| g.open) {
+                let started = Instant::now();
+                let Some((w, h)) = self.renderer.as_ref().map(Renderer::size) else {
+                    return;
+                };
+                if self.occluded || w == 0 || h == 0 {
                     self.state.last = Instant::now();
-                } else {
+                    return;
+                }
+                if self.world_visible()
+                    && self
+                        .pacer
+                        .deadline(started, true, self.graphics.settings.max_fps)
+                        .is_some_and(|deadline| deadline > started)
+                {
+                    self.pacer.request();
+                    return;
+                }
+                if self.world_visible() {
                     self.state.advance();
                     self.state.track();
+                } else {
+                    self.state.last = Instant::now();
                 }
-                let lock_label = self
-                    .state
-                    .lock_label(self.show_labels && self.show_hud && self.game.is_none());
+                let (frame, vertices) = self.build_frame(w, h);
                 if let (Some(r), Some(window)) = (self.renderer.as_mut(), self.window.as_ref()) {
-                    let (w, h) = r.size();
-                    if w > 0 && h > 0 {
-                        let mut frame = self.state.build_frame(w, h);
-                        if self.show_hud && !self.menu.open {
-                            let layout = ui::layout(w as f32, h as f32, self.scale)
-                                .with_puzzle(self.game.is_some());
-                            ui::build(
-                                &mut frame.ui,
-                                &layout,
-                                w as f32,
-                                h as f32,
-                                ui::HudState {
-                                    labels: ui::LabelOptions {
-                                        show: self.show_labels && self.game.is_none(),
-                                        locked: self.state.locked_body(),
-                                    },
-                                    lock_label: lock_label.as_deref(),
-                                    sim_time: self.state.sim_time,
-                                    day_step_failed: self.state.day_step_failed,
-                                    auto_exposure: self.auto_exposure,
-                                    ev_bias: self.ev_bias,
-                                    steady_stars: self.state.observer.star_orientation.is_some(),
-                                    minutes_per_second: WARPS[self.state.warp] * 1440.0,
-                                },
-                                &frame.labels,
-                            );
-                        }
-                        if !self.show_hud
-                            && !self.menu.open
-                            && !self.game.as_ref().is_some_and(|g| g.open)
-                        {
-                            let layout = ui::layout(w as f32, h as f32, self.scale)
-                                .with_puzzle(self.game.is_some());
-                            ui::build_lock(
-                                &mut frame.ui,
-                                &layout,
-                                [w as f32, h as f32],
-                                lock_label.as_deref(),
-                            );
-                        }
-                        if let Some(game) = &self.game {
-                            game::build(
-                                &mut frame.ui,
-                                [w as f32, h as f32],
-                                self.scale,
-                                game,
-                                self.cursor,
-                                &format!(
-                                    "{} | {:+.1} min/s{}",
-                                    if self.state.warp == STOP_WARP {
-                                        "STOPPED"
-                                    } else {
-                                        "PLAYING"
-                                    },
-                                    WARPS[self.state.warp] * 1440.0,
-                                    if self.state.view_lock.is_some() {
-                                        " | View locked"
-                                    } else {
-                                        ""
-                                    }
-                                ),
-                            );
-                        }
-                        menu::build(
-                            &mut frame.ui,
-                            [w as f32, h as f32],
-                            self.scale,
-                            &self.menu,
-                            self.cursor,
-                            self.game.is_some(),
-                        );
-                        r.render(&frame);
+                    window.pre_present_notify();
+                    let outcome = r.render(frame.as_ref(), &vertices);
+                    self.pacer.rendered(started);
+                    if matches!(outcome, renderer::RenderOutcome::Retry) {
+                        // Menus do not have a continuous redraw loop to retry a
+                        // lost surface or a timed-out acquisition for them.
+                        self.pacer.request();
                     }
-                    let rate = format!("{:+.3} day/s", WARPS[self.state.warp]);
-                    let lock = lock_label
-                        .as_ref()
-                        .map_or_else(String::new, |label| format!("  ·  locked: {label}"));
-                    let exposure = if self.auto_exposure {
-                        format!("auto exp {:+.2} EV", self.ev_bias)
-                    } else {
-                        format!("exp {:.3} {:+.2} EV", r.manual_exposure(), self.ev_bias)
-                    };
-                    let title = if self.game.is_some() {
+                    let title = if self.graphics.open {
+                        "stargaze · Graphics settings".into()
+                    } else if self.game.is_some() {
                         "stargaze · Reconstruction puzzle · M: menu · Tab: diagram · Space: stop"
                             .into()
                     } else if self.menu.open {
                         "stargaze  ·  Solar systems".to_string()
                     } else {
+                        let rate = format!("{:+.3} day/s", WARPS[self.state.warp]);
+                        let lock = self
+                            .state
+                            .lock_label(self.show_labels && self.show_hud)
+                            .map_or_else(String::new, |label| format!("  ·  locked: {label}"));
+                        let exposure = if self.auto_exposure {
+                            format!("auto exp {:+.2} EV", self.ev_bias)
+                        } else {
+                            format!("exp {:.3} {:+.2} EV", r.manual_exposure(), self.ev_bias)
+                        };
                         format!(
                             "stargaze  ·  t = {:.2} d ({:.3} yr)  ·  {}  ·  {} spp  ·  {exposure}{lock}  ·  right click=lock  left click=unlock  drag=look  scroll=zoom  space=stop  , . =exposure  A=auto  arrows=speed  R=reset  E=eclipse  T=transit  H=hud  L=labels",
                             self.state.sim_time,
@@ -1218,7 +1339,7 @@ impl ApplicationHandler for App {
             }
             WindowEvent::CursorMoved { position, .. } => {
                 self.cursor = (position.x, position.y);
-                if self.menu.open {
+                if self.menu.open || self.graphics.open {
                     return;
                 }
                 if let (Some(game), Some(r)) = (self.game.as_mut(), self.renderer.as_ref())
@@ -1249,6 +1370,9 @@ impl ApplicationHandler for App {
                 self.state.end_sky_press();
             }
             WindowEvent::MouseWheel { delta, .. } => {
+                if self.graphics.open {
+                    return;
+                }
                 let y = match delta {
                     MouseScrollDelta::LineDelta(_, y) => y as f64,
                     MouseScrollDelta::PixelDelta(p) => p.y / 50.0,
@@ -1278,6 +1402,12 @@ impl ApplicationHandler for App {
                 let PhysicalKey::Code(key) = event.physical_key else {
                     return;
                 };
+                if self.graphics.open {
+                    if !event.repeat && self.graphics.key(key) {
+                        self.sync_graphics();
+                    }
+                    return;
+                }
                 if self.game.as_ref().is_some_and(|g| g.confirm_clear) {
                     if !event.repeat
                         && let (Some(game), Some(r)) = (self.game.as_mut(), self.renderer.as_ref())
@@ -1299,6 +1429,10 @@ impl ApplicationHandler for App {
                     return;
                 }
                 if self.menu.open {
+                    if key == KeyCode::KeyG && !event.repeat {
+                        self.graphics.open = true;
+                        return;
+                    }
                     if let Some(layout) = self.menu_layout() {
                         let page = layout.rows.len();
                         match key {
@@ -1448,9 +1582,28 @@ impl ApplicationHandler for App {
         }
     }
 
-    fn about_to_wait(&mut self, _event_loop: &ActiveEventLoop) {
-        if let Some(window) = self.window.as_ref() {
-            window.request_redraw();
+    fn about_to_wait(&mut self, event_loop: &ActiveEventLoop) {
+        let size = self
+            .renderer
+            .as_ref()
+            .map(Renderer::size)
+            .unwrap_or_default();
+        event_loop.set_control_flow(ControlFlow::Wait);
+        if self.occluded || size.0 == 0 || size.1 == 0 {
+            return;
+        }
+        let fps = if self.world_visible() {
+            self.graphics.settings.max_fps
+        } else {
+            0
+        };
+        let now = Instant::now();
+        if let Some(deadline) = self.pacer.deadline(now, self.continuous_redraw(size), fps) {
+            if deadline > now {
+                event_loop.set_control_flow(ControlFlow::WaitUntil(deadline));
+            } else if let Some(window) = &self.window {
+                window.request_redraw();
+            }
         }
     }
 }
@@ -1465,7 +1618,7 @@ fn main() -> Result<()> {
     log::info!("generated {} background stars", stars.len());
 
     let event_loop = EventLoop::new()?;
-    event_loop.set_control_flow(ControlFlow::Poll);
+    event_loop.set_control_flow(ControlFlow::Wait);
 
     let mut app = App {
         state: State::with_scene(scene),
@@ -1482,6 +1635,9 @@ fn main() -> Result<()> {
         auto_exposure: true,
         ev_bias: 0.0,
         exposure_dragging: false,
+        occluded: false,
+        graphics: graphics::Menu::load(),
+        pacer: graphics::FramePacer::default(),
     };
 
     if app.game.is_some() {
@@ -1534,9 +1690,8 @@ fn main() -> Result<()> {
 mod app_tests {
     use super::*;
 
-    #[test]
-    fn time_controls_and_menus_preserve_lock_but_lock_button_releases_it() {
-        let mut app = App {
+    fn app() -> App {
+        App {
             state: State::with_scene(sim::default_scene()),
             menu: menu::Menu::default(),
             game: None,
@@ -1551,7 +1706,126 @@ mod app_tests {
             auto_exposure: true,
             ev_bias: 0.0,
             exposure_dragging: false,
-        };
+            occluded: false,
+            graphics: graphics::Menu::default(),
+            pacer: graphics::FramePacer::default(),
+        }
+    }
+
+    #[test]
+    fn opaque_screens_build_without_a_world_and_menu_covers_diagram() {
+        let mut app = app();
+        app.game = Some(game::Game::default());
+        app.toggle_notebook();
+        // Deliberately make world assembly impossible. Neither opaque screen
+        // should touch scene geometry, even with the HUD and labels enabled.
+        app.state.scene.bodies.clear();
+        let (world, diagram) = app.build_frame(1280, 720);
+        assert!(world.is_none());
+        assert!(!diagram.is_empty());
+        assert!(!app.continuous_redraw((1280, 720)));
+
+        app.toggle_menu();
+        let (world, vertices) = app.build_frame(1280, 720);
+        assert!(world.is_none());
+        assert!(!app.continuous_redraw((1280, 720)));
+        let mut menu_only = Vec::new();
+        menu::build(
+            &mut menu_only,
+            [1280.0, 720.0],
+            app.scale,
+            &app.menu,
+            app.cursor,
+            true,
+        );
+        assert_eq!(
+            bytemuck::cast_slice::<_, u8>(&vertices),
+            bytemuck::cast_slice::<_, u8>(&menu_only),
+            "the map menu should not build the diagram or HUD underneath"
+        );
+        app.graphics.open = true;
+        let (world, settings) = app.build_frame(1280, 720);
+        assert!(world.is_none());
+        assert!(!settings.is_empty());
+        assert!(!app.continuous_redraw((1280, 720)));
+        app.toggle_menu();
+        assert!(!app.graphics.open);
+        assert!(app.menu.open, "back from settings returns to the map menu");
+    }
+
+    #[test]
+    fn only_a_visible_observation_redraws_continuously() {
+        let mut app = app();
+        // Stopped simulation still needs fresh samples for convergence.
+        assert_eq!(app.state.warp, STOP_WARP);
+        assert!(app.continuous_redraw((1280, 720)));
+        app.toggle_menu();
+        assert!(!app.continuous_redraw((1280, 720)));
+        app.toggle_menu();
+        app.game = Some(game::Game::default());
+        app.toggle_notebook();
+        assert!(!app.continuous_redraw((1280, 720)));
+        app.toggle_notebook();
+        assert!(app.continuous_redraw((1280, 720)));
+        for size in [(0, 0), (0, 720), (1280, 0)] {
+            assert!(!app.continuous_redraw(size));
+        }
+        app.occluded = true;
+        assert!(!app.continuous_redraw((1280, 720)));
+        app.occluded = false;
+        assert!(app.continuous_redraw((1280, 720)));
+    }
+
+    #[test]
+    fn playback_after_a_sleeping_still_view_does_not_jump_in_time() {
+        let mut app = app();
+        for forward in [true, false] {
+            app.state.warp = STOP_WARP;
+            app.state.last = Instant::now() - std::time::Duration::from_secs(60);
+            let time = app.state.sim_time;
+            app.state.change_speed(forward);
+            assert!(app.state.last.elapsed().as_secs_f64() < 1.0);
+            assert_eq!(app.state.sim_time, time);
+        }
+    }
+
+    #[test]
+    fn observation_resumes_after_idle_menus_with_the_same_camera_and_time() {
+        let mut app = app();
+        app.game = Some(game::Game::default());
+        app.state.warp = STOP_WARP + 1;
+        app.state.view_lock = Some(ViewLock::Body(2));
+        let (before, _) = app.build_frame(1280, 720);
+        let before = before.unwrap();
+        app.toggle_notebook();
+        assert!(app.build_frame(1280, 720).0.is_none());
+        app.toggle_menu();
+        assert!(app.build_frame(1280, 720).0.is_none());
+        app.state.last = Instant::now() - std::time::Duration::from_secs(60);
+        app.toggle_menu();
+        assert!(app.state.last.elapsed().as_secs_f64() < 1.0);
+        assert!(app.build_frame(1280, 720).0.is_none());
+        app.state.last = Instant::now() - std::time::Duration::from_secs(60);
+        app.toggle_notebook();
+        assert!(app.state.last.elapsed().as_secs_f64() < 1.0);
+        let (after, _) = app.build_frame(1280, 720);
+        let after = after.unwrap();
+        assert_eq!(before.scene_time, after.scene_time);
+        assert_eq!(
+            bytemuck::bytes_of(&before.globals),
+            bytemuck::bytes_of(&after.globals)
+        );
+        assert_eq!(
+            bytemuck::cast_slice::<_, u8>(&before.bodies),
+            bytemuck::cast_slice::<_, u8>(&after.bodies)
+        );
+        assert_eq!(app.state.warp, STOP_WARP + 1);
+        assert_eq!(app.state.view_lock, Some(ViewLock::Body(2)));
+    }
+
+    #[test]
+    fn time_controls_and_menus_preserve_lock_but_lock_button_releases_it() {
+        let mut app = app();
         let layout = ui::layout(1280.0, 720.0, 1.0);
         let click = |app: &mut App, r: ui::Rect| {
             assert!(app.hud_click(&layout, (r.x + r.w * 0.5) as f64, (r.y + r.h * 0.5) as f64));

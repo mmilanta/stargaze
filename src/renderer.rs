@@ -1,6 +1,7 @@
 //! Presentation and HUD around the progressive analytic path tracer.
 use std::sync::Arc;
 
+use crate::graphics;
 use crate::pathtracer::{Options, PathTracer};
 use crate::stars::CatalogueStar;
 use crate::ui::{self, Label, UiVertex};
@@ -14,7 +15,7 @@ pub struct Globals {
     pub cam_right: [f32; 4],
     pub cam_up: [f32; 4],
     pub cam_forward: [f32; 4], // w = tan(fov_y / 2)
-    pub viewport: [f32; 4],    // width, height, exposure, unused
+    pub viewport: [f32; 4],    // trace width, height, exposure, display aspect
     // Host-atmosphere shell, in telescope space.
     pub atmo_center: [f32; 4],   // xyz = host centre, w = host radius
     pub atmo_rayleigh: [f32; 4], // rgb = Rayleigh coefficients (1/AU), w = Mie
@@ -41,7 +42,12 @@ pub struct Frame {
     pub bodies: Vec<Sphere>,
     pub scene_time: f64,
     pub labels: Vec<Label>,
-    pub ui: Vec<UiVertex>,
+}
+
+pub enum RenderOutcome {
+    Presented,
+    Retry,
+    Unavailable,
 }
 
 pub struct Renderer {
@@ -51,6 +57,7 @@ pub struct Renderer {
     config: wgpu::SurfaceConfiguration,
     size: (u32, u32),
     tracer: PathTracer,
+    graphics: graphics::Settings,
     ui_pipeline: wgpu::RenderPipeline,
     ui_bind_group: wgpu::BindGroup,
     ui_vbo: wgpu::Buffer,
@@ -58,7 +65,11 @@ pub struct Renderer {
 }
 
 impl Renderer {
-    pub fn new(window: Arc<Window>, stars: &[CatalogueStar]) -> Result<Self> {
+    pub fn new(
+        window: Arc<Window>,
+        stars: &[CatalogueStar],
+        graphics: graphics::Settings,
+    ) -> Result<Self> {
         let instance = wgpu::Instance::new(wgpu::InstanceDescriptor::new_without_display_handle());
         let surface = instance.create_surface(window.clone())?;
         let adapter = pollster::block_on(instance.request_adapter(&wgpu::RequestAdapterOptions {
@@ -94,7 +105,17 @@ impl Renderer {
             .ok_or_else(|| anyhow!("surface is not supported by the adapter"))?;
         config.format = format;
         surface.configure(&device, &config);
-        let tracer = PathTracer::new(&device, format, (width, height), stars, Options::from_env());
+        let mut options = Options::from_env();
+        options.samples_per_frame = graphics.samples_per_frame;
+        options.max_bounces = graphics.max_bounces;
+        options.sample_limit = graphics.sample_limit();
+        let tracer = PathTracer::new(
+            &device,
+            format,
+            graphics.render_size((width, height)),
+            stars,
+            options,
+        );
 
         let atlas_extent = wgpu::Extent3d {
             width: ui::ATLAS_W as u32,
@@ -225,6 +246,7 @@ impl Renderer {
             config,
             size: (width, height),
             tracer,
+            graphics,
             ui_pipeline,
             ui_bind_group,
             ui_vbo,
@@ -233,20 +255,33 @@ impl Renderer {
     }
 
     pub fn resize(&mut self, width: u32, height: u32) {
+        self.size = (width, height);
         if width == 0 || height == 0 {
             return;
         }
-        self.size = (width, height);
+        if (self.config.width, self.config.height) == self.size {
+            return;
+        }
         self.config.width = width;
         self.config.height = height;
         self.surface.configure(&self.device, &self.config);
-        self.tracer.resize(&self.device, self.size);
     }
     pub fn size(&self) -> (u32, u32) {
         self.size
     }
     pub fn samples(&self) -> u32 {
         self.tracer.samples()
+    }
+    pub fn needs_redraw(&self) -> bool {
+        self.graphics.render_size(self.size) != self.tracer.size() || self.tracer.needs_redraw()
+    }
+    pub fn set_graphics(&mut self, settings: graphics::Settings) {
+        self.graphics = settings.normalized();
+        self.tracer.set_quality(
+            settings.samples_per_frame,
+            settings.max_bounces,
+            settings.sample_limit(),
+        );
     }
     /// Switch between automatic metering and the manual exposure, and set the
     /// exposure-compensation bias in stops.
@@ -263,22 +298,28 @@ impl Renderer {
         self.tracer.manual_exposure()
     }
 
-    pub fn render(&mut self, frame: &Frame) {
+    /// An opaque menu or diagram needs only UI. Leave the world accumulation
+    /// and exposure untouched until observation resumes.
+    pub fn render(&mut self, frame: Option<&Frame>, ui: &[UiVertex]) -> RenderOutcome {
+        if self.size.0 == 0 || self.size.1 == 0 {
+            return RenderOutcome::Unavailable;
+        }
         let surface_tex = match self.surface.get_current_texture() {
             wgpu::CurrentSurfaceTexture::Success(t)
             | wgpu::CurrentSurfaceTexture::Suboptimal(t) => t,
             wgpu::CurrentSurfaceTexture::Outdated | wgpu::CurrentSurfaceTexture::Lost => {
                 self.surface.configure(&self.device, &self.config);
-                return;
+                return RenderOutcome::Retry;
             }
-            wgpu::CurrentSurfaceTexture::Timeout | wgpu::CurrentSurfaceTexture::Occluded => return,
+            wgpu::CurrentSurfaceTexture::Timeout => return RenderOutcome::Retry,
+            wgpu::CurrentSurfaceTexture::Occluded => return RenderOutcome::Unavailable,
             wgpu::CurrentSurfaceTexture::Validation => {
                 log::error!("surface validation error while acquiring frame");
-                return;
+                return RenderOutcome::Unavailable;
             }
         };
-        if !frame.ui.is_empty() {
-            let bytes = bytemuck::cast_slice(&frame.ui);
+        if !ui.is_empty() {
+            let bytes = bytemuck::cast_slice(ui);
             if bytes.len() as u64 > self.ui_capacity {
                 self.ui_capacity = (bytes.len() as u64).next_power_of_two();
                 self.ui_vbo = self.device.create_buffer(&wgpu::BufferDescriptor {
@@ -296,7 +337,12 @@ impl Renderer {
             .create_command_encoder(&wgpu::CommandEncoderDescriptor {
                 label: Some("frame"),
             });
-        self.tracer.encode(&self.queue, &mut encoder, frame);
+        if let Some(frame) = frame {
+            // Resizing a menu must not repeatedly allocate a full HDR buffer.
+            self.tracer
+                .resize(&self.device, self.graphics.render_size(self.size));
+            self.tracer.encode(&self.queue, &mut encoder, frame);
+        }
         {
             let mut pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
                 label: Some("display-and-hud"),
@@ -314,15 +360,18 @@ impl Renderer {
                 occlusion_query_set: None,
                 multiview_mask: None,
             });
-            self.tracer.display(&mut pass);
-            if !frame.ui.is_empty() {
+            if frame.is_some() {
+                self.tracer.display(&mut pass);
+            }
+            if !ui.is_empty() {
                 pass.set_pipeline(&self.ui_pipeline);
                 pass.set_bind_group(0, &self.ui_bind_group, &[]);
                 pass.set_vertex_buffer(0, self.ui_vbo.slice(..));
-                pass.draw(0..frame.ui.len() as u32, 0..1);
+                pass.draw(0..ui.len() as u32, 0..1);
             }
         }
         self.queue.submit(Some(encoder.finish()));
         self.queue.present(surface_tex);
+        RenderOutcome::Presented
     }
 }

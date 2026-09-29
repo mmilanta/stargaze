@@ -85,6 +85,7 @@ pub struct Layout {
     pub previous: Rect,
     pub next: Rect,
     pub resume: Rect,
+    pub graphics: Rect,
     pub scale: f32,
 }
 
@@ -122,6 +123,12 @@ impl Layout {
                 y: 28.0 * s,
                 w: 140.0 * s,
                 h: 28.0 * s,
+            },
+            graphics: Rect {
+                x: x + 120.0 * s,
+                y: h - 125.0 * s,
+                w: width - 240.0 * s,
+                h: 32.0 * s,
             },
             scale: s,
         }
@@ -288,6 +295,15 @@ pub fn build(
                 );
             }
         }
+        crate::ui::toolbar_button(
+            verts,
+            l.graphics,
+            "[G]raphics",
+            s,
+            false,
+            l.graphics.contains(cursor.0, cursor.1),
+            viewport,
+        );
         let message = menu.error.as_deref().unwrap_or(if menu.entries.is_empty() {
             "No YAML systems found in configs."
         } else if puzzle {
@@ -379,12 +395,14 @@ mod tests {
             for r in l
                 .rows
                 .iter()
-                .chain([&l.home, &l.previous, &l.next, &l.resume])
+                .chain([&l.home, &l.previous, &l.next, &l.resume, &l.graphics])
             {
                 assert!(r.x >= 0.0 && r.y >= 0.0);
                 assert!(r.x + r.w <= w && r.y + r.h <= h);
             }
             assert!(l.resume.y + l.resume.h < l.rows[0].y);
+            assert!(l.previous.x + l.previous.w <= l.graphics.x);
+            assert!(l.graphics.x + l.graphics.w <= l.next.x);
             let last = l.rows.last().unwrap();
             assert!(last.y + last.h < l.previous.y);
             let hud = crate::ui::layout(w, h, scale);
