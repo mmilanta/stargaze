@@ -8,3 +8,12 @@
 .concept-card.phosphor .card-copy>p{min-height:0}
 .card-copy code{font:11px monospace;color:#c2f983}
 @media(max-width:800px){.concept-card.phosphor{display:block}.concept-card.phosphor .card-preview{border-right:0;border-bottom:1px solid #2b2e2d}.concept-card.phosphor .card-copy{padding:25px 27px}}
+
+.concept-card.survey{--accent:#8debd2;--color1:#123c84;--color2:#edf5ff;--color3:#8debd2}
+.concept-card.archive{--accent:#d9c9b0;--color1:#eee9db;--color2:#233c61;--color3:#b33f2e}
+.concept-card.nocturne{--accent:#e6c778;--color1:#0e1428;--color2:#e4e9f8;--color3:#e6c778}
+.celestial-series .series-heading h2{color:#d7dfee}
+.celestial-series .concept-card{border-color:#394559}
+.new-series .concept-card.phosphor{grid-column:auto;display:block}
+.new-series .concept-card.phosphor .card-preview{border-right:0;border-bottom:1px solid #2b2e2d}
+.new-series .concept-card.phosphor .card-copy{padding:25px 27px}

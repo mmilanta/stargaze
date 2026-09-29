@@ -4,6 +4,9 @@ const themes = {
   blueprint: { name: 'Celestial Blueprint', number: '03', kind: 'NEW TERRITORY', note: 'A celestial drafting table. Cobalt paper, chalk lines, signal yellow, and IBM Plex Mono. A circular sky chart takes center stage, with a horizontal system index underneath. The chart is decorative, not a computed orbital map.', title: 'Find your coordinates.', subtitle: 'A chart, a destination, and a sky still to be discovered.', eyebrow: 'CELESTIAL ATLAS / PLATE 003' },
   vermilion: { name: 'Vermilion Dispatch', number: '04', kind: 'NEW TERRITORY', note: 'A bold space expedition poster. Vermilion, near-black ink, warm cream, and oversized DM Sans lettering. An image-led dispatch fills the left side; a dark destination index occupies the right. Hard rules replace conventional cards.', title: 'PICK YOUR SKY.', subtitle: 'Five destinations. Zero ordinary nights.', eyebrow: 'STARGAZE EXPLORATION BUREAU / DISPATCH 004' },
   phosphor: { name: 'Phosphor Console', number: '05', kind: 'NEW TERRITORY', note: 'A remote observatory terminal. Black, acid lime, mint, VT323 display lettering, and IBM Plex Mono readouts. Select a system from the file tree, or type commands into the working prompt. Try help, open 2, puzzle, explore, and menu.', title: 'REMOTE OBSERVATORY', subtitle: 'Connection established. The night shift is yours.', eyebrow: 'STARGAZE://OBSERVATORY / SESSION 005' },
+  survey: { name: 'Celestial Survey', nav: 'Survey', number: '06', kind: 'CELESTIAL FAMILY', family: true, note: 'An exploration desk in cobalt and turquoise. A large compass chart sits between the world index and the selected destination. Thin instrument lines and a preview scale control build on Celestial Blueprint without losing its game-like sense of discovery.', title: 'The next sky is calling.', subtitle: 'Choose a world. Follow its motion. Find the pattern.', eyebrow: 'CELESTIAL SURVEY / EXPEDITION 006' },
+  archive: { name: 'Celestial Archive', nav: 'Archive', number: '07', kind: 'CELESTIAL FAMILY', family: true, note: 'A printed celestial atlas in ivory, navy, and vermilion. Newsreader serif titles, an etched circular chart, and numbered world plates give the game the feeling of opening an old book of unexplored skies.', title: 'An atlas of undiscovered skies.', subtitle: 'Open a field study. Let the night reveal its secrets.', eyebrow: 'THE CELESTIAL ARCHIVE / VOLUME I' },
+  nocturne: { name: 'Celestial Nocturne', nav: 'Nocturne', number: '08', kind: 'CELESTIAL FAMILY', family: true, note: 'The most game-focused variation: a constellation of clickable mysteries in deep indigo, silver, and saffron. Puzzle mode is selected on arrival. Pick a star to choose a field study, then begin your own theory. The constellation is a decorative level selector, not an orbital simulation.', title: 'Every sky has a secret.', puzzleTitle: 'Every sky has a secret.', subtitle: 'Choose a distant light. Discover the world behind it.', eyebrow: 'CELESTIAL NOCTURNE / CHOOSE YOUR NEXT MYSTERY' },
 };
 const theme = document.body.dataset.theme;
 const concept = themes[theme];
@@ -47,14 +50,14 @@ let toastTimer;
 document.getElementById('app').innerHTML = `
   <header class="concept-bar">
     <a class="all-concepts" href="index.html">${icon('back')}<span>All concepts</span></a>
-    <nav class="concept-switcher" aria-label="Design concepts">${Object.entries(themes).map(([key, value]) => `<a href="${key}.html" ${key === theme ? 'aria-current="page"' : ''}><span>${value.number}</span> ${value.name}</a>`).join('')}</nav>
+    <nav class="concept-switcher" aria-label="Design concepts">${Object.entries(themes).map(([key, value]) => `<a href="${key}.html" ${key === theme ? 'aria-current="page"' : ''}><span>${value.number}</span> ${value.nav || value.name}</a>`).join('')}</nav>
     <button class="concept-info" id="concept-info" aria-label="About this concept">i</button>
   </header>
   <div class="workspace">
     <main class="main-shell" id="main">
       <header class="app-header">
         <a href="index.html" class="brand">${icon('orbit')}<span>stargaze<span class="brand-dot">.</span></span></a>
-        <div class="header-right"><span class="session-status"><i></i> Observation paused</span><button id="resume" class="button secondary">Resume <kbd>Esc</kbd></button></div>
+        <div class="header-right"><span class="session-status"><i></i> ${concept.family ? 'Your current sky is waiting' : 'Observation paused'}</span><button id="resume" class="button secondary">Resume <kbd>Esc</kbd></button></div>
       </header>
       <section class="intro">
         <div><p class="eyebrow">${concept.eyebrow || (theme === 'amber' ? 'THE NIGHT IS YOURS' : 'OBSERVATORY / SYSTEM LIBRARY')}</p><h1 id="page-title">${concept.title || 'A sky worth exploring.'}</h1><p class="intro-copy" id="intro-copy">${concept.subtitle || 'Choose a world. Settle in. See what moves.'}</p></div>
@@ -62,7 +65,7 @@ document.getElementById('app').innerHTML = `
       </section>
       <div class="library-layout">
         <section class="library" aria-label="System library">
-          <div class="section-heading"><span id="library-title">Solar systems</span><span class="counter" id="counter">05 AVAILABLE</span></div>
+          <div class="section-heading"><span id="library-title">${concept.family ? 'Destinations' : 'Solar systems'}</span><span class="counter" id="counter">05 AVAILABLE</span></div>
           <label class="search">${icon('search')}<input id="search" type="search" placeholder="Find a solar system…" aria-label="Search systems"><kbd>/</kbd></label>
           <div class="filters" aria-label="Library filters"><button class="active" data-filter="all" aria-pressed="true">All systems</button><button data-filter="favorites" aria-pressed="false">${icon('star')} Favorites</button><button data-filter="binary" aria-pressed="false">Binary</button></div>
           <div id="system-list" class="system-list"></div>
@@ -92,7 +95,7 @@ document.getElementById('app').innerHTML = `
   </div>
   <footer class="prototype-footer"><span><i></i> INTERACTIVE HTML CONCEPT</span><span>${concept.number} / ${concept.name} <span class="prototype-separator">·</span> ${concept.kind}</span></footer>
   <div id="toast" class="toast" role="status"></div>
-  <dialog id="about"><button id="close-about" class="icon-button" aria-label="Close concept details">${icon('close')}</button><p class="eyebrow">CONCEPT ${concept.number} / ${concept.kind}</p><h2>${concept.name}</h2><p>${concept.note}</p><p class="dialog-detail">Try selecting systems, switching modes, searching, and entering the observation. The controls are an interactive browser prototype.</p><a href="index.html" class="button primary">Compare all five ${icon('arrow')}</a></dialog>
+  <dialog id="about"><button id="close-about" class="icon-button" aria-label="Close concept details">${icon('close')}</button><p class="eyebrow">CONCEPT ${concept.number} / ${concept.kind}</p><h2>${concept.name}</h2><p>${concept.note}</p><p class="dialog-detail">Try selecting systems, switching modes, searching, and entering the observation. The controls are an interactive browser prototype.</p><a href="index.html" class="button primary">Compare all concepts ${icon('arrow')}</a></dialog>
 `;
 
 const $ = selector => document.querySelector(selector);
@@ -102,6 +105,54 @@ if (theme === 'blueprint' || theme === 'vermilion') {
 }
 if (theme === 'blueprint') {
   $('#planet-stage').insertAdjacentHTML('beforeend', '<div class="chart-reticle" aria-hidden="true"><span>N / 00°</span><span>E / 90°</span><span>S / 180°</span><span>W / 270°</span></div><span class="chart-note">ILLUSTRATIVE SKY CHART</span>');
+}
+if (concept.family) {
+  $('#planet-stage').insertAdjacentHTML('beforeend', '<div class="celestial-reticle" aria-hidden="true"><span>N / 00°</span><span>E / 90°</span><span>S / 180°</span><span>W / 270°</span></div><div class="azimuth-ticks" aria-hidden="true"></div><span class="celestial-chart-note">ILLUSTRATIVE SKY CHART</span>');
+  $('.feature').insertAdjacentHTML('beforeend', '<div class="chart-tools" aria-label="Preview chart controls"><button id="chart-grid" aria-pressed="true">Grid <span>on</span></button><button id="chart-reticle" aria-pressed="true">Compass <span>on</span></button><div class="chart-scale"><button id="chart-smaller" aria-label="Reduce preview scale">−</button><output id="chart-scale">100%</output><button id="chart-larger" aria-label="Increase preview scale">+</button></div><span class="scale-label">Preview scale</span></div>');
+  $('.observation-heading .eyebrow').textContent = 'EXPLORATION PREVIEW';
+  if (theme === 'archive' || theme === 'nocturne') {
+    $('.library-layout').prepend($('.feature'));
+    const story = document.createElement('div');
+    story.className = 'plate-story';
+    const copy = $('.feature-copy');
+    copy.prepend(story);
+    ['.feature-kicker', '#feature-title', '#feature-description'].forEach(selector => story.append($(selector)));
+    const action = document.createElement('div');
+    action.className = 'plate-action';
+    copy.append(action);
+    action.append($('#launch'), $('.launch-hint'));
+  }
+  if (theme === 'archive') {
+    $('.feature').prepend($('.feature-copy'));
+    $('.feature').insertAdjacentHTML('afterbegin', '<div class="archive-running-head"><span>STARGAZE / AN ATLAS OF THE NIGHT</span><span>PLATE VII · FIVE UNCHARTED WORLDS</span></div>');
+  }
+  if (theme === 'nocturne') {
+    $('.library-layout').prepend($('.library'));
+    $('#planet-stage').insertAdjacentHTML('beforeend', `<svg class="constellation-lines" viewBox="0 0 1000 350" preserveAspectRatio="none" aria-hidden="true"><path d="M140 84 290 231 580 277 810 224 670 84 140 84M290 231 670 84"/></svg><div class="unknown-world" aria-hidden="true"></div>${systems.map((s, i) => `<button class="constellation-node node-${i + 1}" data-map-select="${s.id}" aria-pressed="${i === 0}"><span class="node-star" aria-hidden="true"></span><span class="node-name">${s.puzzle}</span><span class="node-number">FIELD STUDY / 0${i + 1}</span></button>`).join('')}`);
+    $('.preview-label').textContent = 'CHOOSE A LIGHT TO BEGIN';
+    $('.celestial-chart-note').textContent = 'A CONSTELLATION OF MYSTERIES';
+    $$('[data-map-select]').forEach(button => button.addEventListener('click', () => select(button.dataset.mapSelect)));
+  }
+  let scale = 100;
+  $('#chart-grid').addEventListener('click', () => {
+    const active = $('#chart-grid').getAttribute('aria-pressed') !== 'true';
+    $('#chart-grid').setAttribute('aria-pressed', String(active));
+    $('#chart-grid span').textContent = active ? 'on' : 'off';
+    document.body.classList.toggle('chart-grid-off', !active);
+  });
+  $('#chart-reticle').addEventListener('click', () => {
+    const active = $('#chart-reticle').getAttribute('aria-pressed') !== 'true';
+    $('#chart-reticle').setAttribute('aria-pressed', String(active));
+    $('#chart-reticle span').textContent = active ? 'on' : 'off';
+    document.body.classList.toggle('chart-reticle-off', !active);
+  });
+  const previewScale = delta => {
+    scale = Math.max(75, Math.min(125, scale + delta));
+    $('#chart-scale').textContent = `${scale}%`;
+    $('#planet-stage').style.setProperty('--preview-scale', String(scale / 100));
+  };
+  $('#chart-smaller').addEventListener('click', () => previewScale(-5));
+  $('#chart-larger').addEventListener('click', () => previewScale(5));
 }
 if (theme === 'vermilion') {
   $('.feature').insertAdjacentHTML('afterbegin', '<div class="dispatch-masthead"><span>THE OBSERVATION DISPATCH</span><span>VOL. 01 / NO. 004</span></div>');
@@ -137,6 +188,8 @@ function renderList() {
   $('#system-list').innerHTML = visible.length ? visible.map(s => `<div class="system-row ${s.id === selected.id ? 'selected' : ''}"><button class="system-select" data-select="${s.id}" aria-pressed="${s.id === selected.id}"><span class="system-number">${String(systems.indexOf(s) + 1).padStart(2, '0')}</span><span class="system-text"><strong>${puzzle ? s.puzzle : s.name}</strong><span>${puzzle ? 'Start a fresh theory' : s.short}</span></span><span class="row-tag">${puzzle ? 'Map' : s.tag}</span><span class="row-arrow">${icon('chevron')}</span></button><button class="row-favorite ${favorites.has(s.id) ? 'favorited' : ''}" data-favorite="${s.id}" aria-label="Favorite ${puzzle ? s.puzzle : s.name}" aria-pressed="${favorites.has(s.id)}">${icon('star')}</button></div>`).join('') : '<div class="empty-state">No skies found.<br><span>Try another search or filter.</span></div>';
   $$('[data-select]').forEach(b => b.addEventListener('click', () => select(b.dataset.select)));
   $$('[data-favorite]').forEach(b => b.addEventListener('click', () => toggleFavorite(b.dataset.favorite)));
+  const visibleIds = new Set(visible.map(system => system.id));
+  $$('[data-map-select]').forEach(button => { button.hidden = !visibleIds.has(button.dataset.mapSelect); });
 }
 function updateFeature() {
   $('#feature-title').textContent = puzzle ? selected.puzzle : selected.name;
@@ -156,6 +209,12 @@ function updateFeature() {
   $('#launch-note').textContent = puzzle ? 'Starts a fresh theory' : 'A new perspective awaits';
   $('#feature-favorite').setAttribute('aria-pressed', String(favorites.has(selected.id)));
   $('#feature-favorite').classList.toggle('favorited', favorites.has(selected.id));
+  $$('[data-map-select]').forEach(button => {
+    const active = button.dataset.mapSelect === selected.id;
+    button.setAttribute('aria-pressed', String(active));
+    button.classList.toggle('selected', active);
+  });
+  if (concept.family && !puzzle) $('#launch span').textContent = 'Explore this sky';
 }
 function select(id) {
   selected = systems.find(s => s.id === id);
@@ -166,9 +225,9 @@ function setMode(mode) {
   puzzle = mode === 'puzzle';
   document.body.classList.toggle('puzzle-mode', puzzle);
   $$('[data-mode]').forEach(b => { b.classList.toggle('active', b.dataset.mode === mode); b.setAttribute('aria-pressed', String(b.dataset.mode === mode)); });
-  $('#page-title').textContent = puzzle ? (theme === 'vermilion' ? 'UNKNOWN SKIES.' : 'A mystery in every sky.') : (concept.title || 'A sky worth exploring.');
-  $('#intro-copy').textContent = puzzle ? 'Watch the motion. Build your own theory.' : (concept.subtitle || 'Choose a world. Settle in. See what moves.');
-  $('#library-title').textContent = puzzle ? 'Uncharted maps' : 'Solar systems';
+  $('#page-title').textContent = puzzle ? (concept.puzzleTitle || (theme === 'vermilion' ? 'UNKNOWN SKIES.' : 'A mystery in every sky.')) : (concept.title || 'A sky worth exploring.');
+  $('#intro-copy').textContent = puzzle ? (theme === 'nocturne' ? concept.subtitle : 'Watch the motion. Build your own theory.') : (concept.subtitle || 'Choose a world. Settle in. See what moves.');
+  $('#library-title').textContent = puzzle ? 'Uncharted maps' : (concept.family ? 'Destinations' : 'Solar systems');
   $('#search').placeholder = puzzle ? 'Find a map…' : 'Find a solar system…';
   $('#search').setAttribute('aria-label', puzzle ? 'Search maps' : 'Search systems');
   $('#search').value = '';
@@ -251,3 +310,4 @@ document.addEventListener('keydown', e => {
 });
 renderList();
 updateFeature();
+if (theme === 'nocturne') setMode('puzzle');

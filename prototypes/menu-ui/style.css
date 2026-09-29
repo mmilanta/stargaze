@@ -21,3 +21,4 @@ body[data-theme=glacier] .main-shell{max-width:1320px;padding:0 44px}body[data-t
 @media(prefers-reduced-motion:reduce){*,*:before,*:after{animation:none!important;transition:none!important;scroll-behavior:auto!important}}
 @media(max-width:1180px){.main-shell{padding:0 30px}.library-layout,body[data-theme=amber] .library-layout{gap:25px}}
 @media(max-width:760px){.main-shell,body[data-theme=glacier] .main-shell{padding:0 20px}.library-layout{grid-template-columns:1fr;gap:24px}.concept-switcher{flex-wrap:wrap;justify-content:flex-start;gap:4px}.concept-switcher a{padding:6px 8px}}
+.concept-switcher{flex-wrap:wrap;justify-content:center}
