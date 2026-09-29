@@ -1,0 +1,291 @@
+@font-face{font-family:'Plex Mono';src:url('assets/plex-mono.ttf') format('truetype');font-display:swap}
+/* 03 — A drafting table: the chart above a horizontal destination index. */
+body[data-theme=blueprint]{--bg:#1538a4;--surface:#1538a4;--surface2:#2448b5;--hover:#ffffff13;--line:#aebfff60;--text:#f0f4ff;--muted:#c0cef5;--accent:#f0e76a;--accent-ink:#1538a4;--accent-soft:#ffffff13;--font:'Plex Mono',monospace;font-size:13px;line-height:1.5;background-color:var(--bg);background-image:linear-gradient(#d8e0ff07 1px,transparent 1px),linear-gradient(90deg,#d8e0ff07 1px,transparent 1px);background-size:32px 32px}
+body[data-theme=blueprint] .main-shell{max-width:1450px;padding:0 50px}
+body[data-theme=blueprint] .app-header{min-height:72px!important;border-bottom:1px solid var(--line)}
+body[data-theme=blueprint] .brand{font-size:21px;letter-spacing:-1px}
+body[data-theme=blueprint] .brand:after{content:' / CELESTIAL ATLAS';font-size:9px;letter-spacing:1px;margin-left:15px;color:var(--muted)}
+body[data-theme=blueprint] .brand svg{width:23px;height:23px}
+body[data-theme=blueprint] .intro{margin:24px 0!important}
+body[data-theme=blueprint] .intro h1{font:500 42px/1.12 'DM Sans',sans-serif;letter-spacing:-1.5px}
+body[data-theme=blueprint] .eyebrow{font-size:9px;letter-spacing:1.5px}
+body[data-theme=blueprint] .intro-copy{font-size:11px}
+body[data-theme=blueprint] .mode-toggle{background:none;border:1px solid var(--line);padding:0;font-size:11px}
+body[data-theme=blueprint] .mode-toggle button{padding:11px 15px}
+body[data-theme=blueprint] .mode-toggle .active{background:var(--text);color:var(--bg)}
+body[data-theme=blueprint] .library-layout{display:flex;flex-direction:column;gap:22px!important}
+body[data-theme=blueprint] .feature{display:grid;grid-template-columns:1.2fr 1fr;gap:35px;border:1px solid var(--line);background:transparent;overflow:visible;padding:18px 28px}
+body[data-theme=blueprint] .preview-top{top:13px;left:25px;right:auto;width:calc(53% - 25px);font-size:8px}
+body[data-theme=blueprint] .planet-stage{height:330px!important;background:transparent;overflow:visible;align-self:center}
+body[data-theme=blueprint] .planet-stage:after{display:none}
+body[data-theme=blueprint] .planet-stage img{width:82%;height:82%;mix-blend-mode:screen;filter:grayscale(1) brightness(1.6);opacity:.9;image-rendering:auto;transform:none}
+body[data-theme=blueprint] .star-field{background-size:93px 89px,77px 61px;opacity:.5}
+body[data-theme=blueprint] .orbit-guide{width:255px;height:255px;transform:none;border:1px solid #edf3ff80}
+body[data-theme=blueprint] .orbit-guide.two{width:300px;height:300px;border:1px dashed #edf3ff55}
+body[data-theme=blueprint] .chart-reticle{position:absolute;inset:20px;pointer-events:none;border-radius:50%;background:linear-gradient(90deg,transparent calc(50% - .5px),#eef3ff55 50%,transparent calc(50% + .5px)),linear-gradient(transparent calc(50% - .5px),#eef3ff55 50%,transparent calc(50% + .5px))}
+.chart-reticle span{position:absolute;font-size:8px;color:#e2eaff}
+.chart-reticle span:nth-child(1){top:1px;left:50%;transform:translateX(-50%)}
+.chart-reticle span:nth-child(2){right:0;top:50%;transform:translateY(-50%)}
+.chart-reticle span:nth-child(3){bottom:0;left:50%;transform:translateX(-50%)}
+.chart-reticle span:nth-child(4){left:0;top:50%;transform:translateY(-50%)}
+.chart-note{position:absolute;bottom:-1px;left:0;font-size:8px;letter-spacing:1px;color:var(--accent)}
+body[data-theme=blueprint] .image-caption{bottom:11px;font-size:8px;max-width:70%;right:0}
+body[data-theme=blueprint] .stage-marker{display:none}
+body[data-theme=blueprint] .feature-copy{padding:25px 0 10px!important;align-self:center;border-left:1px solid var(--line);padding-left:35px!important}
+body[data-theme=blueprint] .feature-kicker{font-size:9px}
+body[data-theme=blueprint] .feature h2{font:500 40px/1.1 'DM Sans',sans-serif;letter-spacing:-1px;margin:17px 0}
+body[data-theme=blueprint] #feature-description{font-size:11px;line-height:1.8;min-height:0}
+body[data-theme=blueprint] .metrics{margin:17px 0!important;padding:15px 0!important}
+body[data-theme=blueprint] .metrics dt{font-size:8px}
+body[data-theme=blueprint] .metrics dd{font-size:12px}
+body[data-theme=blueprint] .feature .primary{min-height:42px;font-size:11px;width:auto;gap:50px}
+body[data-theme=blueprint] .launch-hint{justify-content:flex-start;font-size:8px}
+body[data-theme=blueprint] .library{display:grid;grid-template-columns:1fr 1fr;gap:12px 25px;padding:0}
+body[data-theme=blueprint] .section-heading{margin:0;font-size:12px;align-self:center}
+body[data-theme=blueprint] .search{font-size:12px;padding:8px 12px;background:#123093}
+body[data-theme=blueprint] .filters{margin:0;grid-row:2;grid-column:1/-1;font-size:10px;gap:8px}
+body[data-theme=blueprint] .filters button{padding:3px 9px}
+body[data-theme=blueprint] .system-list{grid-column:1/-1;display:grid;grid-template-columns:repeat(5,minmax(0,1fr));gap:0;min-height:0!important;border:1px solid var(--line)}
+body[data-theme=blueprint] .system-row{border:0;border-right:1px solid var(--line);background:transparent;overflow:visible;min-height:98px}
+body[data-theme=blueprint] .system-row:last-child{border-right:0}
+body[data-theme=blueprint] .system-row.selected{background:var(--text);color:var(--bg)}
+body[data-theme=blueprint] .system-row.selected:before{display:none}
+body[data-theme=blueprint] .system-select{align-items:flex-start;flex-direction:column;gap:7px;padding:13px!important;min-height:96px!important}
+body[data-theme=blueprint] .system-number{font-size:9px;color:var(--accent)}
+body[data-theme=blueprint] .selected .system-number{color:var(--bg)}
+body[data-theme=blueprint] .system-text strong{font-size:12px;font-weight:400;line-height:1.3}
+body[data-theme=blueprint] .system-text>span,body[data-theme=blueprint] .row-tag{display:none}
+body[data-theme=blueprint] .row-favorite{position:absolute;top:4px;right:2px;min-height:30px;width:25px}
+body[data-theme=blueprint] .selected .row-favorite{color:#1538a4!important}
+body[data-theme=blueprint] .library-footer{grid-column:1/-1;margin-top:0!important;font-size:8px}
+body[data-theme=blueprint] .counter{font-size:8px}
+body[data-theme=blueprint] .workspace-footer{padding:17px 0!important;font-size:9px}
+body[data-theme=blueprint] .hud{font-size:10px;background:#123093;border-color:var(--line);min-height:48px}
+body[data-theme=blueprint] .session-status{font-size:9px}
+body[data-theme=blueprint] .button.secondary{font-size:10px;min-height:35px}
+/* 04 — A printed dispatch: a loud masthead and an asymmetric destination menu. */
+body[data-theme=vermilion]{--bg:#f05b3f;--surface:#f6ecd8;--surface2:#e0d4be;--hover:#0000000c;--line:#1c1918;--text:#1c1918;--muted:#544337;--accent:#1c1918;--accent-ink:#f6ecd8;--accent-soft:#0000000c;--font:'DM Sans',sans-serif;font-size:14px;line-height:1.5}
+body[data-theme=vermilion] .main-shell{padding:0 38px;max-width:1480px}
+body[data-theme=vermilion] .app-header{min-height:75px!important;border-bottom:3px solid var(--text)}
+body[data-theme=vermilion] .brand{font-size:26px;letter-spacing:-1px;font-weight:800}
+body[data-theme=vermilion] .brand svg{display:none}
+body[data-theme=vermilion] .brand:after{content:'EXPLORATION BUREAU';font:9px 'Plex Mono',monospace;letter-spacing:1px;margin-left:15px}
+body[data-theme=vermilion] .intro{margin:20px 0 24px!important;align-items:flex-end;gap:15px}
+body[data-theme=vermilion] .intro h1{font-size:clamp(56px,6.8vw,104px);font-weight:950;line-height:.95;letter-spacing:-6px;margin:9px 0 15px}
+body[data-theme=vermilion] .eyebrow{font:9px 'Plex Mono',monospace;letter-spacing:1px;color:var(--text)}
+body[data-theme=vermilion] .intro-copy{font:11px 'Plex Mono',monospace}
+body[data-theme=vermilion] .mode-toggle{border:1px solid var(--text);background:transparent;padding:0;font:10px 'Plex Mono',monospace;align-self:flex-end}
+body[data-theme=vermilion] .mode-toggle button{padding:13px 17px;color:var(--text)}
+body[data-theme=vermilion] .mode-toggle .active{background:var(--text);color:var(--bg)}
+body[data-theme=vermilion] .library-layout{grid-template-columns:minmax(0,1.35fr) minmax(0,.65fr);gap:0!important;border:2px solid var(--text)}
+body[data-theme=vermilion] .feature{border:0;background:var(--surface);overflow:hidden}
+.dispatch-masthead{display:flex;justify-content:space-between;gap:10px;padding:10px 25px;border-bottom:1px solid var(--text);font:9px 'Plex Mono',monospace;letter-spacing:1px}
+body[data-theme=vermilion] .preview-top{top:54px;left:25px;right:25px;color:#bbaca0;font:8px 'Plex Mono',monospace}
+body[data-theme=vermilion] .preview-label{color:#d2c5b5}
+body[data-theme=vermilion] .planet-stage{height:230px!important;background:#1c1918}
+body[data-theme=vermilion] .planet-stage:after{display:none}
+body[data-theme=vermilion] .planet-stage img{image-rendering:auto;filter:sepia(.35) saturate(.8);transform:scale(1.3)}
+body[data-theme=vermilion] .image-caption{color:#c5b8a4;font:8px 'Plex Mono',monospace;bottom:12px}
+body[data-theme=vermilion] .orbit-guide,body[data-theme=vermilion] .star-field,body[data-theme=vermilion] .stage-marker{display:none}
+body[data-theme=vermilion] .feature-copy{padding:20px 27px!important}
+body[data-theme=vermilion] .feature-kicker{font:9px 'Plex Mono',monospace;text-transform:uppercase;color:var(--text)}
+body[data-theme=vermilion] .feature h2{font-size:clamp(45px,4.7vw,70px);line-height:1;font-weight:850;letter-spacing:-3px;margin:13px 0}
+body[data-theme=vermilion] #feature-description{font-size:13px;line-height:1.55;max-width:620px;min-height:0}
+body[data-theme=vermilion] .metrics{margin:15px 0!important;padding:12px 0!important;border-block:1px solid #1c191830}
+body[data-theme=vermilion] .metrics dt{font:8px 'Plex Mono',monospace;text-transform:uppercase}
+body[data-theme=vermilion] .metrics dd{font-size:16px;font-weight:650}
+body[data-theme=vermilion] .feature .primary{background:var(--bg);color:var(--text);font-weight:800;font-size:13px;text-transform:uppercase;min-height:43px}
+body[data-theme=vermilion] .launch-hint{font:8px 'Plex Mono',monospace}
+body[data-theme=vermilion] .library{background:#1c1918;color:#f6ecd8;padding:23px;--surface:#1c1918;--line:#f6ecd83a;--muted:#c5b8a4;--accent:#f05b3f;--accent-soft:#f05b3f19;--hover:#f6ecd80c}
+.destination-label{font:9px 'Plex Mono',monospace;letter-spacing:1px;margin:0 0 20px;color:#f05b3f}
+body[data-theme=vermilion] .section-heading{font-size:23px;letter-spacing:-.5px;font-weight:600;margin-bottom:18px}
+body[data-theme=vermilion] .counter{font:8px 'Plex Mono',monospace}
+body[data-theme=vermilion] .search{padding:10px;background:transparent;border:1px solid #f6ecd84a;font:12px 'Plex Mono',monospace}
+body[data-theme=vermilion] .search input{color:#f6ecd8}
+body[data-theme=vermilion] .filters{font:9px 'Plex Mono',monospace;gap:4px;margin:15px 0}
+body[data-theme=vermilion] .filters button{padding:5px 7px}
+body[data-theme=vermilion] .system-list{gap:0;min-height:0!important}
+body[data-theme=vermilion] .system-row{border:0;border-bottom:1px solid #f6ecd833;background:transparent}
+body[data-theme=vermilion] .system-row.selected{background:transparent;color:#f05b3f}
+body[data-theme=vermilion] .system-row.selected:before{display:none}
+body[data-theme=vermilion] .system-select{min-height:65px!important;padding:14px 0!important;gap:12px}
+body[data-theme=vermilion] .system-number{font:9px 'Plex Mono',monospace;width:18px}
+body[data-theme=vermilion] .system-text strong{font-size:21px;font-weight:600;letter-spacing:-.5px}
+body[data-theme=vermilion] .system-text>span{font:8px 'Plex Mono',monospace;margin-top:3px}
+body[data-theme=vermilion] .row-tag{display:none}
+body[data-theme=vermilion] .row-favorite{width:23px;color:#c5b8a4}
+body[data-theme=vermilion] .library-footer{font:8px 'Plex Mono',monospace;margin-top:20px!important}
+body[data-theme=vermilion] .keyboard-hint{display:none}
+body[data-theme=vermilion] .workspace-footer{font:9px 'Plex Mono',monospace;padding:16px 0!important}
+body[data-theme=vermilion] .hud{background:#1c1918;color:#f6ecd8;--text:#f6ecd8;--line:#f6ecd840;--accent:#f05b3f;--accent-soft:#f05b3f22;--accent-ink:#1c1918;--muted:#c5b8a4;font:11px 'Plex Mono',monospace;min-height:50px;border:0}
+body[data-theme=vermilion] .session-status{font:9px 'Plex Mono',monospace;color:var(--text)}
+body[data-theme=vermilion] .button.secondary{background:none;font:11px 'Plex Mono',monospace;min-height:36px}
+body[data-theme=vermilion] .concept-bar{border-bottom:1px solid #1c191860;color:#1c1918}
+body[data-theme=vermilion] .concept-switcher a[aria-current]{background:#1c1918;color:#f6ecd8}
+/* 05 — Text is the interface: a file tree, optical feed, and working shell. */
+body[data-theme=phosphor]{--bg:#080e09;--surface:#080e09;--surface2:#102115;--hover:#b9ef7010;--line:#3e643f;--text:#c2f983;--muted:#87af84;--accent:#c2f983;--accent-ink:#080e09;--accent-soft:#18301c;--font:'Plex Mono',monospace;font-size:12px;line-height:1.5;background-image:linear-gradient(transparent 3px,#00000025 3px);background-size:100% 4px}
+body[data-theme=phosphor] .main-shell{max-width:1400px;padding:0 42px}
+body[data-theme=phosphor] .app-header{min-height:74px!important;border-bottom:1px dashed var(--line)}
+body[data-theme=phosphor] .brand{font:27px VT323,monospace;letter-spacing:1px;text-transform:uppercase}
+body[data-theme=phosphor] .brand svg{display:none}
+body[data-theme=phosphor] .brand:before{content:'[ * ]';font:24px VT323,monospace;color:#87af84}
+body[data-theme=phosphor] .brand:after{content:'v.005 // tty01';font:9px 'Plex Mono',monospace;margin-left:16px;color:var(--muted)}
+body[data-theme=phosphor] .intro{margin:15px 0!important;padding:0 0 22px;border-bottom:1px dashed var(--line)}
+body[data-theme=phosphor] .eyebrow{font-size:8px;color:#87af84;letter-spacing:1px}
+body[data-theme=phosphor] .intro h1{font:42px/1 VT323,monospace;letter-spacing:2px;text-shadow:0 0 18px #b2e88325;margin-bottom:10px}
+body[data-theme=phosphor] .intro h1:after{content:'_';animation:cursor-blink 1.2s steps(1) infinite}
+@keyframes cursor-blink{50%{opacity:0}}
+body[data-theme=phosphor] .intro-copy{font-size:10px;color:#96c6a9}
+body[data-theme=phosphor] .mode-toggle{background:none;padding:0;border:0;font-size:10px}
+body[data-theme=phosphor] .mode-toggle button{padding:8px 10px;color:var(--muted)}
+body[data-theme=phosphor] .mode-toggle .active{background:none;color:var(--text);outline:1px solid var(--line)}
+body[data-theme=phosphor] .mode-toggle button svg{display:none}
+body[data-theme=phosphor] .mode-toggle button:before{content:'[ ]'}
+body[data-theme=phosphor] .mode-toggle .active:before{content:'[x]'}
+body[data-theme=phosphor] .library-layout{grid-template-columns:minmax(0,.7fr) minmax(0,1.3fr);gap:36px!important}
+body[data-theme=phosphor] .library{padding:0}
+.terminal-path{color:#c2f983;font-size:11px;line-height:1.9;border-bottom:1px dashed var(--line);padding:0 0 16px;margin-bottom:19px}
+.terminal-path span{color:#96c6a9;font-size:10px}
+body[data-theme=phosphor] .section-heading{font-size:10px;text-transform:uppercase;margin-bottom:12px}
+body[data-theme=phosphor] .counter{font-size:8px}
+body[data-theme=phosphor] .search{background:none;border:0;border-bottom:1px solid var(--line);padding:8px 0;font-size:11px}
+body[data-theme=phosphor] .search svg{display:none}
+body[data-theme=phosphor] .search:before{content:'find >';font-size:10px;color:#96c6a9;white-space:nowrap}
+body[data-theme=phosphor] .filters{font-size:9px;margin:15px 0;gap:4px}
+body[data-theme=phosphor] .filters button{padding:3px 7px;border:0}
+body[data-theme=phosphor] .filters .active{background:var(--accent);color:var(--bg)}
+body[data-theme=phosphor] .system-list{gap:0;min-height:0!important}
+body[data-theme=phosphor] .system-row{background:none;border:0;overflow:visible}
+body[data-theme=phosphor] .system-row.selected{background:#b9ef7014}
+body[data-theme=phosphor] .system-row.selected:before{display:none}
+body[data-theme=phosphor] .system-select{padding:12px 8px!important;min-height:65px!important;gap:9px}
+body[data-theme=phosphor] .system-number{font-size:10px;width:35px}
+body[data-theme=phosphor] .system-number:before{content:'├ ';color:#87af84}
+body[data-theme=phosphor] .system-row:last-child .system-number:before{content:'└ '}
+body[data-theme=phosphor] .system-text strong{font-size:13px;font-weight:400;color:#c2f983}
+body[data-theme=phosphor] .system-text>span{font-size:9px;color:#96c6a9}
+body[data-theme=phosphor] .row-tag{display:none}
+body[data-theme=phosphor] .row-favorite{width:24px}
+body[data-theme=phosphor] .library-footer{font-size:8px;margin-top:14px!important;border-top:1px dashed var(--line);padding-top:13px}
+body[data-theme=phosphor] .keyboard-hint{display:none}
+body[data-theme=phosphor] .feature{border:1px solid var(--line);background:#090f0b}
+.console-readout{display:flex;justify-content:space-between;gap:10px;border-bottom:1px dashed var(--line);padding:10px 18px;color:#96c6a9;font-size:8px}
+body[data-theme=phosphor] .preview-top{top:46px;left:18px;right:18px;font-size:8px}
+body[data-theme=phosphor] .planet-stage{height:200px!important;background:#0b180e;border-bottom:1px dashed var(--line)}
+body[data-theme=phosphor] .planet-stage:after{inset:0;height:100%;background:repeating-linear-gradient(transparent 0 3px,#080e0940 3px 4px);z-index:2}
+body[data-theme=phosphor] .planet-stage img{filter:grayscale(1) sepia(1) hue-rotate(46deg) saturate(2);image-rendering:pixelated;transform:scale(1.08)}
+body[data-theme=phosphor] .orbit-guide{width:245px;height:140px;transform:none;border:1px dashed #c2f98330;border-radius:0}
+body[data-theme=phosphor] .orbit-guide.two{width:330px;height:170px}
+body[data-theme=phosphor] .image-caption{font-size:8px;bottom:8px;color:#96c6a9}
+body[data-theme=phosphor] .feature-copy{padding:18px 23px!important}
+body[data-theme=phosphor] .feature-kicker{font-size:9px;color:#96c6a9}
+body[data-theme=phosphor] .feature h2{font:35px/1.1 VT323,monospace;letter-spacing:1px;margin:11px 0}
+body[data-theme=phosphor] #feature-description{font-size:10px;line-height:1.75;min-height:0}
+body[data-theme=phosphor] .metrics{margin:14px 0!important;padding:12px 0!important;border-block:1px dashed var(--line)}
+body[data-theme=phosphor] .metrics dt{font-size:8px;text-transform:uppercase}
+body[data-theme=phosphor] .metrics dd{font-size:12px;color:#96c6a9}
+body[data-theme=phosphor] .feature .primary{background:transparent;color:var(--text);border:1px solid var(--accent);font-size:11px;padding:10px 14px;min-height:39px}
+body[data-theme=phosphor] .feature .primary span:before{content:'> '}
+body[data-theme=phosphor] .launch-hint{font-size:8px}
+.command-console{margin-top:20px;border:1px solid var(--line);padding:12px 16px;font-size:10px;background:#0d170f}
+#command-output{color:#96c6a9;min-height:20px;margin-bottom:7px;font-size:9px}
+#command-form{display:flex;gap:12px;align-items:center}
+#command-form label{color:#c2f983;white-space:nowrap}
+#command-input{min-width:0;flex:1;border:0;background:none;color:#c2f983;outline:0;font-size:11px}
+#command-input::placeholder{color:#64915f}
+#command-form button{color:#c2f983;font-size:9px;white-space:nowrap;padding:5px 8px;border:1px solid var(--line)}
+.command-console:focus-within{border-color:var(--accent)}
+body[data-theme=phosphor] .workspace-footer{font-size:8px;padding:14px 0!important}
+body[data-theme=phosphor] .hud{font:14px VT323,monospace;min-height:45px;border:1px dashed var(--line);background:none}
+body[data-theme=phosphor] .session-status{font-size:9px;color:#96c6a9}
+body[data-theme=phosphor] .button.secondary{font-size:10px;min-height:34px;background:none}
+/* Shared prototype chrome stays small while the concepts themselves diverge. */
+body[data-theme=blueprint] .concept-bar,body[data-theme=phosphor] .concept-bar{background:#00000010}
+body[data-theme=blueprint] .prototype-footer,body[data-theme=vermilion] .prototype-footer,body[data-theme=phosphor] .prototype-footer{font-size:9px}
+body[data-theme].is-observing .library-layout{display:none!important}
+body[data-theme=vermilion] .observation-view{--accent:#f05b3f;--text:#f6ecd8;--surface:#1c1918;--muted:#c5b8a4}
+body[data-theme=vermilion] .observation-return{color:#f6ecd8;border-color:#f6ecd850}
+@media(max-width:1100px){
+  body[data-theme=blueprint] .main-shell,body[data-theme=vermilion] .main-shell,body[data-theme=phosphor] .main-shell{padding:0 28px}
+  body[data-theme=blueprint] .feature{padding:15px 20px;gap:20px}
+  body[data-theme=blueprint] .feature-copy{padding-left:20px!important}
+  body[data-theme=blueprint] .chart-reticle{inset:20px 0}
+  body[data-theme=blueprint] .orbit-guide.two{width:270px;height:270px}
+  body[data-theme=blueprint] .orbit-guide.one{width:230px;height:230px}
+  body[data-theme=vermilion] .library{padding:20px}
+  body[data-theme=vermilion] .system-text strong{font-size:17px}
+  body[data-theme=vermilion] .intro h1{letter-spacing:-4px;font-size:7vw}
+  body[data-theme=phosphor] .library-layout{gap:24px!important}
+  body[data-theme=phosphor] .intro h1{font-size:35px}
+}
+@media(max-width:850px){
+  .concept-switcher{max-width:100%;flex-wrap:wrap;justify-content:center}
+  body[data-theme=blueprint] .feature{grid-template-columns:1fr 1fr}
+  body[data-theme=blueprint] .feature h2{font-size:32px}
+  body[data-theme=blueprint] .planet-stage{height:290px!important}
+  body[data-theme=blueprint] .orbit-guide.two{width:235px;height:235px}
+  body[data-theme=blueprint] .orbit-guide.one{width:200px;height:200px}
+  body[data-theme=vermilion] .brand:after{display:none}
+  body[data-theme=vermilion] .intro h1{font-size:7vw}
+  body[data-theme=vermilion] .library-layout{grid-template-columns:1.1fr 1fr}
+  body[data-theme=vermilion] .section-heading{font-size:19px}
+  body[data-theme=phosphor] .brand:after{display:none}
+  body[data-theme=phosphor] .library-layout{grid-template-columns:1fr 1.25fr}
+  body[data-theme=phosphor] .system-text strong{font-size:11px}
+  body[data-theme=phosphor] .system-text>span{font-size:8px}
+}
+@media(max-width:760px){
+  .concept-switcher{gap:4px;justify-content:flex-start}
+  .concept-switcher a{font-size:9px;padding:6px 8px}
+  body[data-theme=blueprint] .main-shell,body[data-theme=vermilion] .main-shell,body[data-theme=phosphor] .main-shell{padding:0 18px}
+  body[data-theme=blueprint] .brand:after{display:none}
+  body[data-theme=blueprint] .intro,body[data-theme=phosphor] .intro{gap:15px}
+  body[data-theme=blueprint] .intro h1{font-size:36px}
+  body[data-theme=blueprint] .intro-copy{font-size:11px}
+  body[data-theme=blueprint] .feature{grid-template-columns:1fr;gap:5px;padding:18px}
+  body[data-theme=blueprint] .preview-top{width:calc(100% - 40px);left:20px}
+  body[data-theme=blueprint] .planet-stage{height:305px!important;margin-top:15px}
+  body[data-theme=blueprint] .orbit-guide.two{width:270px;height:270px}
+  body[data-theme=blueprint] .orbit-guide.one{width:230px;height:230px}
+  body[data-theme=blueprint] .feature-copy{padding:20px 0 0!important;border-left:0;border-top:1px solid var(--line)}
+  body[data-theme=blueprint] .feature h2{font-size:34px}
+  body[data-theme=blueprint] .library{grid-template-columns:1fr;gap:12px}
+  body[data-theme=blueprint] .filters{grid-row:auto}
+  body[data-theme=blueprint] .system-list{grid-template-columns:1fr;border-bottom:0}
+  body[data-theme=blueprint] .system-row{border-right:0;border-bottom:1px solid var(--line);min-height:55px}
+  body[data-theme=blueprint] .system-select{min-height:55px!important;flex-direction:row;align-items:center;gap:12px;padding:12px!important}
+  body[data-theme=blueprint] .row-favorite{top:12px;right:8px}
+  body[data-theme=blueprint] .system-text strong{font-size:13px}
+  body[data-theme=blueprint] .library-footer{font-size:9px;line-height:1.7}
+  body[data-theme=vermilion] .app-header{min-height:67px!important}
+  body[data-theme=vermilion] .intro{align-items:flex-start;gap:16px}
+  body[data-theme=vermilion] .intro h1{font-size:64px;letter-spacing:-4px;max-width:310px}
+  body[data-theme=vermilion] .eyebrow{font-size:8px;line-height:1.8;max-width:290px}
+  body[data-theme=vermilion] .mode-toggle{align-self:flex-start}
+  body[data-theme=vermilion] .library-layout{grid-template-columns:1fr}
+  body[data-theme=vermilion] .library{padding:24px;border-top:2px solid #1c1918}
+  body[data-theme=vermilion] .planet-stage{height:230px!important}
+  body[data-theme=vermilion] .dispatch-masthead{font-size:7px;padding:10px 16px;letter-spacing:.4px}
+  body[data-theme=vermilion] .feature-copy{padding:20px!important}
+  body[data-theme=vermilion] .feature h2{font-size:50px;letter-spacing:-2px}
+  body[data-theme=vermilion] .section-heading{font-size:24px}
+  body[data-theme=vermilion] .system-text strong{font-size:22px}
+  body[data-theme=vermilion] .system-text>span{font-size:9px}
+  body[data-theme=vermilion] .hud{font-size:10px}
+  body[data-theme=phosphor] .library-layout{grid-template-columns:1fr;gap:24px!important}
+  body[data-theme=phosphor] .intro h1{font-size:35px;line-height:1.05;max-width:300px}
+  body[data-theme=phosphor] .system-text strong{font-size:14px}
+  body[data-theme=phosphor] .system-text>span{font-size:9px}
+  body[data-theme=phosphor] .library-footer{font-size:9px}
+  body[data-theme=phosphor] .console-readout{font-size:7px;letter-spacing:-.3px;padding:10px 12px}
+  body[data-theme=phosphor] .planet-stage{height:230px!important}
+  body[data-theme=phosphor] .orbit-guide.two{width:290px;height:190px}
+  .command-console{padding:12px;font-size:9px}
+  #command-form{gap:7px;flex-wrap:wrap}
+  #command-form label{width:100%;font-size:10px}
+  #command-input{min-height:30px}
+  #command-output{font-size:8px;line-height:1.9}
+  body[data-theme=phosphor] .hud{font-size:15px}
+  body[data-theme=phosphor] .observation-heading h1{font:33px VT323,monospace}
+}
+@media(prefers-reduced-motion:reduce){body[data-theme=phosphor] .intro h1:after{animation:none}}

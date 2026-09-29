@@ -1,8 +1,9 @@
 const themes = {
   amber: { name: 'Amber Terminal', number: '01', kind: 'PIXEL SERIES', note: 'A warmer observatory. VT323 lettering, amber highlights, hard edges, and quiet instrument markings. Keeps the numbered rows and keyboard-first rhythm of the current menu.' },
   glacier: { name: 'Glacier Arcade', number: '02', kind: 'PIXEL SERIES', note: 'An icy flight console. Silkscreen lettering, midnight blue, mint status lights, and inset panels. A more geometric, spacious take on the existing pixel menu.' },
-  midnight: { name: 'Material Midnight', number: '03', kind: 'MATERIAL SERIES', note: 'A calm dark workspace. DM Sans, lavender accents, rounded surfaces, a navigation rail, and a large preview. Controls use Material-inspired filled, tonal, and outlined treatments.' },
-  daylight: { name: 'Material Daylight', number: '04', kind: 'MATERIAL SERIES', note: 'A light field notebook. DM Sans, warm white surfaces, sage green, generous space, and a split library layout. A softer, daylight-friendly Material direction.' },
+  blueprint: { name: 'Celestial Blueprint', number: '03', kind: 'NEW TERRITORY', note: 'A celestial drafting table. Cobalt paper, chalk lines, signal yellow, and IBM Plex Mono. A circular sky chart takes center stage, with a horizontal system index underneath. The chart is decorative, not a computed orbital map.', title: 'Find your coordinates.', subtitle: 'A chart, a destination, and a sky still to be discovered.', eyebrow: 'CELESTIAL ATLAS / PLATE 003' },
+  vermilion: { name: 'Vermilion Dispatch', number: '04', kind: 'NEW TERRITORY', note: 'A bold space expedition poster. Vermilion, near-black ink, warm cream, and oversized DM Sans lettering. An image-led dispatch fills the left side; a dark destination index occupies the right. Hard rules replace conventional cards.', title: 'PICK YOUR SKY.', subtitle: 'Five destinations. Zero ordinary nights.', eyebrow: 'STARGAZE EXPLORATION BUREAU / DISPATCH 004' },
+  phosphor: { name: 'Phosphor Console', number: '05', kind: 'NEW TERRITORY', note: 'A remote observatory terminal. Black, acid lime, mint, VT323 display lettering, and IBM Plex Mono readouts. Select a system from the file tree, or type commands into the working prompt. Try help, open 2, puzzle, explore, and menu.', title: 'REMOTE OBSERVATORY', subtitle: 'Connection established. The night shift is yours.', eyebrow: 'STARGAZE://OBSERVATORY / SESSION 005' },
 };
 const theme = document.body.dataset.theme;
 const concept = themes[theme];
@@ -50,19 +51,13 @@ document.getElementById('app').innerHTML = `
     <button class="concept-info" id="concept-info" aria-label="About this concept">i</button>
   </header>
   <div class="workspace">
-    <aside class="rail" aria-label="Main navigation">
-      <a href="index.html" class="rail-brand" aria-label="Stargaze concepts">${icon('orbit')}</a>
-      <button id="rail-explore" class="rail-item active">${icon('orbit')}<span>Explore</span></button>
-      <button id="rail-puzzle" class="rail-item">${icon('book')}<span>Puzzle</span></button>
-      <div class="rail-bottom"><button id="rail-settings" class="rail-item">${icon('settings')}<span>Controls</span></button><span class="rail-version">v.01</span></div>
-    </aside>
     <main class="main-shell" id="main">
       <header class="app-header">
         <a href="index.html" class="brand">${icon('orbit')}<span>stargaze<span class="brand-dot">.</span></span></a>
         <div class="header-right"><span class="session-status"><i></i> Observation paused</span><button id="resume" class="button secondary">Resume <kbd>Esc</kbd></button></div>
       </header>
       <section class="intro">
-        <div><p class="eyebrow">${theme === 'amber' ? 'THE NIGHT IS YOURS' : theme === 'glacier' ? 'OBSERVATORY / SYSTEM LIBRARY' : 'YOUR WINDOW INTO THE UNIVERSE'}</p><h1 id="page-title">A sky worth exploring<span class="title-dot">.</span></h1><p class="intro-copy" id="intro-copy">Choose a world. Settle in. See what moves.</p></div>
+        <div><p class="eyebrow">${concept.eyebrow || (theme === 'amber' ? 'THE NIGHT IS YOURS' : 'OBSERVATORY / SYSTEM LIBRARY')}</p><h1 id="page-title">${concept.title || 'A sky worth exploring.'}</h1><p class="intro-copy" id="intro-copy">${concept.subtitle || 'Choose a world. Settle in. See what moves.'}</p></div>
         <div class="mode-toggle" role="group" aria-label="Observation mode"><button class="active" data-mode="explore" aria-pressed="true">${icon('orbit')} Explore</button><button data-mode="puzzle" aria-pressed="false">${icon('book')} Puzzle</button></div>
       </section>
       <div class="library-layout">
@@ -97,11 +92,26 @@ document.getElementById('app').innerHTML = `
   </div>
   <footer class="prototype-footer"><span><i></i> INTERACTIVE HTML CONCEPT</span><span>${concept.number} / ${concept.name} <span class="prototype-separator">·</span> ${concept.kind}</span></footer>
   <div id="toast" class="toast" role="status"></div>
-  <dialog id="about"><button id="close-about" class="icon-button" aria-label="Close concept details">${icon('close')}</button><p class="eyebrow">CONCEPT ${concept.number} / ${concept.kind}</p><h2>${concept.name}</h2><p>${concept.note}</p><p class="dialog-detail">Try selecting systems, switching modes, searching, and entering the observation. The controls are an interactive browser prototype.</p><a href="index.html" class="button primary">Compare all four ${icon('arrow')}</a></dialog>
+  <dialog id="about"><button id="close-about" class="icon-button" aria-label="Close concept details">${icon('close')}</button><p class="eyebrow">CONCEPT ${concept.number} / ${concept.kind}</p><h2>${concept.name}</h2><p>${concept.note}</p><p class="dialog-detail">Try selecting systems, switching modes, searching, and entering the observation. The controls are an interactive browser prototype.</p><a href="index.html" class="button primary">Compare all five ${icon('arrow')}</a></dialog>
 `;
 
 const $ = selector => document.querySelector(selector);
 const $$ = selector => [...document.querySelectorAll(selector)];
+if (theme === 'blueprint' || theme === 'vermilion') {
+  $('.library-layout').prepend($('.feature'));
+}
+if (theme === 'blueprint') {
+  $('#planet-stage').insertAdjacentHTML('beforeend', '<div class="chart-reticle" aria-hidden="true"><span>N / 00°</span><span>E / 90°</span><span>S / 180°</span><span>W / 270°</span></div><span class="chart-note">ILLUSTRATIVE SKY CHART</span>');
+}
+if (theme === 'vermilion') {
+  $('.feature').insertAdjacentHTML('afterbegin', '<div class="dispatch-masthead"><span>THE OBSERVATION DISPATCH</span><span>VOL. 01 / NO. 004</span></div>');
+  $('.library').insertAdjacentHTML('afterbegin', '<p class="destination-label">YOUR NEXT STOP ↘</p>');
+}
+if (theme === 'phosphor') {
+  $('.library').insertAdjacentHTML('afterbegin', '<div class="terminal-path">root@stargaze<br><span>└─ /observatory/systems/</span></div>');
+  $('.feature').insertAdjacentHTML('afterbegin', '<div class="console-readout"><span>OPTICAL FEED [CONNECTED]</span><span>REFERENCE BUFFER / 01</span></div>');
+  $('.workspace-footer').insertAdjacentHTML('beforebegin', '<section class="command-console" aria-label="Observatory command prompt"><div id="command-output" role="status">READY. Type help to list commands.</div><form id="command-form"><label for="command-input">observer@stargaze:~$</label><input id="command-input" autocomplete="off" spellcheck="false" placeholder="open 2" aria-label="Observatory command"><button type="submit" aria-label="Run command">RUN ↵</button></form></section>');
+}
 function toast(message) {
   $('#toast').textContent = message;
   $('#toast').classList.add('show');
@@ -156,10 +166,8 @@ function setMode(mode) {
   puzzle = mode === 'puzzle';
   document.body.classList.toggle('puzzle-mode', puzzle);
   $$('[data-mode]').forEach(b => { b.classList.toggle('active', b.dataset.mode === mode); b.setAttribute('aria-pressed', String(b.dataset.mode === mode)); });
-  $('#rail-explore').classList.toggle('active', !puzzle);
-  $('#rail-puzzle').classList.toggle('active', puzzle);
-  $('#page-title').textContent = puzzle ? 'A mystery in every sky.' : 'A sky worth exploring.';
-  $('#intro-copy').textContent = puzzle ? 'Watch the motion. Build your own theory.' : 'Choose a world. Settle in. See what moves.';
+  $('#page-title').textContent = puzzle ? (theme === 'vermilion' ? 'UNKNOWN SKIES.' : 'A mystery in every sky.') : (concept.title || 'A sky worth exploring.');
+  $('#intro-copy').textContent = puzzle ? 'Watch the motion. Build your own theory.' : (concept.subtitle || 'Choose a world. Settle in. See what moves.');
   $('#library-title').textContent = puzzle ? 'Uncharted maps' : 'Solar systems';
   $('#search').placeholder = puzzle ? 'Find a map…' : 'Find a solar system…';
   $('#search').setAttribute('aria-label', puzzle ? 'Search maps' : 'Search systems');
@@ -191,9 +199,6 @@ $$('[data-filter]').forEach(b => b.addEventListener('click', () => {
   renderList();
 }));
 $$('[data-mode]').forEach(b => b.addEventListener('click', () => setMode(b.dataset.mode)));
-$('#rail-explore').addEventListener('click', () => { observation(false); setMode('explore'); });
-$('#rail-puzzle').addEventListener('click', () => { observation(false); setMode('puzzle'); });
-$('#rail-settings').addEventListener('click', () => { $('#exposure').focus(); toast('Try playback, labels, exposure, and steady stars below.'); });
 $('#feature-favorite').addEventListener('click', () => toggleFavorite(selected.id));
 $('#launch').addEventListener('click', () => { day = 0; updateDay(); observation(true); });
 $('#resume').addEventListener('click', () => observation(true));
@@ -219,6 +224,24 @@ $('#steady').addEventListener('click', () => { steady = !steady; $('#steady').se
 $('#concept-info').addEventListener('click', () => $('#about').showModal());
 $('#close-about').addEventListener('click', () => $('#about').close());
 $('#about').addEventListener('click', e => { if (e.target === $('#about')) $('#about').close(); });
+if (theme === 'phosphor') {
+  $('#command-form').addEventListener('submit', e => {
+    e.preventDefault();
+    const command = $('#command-input').value.trim().toLowerCase();
+    const match = command.match(/^open ([1-5])$/);
+    let result;
+    if (match) { select(systems[Number(match[1]) - 1].id); day = 0; updateDay(); observation(true); result = `LOADED: ${puzzle ? selected.puzzle : selected.name}. Type menu to return.`; }
+    else if (command === 'help') result = 'COMMANDS: open 1–5 / puzzle / explore / menu / resume / clear';
+    else if (command === 'puzzle' || command === 'explore') { observation(false); setMode(command); result = `MODE: ${command.toUpperCase()}. Select a destination.`; }
+    else if (command === 'menu') { observation(false); result = 'SYSTEM INDEX RESTORED.'; }
+    else if (command === 'resume') { observation(true); result = 'OPTICAL FEED RESUMED.'; }
+    else if (command === 'clear') result = 'READY.';
+    else result = 'Command not found. Type help.';
+    $('#command-output').textContent = result;
+    $('#command-input').value = '';
+    $('#command-input').focus({preventScroll:true});
+  });
+}
 document.addEventListener('keydown', e => {
   if ($('#about').open || e.altKey || e.ctrlKey || e.metaKey || ['INPUT', 'TEXTAREA', 'SELECT'].includes(document.activeElement.tagName)) return;
   if (e.key === '/') { e.preventDefault(); $('#search').focus(); }
