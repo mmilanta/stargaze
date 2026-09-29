@@ -234,3 +234,54 @@ fn gpu_ground_sky_visibility() {
     let sky = sample(&device, &queue, &mut tracer, &scene, 1)[0][0];
     assert!(sky > 0.1, "landscape must not hide background sky: {sky}");
 }
+
+#[test]
+#[ignore = "requires a GPU"]
+fn gpu_ground_refines_again_after_scene_and_quality_changes() {
+    let (device, queue) = gpu();
+    let mut tracer = PathTracer::new(
+        &device,
+        wgpu::TextureFormat::Rgba8UnormSrgb,
+        (1, 1),
+        &[],
+        Options {
+            samples_per_frame: 8,
+            max_bounces: 1,
+            sample_limit: 16,
+            ..Options::default()
+        },
+    );
+    let mut scene = local_frame(6_371_000.0);
+    let lit = sample(&device, &queue, &mut tracer, &scene, 2)[0][0];
+    assert!(lit > 0.01);
+    assert_eq!(tracer.samples(), 16);
+    assert!(!tracer.needs_redraw(), "converged ground should rest");
+
+    // A landscape change must discard the sleeping view's old lighting.
+    scene.ground.push(crate::ground::Primitive {
+        center: [0.0, 4.0, -4.0, 0.0],
+        extent: [0.8, 0.8, 0.8, 0.0],
+        albedo: [0.0; 4],
+    });
+    scene.globals.ground_counts[0] = 1;
+    assert!(sample(&device, &queue, &mut tracer, &scene, 1)[0][0] < lit * 0.001);
+    assert_eq!(tracer.samples(), 8);
+    assert!(tracer.needs_redraw());
+    sample(&device, &queue, &mut tracer, &scene, 1);
+    assert!(!tracer.needs_redraw());
+
+    // Main's light-detail setting and reduced render size must preserve
+    // ground bindings and start a fresh, capped accumulation.
+    tracer.set_quality(8, 2, 24);
+    assert_eq!(tracer.samples(), 0);
+    assert!(tracer.needs_redraw());
+    scene.ground.clear();
+    scene.globals.ground_counts[0] = 0;
+    tracer.resize(&device, (2, 1));
+    scene.globals.viewport[..2].copy_from_slice(&[4.0, 1.0]);
+    let pixels = sample(&device, &queue, &mut tracer, &scene, 3);
+    assert_eq!(pixels.len(), 2);
+    assert!(pixels.iter().all(|p| p[0].is_finite() && p[0] > 0.01));
+    assert_eq!(tracer.samples(), 24);
+    assert!(!tracer.needs_redraw());
+}

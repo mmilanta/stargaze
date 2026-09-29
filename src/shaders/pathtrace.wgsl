@@ -6,7 +6,7 @@ struct Globals {
     cam_right: vec4<f32>,
     cam_up: vec4<f32>,
     cam_forward: vec4<f32>, // w = tan(vertical FOV / 2)
-    viewport: vec4<f32>, // width, height, exposure, unused
+    viewport: vec4<f32>, // trace width, height, exposure, display aspect
     // Host-atmosphere shell, in telescope space.
     atmo_center: vec4<f32>, // xyz = host centre, w = host radius
     atmo_rayleigh: vec4<f32>, // rgb = Rayleigh coefficients (1/AU), w = Mie
@@ -652,7 +652,7 @@ fn main(@builtin(global_invocation_id) id: vec3<u32>) {
         // Stay in telescope space: adding 1e-9-radian jitter to a world-space
         // unit vector would lose the jitter in f32 at high magnification.
         let direction = normalize(vec3<f32>(
-            ndc.x * tangent * settings.g.viewport.x / settings.g.viewport.y,
+            ndc.x * tangent * settings.g.viewport.w,
             ndc.y * tangent, -1.0));
         sum += trace(Ray(vec3<f32>(0.0), direction, MISS), &rng);
     }

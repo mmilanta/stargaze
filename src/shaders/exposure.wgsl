@@ -9,7 +9,7 @@ struct Globals {
     cam_right: vec4<f32>,
     cam_up: vec4<f32>,
     cam_forward: vec4<f32>,
-    viewport: vec4<f32>, // width, height, manual exposure, unused
+    viewport: vec4<f32>, // trace width, height, manual exposure, display aspect
     atmo_center: vec4<f32>,
     atmo_rayleigh: vec4<f32>,
     atmo_params: vec4<f32>,

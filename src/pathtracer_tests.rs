@@ -18,7 +18,6 @@ fn frame() -> Frame {
         ground: vec![],
         scene_time: 0.0,
         labels: vec![],
-        ui: vec![],
     }
 }
 fn body(center: [f32; 3], radius: f32, color: [f32; 3], emissive: bool) -> Sphere {
@@ -77,7 +76,13 @@ fn history_resets_for_scene_changes_but_not_overlay_changes() {
     let options = Options::default();
     history.update(&frame, options);
     history.samples = 100;
-    frame.ui.push(crate::ui::UiVertex::zeroed());
+    frame.labels.push(crate::ui::Label {
+        x: 0.0,
+        y: 0.0,
+        radius: 4.0,
+        text: "Overlay only".into(),
+        body: 0,
+    });
     history.update(&frame, options);
     assert_eq!(history.samples, 100);
     frame.scene_time = 1e-12;
@@ -164,6 +169,199 @@ fn sample(
     read_pixels(device, queue, tracer)
 }
 
+#[test]
+#[ignore = "requires a GPU"]
+fn gpu_quality_limits_rest_resume_and_preserve_valid_samples() {
+    let (device, queue) = gpu();
+    let mut tracer = PathTracer::new(
+        &device,
+        wgpu::TextureFormat::Rgba8UnormSrgb,
+        (1, 1),
+        &[],
+        Options {
+            samples_per_frame: 64,
+            max_bounces: 1,
+            sample_limit: 65,
+            auto_exposure: true,
+            ..Options::default()
+        },
+    );
+    let mut frame = frame();
+    frame.bodies = vec![body([0., 0., -1.], 0.1, [2., 3., 4.], true)];
+    let initial = sample(&device, &queue, &mut tracer, &frame, 1);
+    assert_eq!(tracer.samples(), 64);
+    assert!(tracer.needs_redraw());
+    sample(&device, &queue, &mut tracer, &frame, 1);
+    assert_eq!(
+        tracer.samples(),
+        65,
+        "last batch must stop exactly at the limit"
+    );
+    assert!(tracer.needs_redraw(), "exposure still needs to settle");
+    assert_eq!(sample(&device, &queue, &mut tracer, &frame, 60), initial);
+    assert_eq!(tracer.samples(), 65);
+    assert!(
+        !tracer.needs_redraw(),
+        "a completed still view should sleep"
+    );
+
+    tracer.set_quality(8, 1, 32);
+    assert_eq!(
+        tracer.samples(),
+        65,
+        "lowering the target preserves the better image"
+    );
+    assert!(!tracer.needs_redraw());
+    sample(&device, &queue, &mut tracer, &frame, 1);
+    assert_eq!(
+        tracer.samples(),
+        65,
+        "a lower target must not underflow the counter"
+    );
+    tracer.set_quality(8, 1, 256);
+    assert!(tracer.needs_redraw());
+    sample(&device, &queue, &mut tracer, &frame, 1);
+    assert_eq!(
+        tracer.samples(),
+        73,
+        "a higher target resumes the existing average"
+    );
+    tracer.set_quality(8, 2, 256);
+    assert_eq!(
+        tracer.samples(),
+        0,
+        "changing light transport invalidates the image"
+    );
+    sample(&device, &queue, &mut tracer, &frame, 1);
+    assert_eq!(tracer.samples(), 8);
+    tracer.set_quality(8, 2, 8);
+    sample(&device, &queue, &mut tracer, &frame, 60);
+    assert!(!tracer.needs_redraw());
+    frame.scene_time += 1.0;
+    sample(&device, &queue, &mut tracer, &frame, 1);
+    assert_eq!(tracer.samples(), 8);
+    assert!(
+        tracer.needs_redraw(),
+        "a changed scene starts refinement again"
+    );
+}
+
+#[test]
+#[ignore = "requires a GPU"]
+fn gpu_display_upscales_hdr_with_correct_orientation_and_edges() {
+    let (device, queue) = gpu();
+    let mut tracer = PathTracer::new(
+        &device,
+        wgpu::TextureFormat::Rgba32Float,
+        (2, 2),
+        &[],
+        Options::default(),
+    );
+    let mut scene = frame();
+    scene.globals.viewport[..2].copy_from_slice(&[4., 4.]);
+    sample(&device, &queue, &mut tracer, &scene, 1);
+    let colors = [
+        [1_f32, 0., 0., 1.],
+        [0., 1., 0., 1.],
+        [0., 0., 1., 1.],
+        [1., 1., 1., 1.],
+    ];
+    tracer.accumulation = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
+        label: Some("upscale-test-colors"),
+        contents: bytemuck::cast_slice(&colors),
+        usage: wgpu::BufferUsages::STORAGE,
+    });
+    tracer.display_group = group(
+        &device,
+        &tracer.display_layout,
+        &[&tracer.settings, &tracer.accumulation, &tracer.exposure],
+    );
+    for (width, height) in [(4, 4), (2, 2), (1, 1)] {
+        let target = device.create_texture(&wgpu::TextureDescriptor {
+            label: Some("upscale-test"),
+            size: wgpu::Extent3d {
+                width,
+                height,
+                depth_or_array_layers: 1,
+            },
+            mip_level_count: 1,
+            sample_count: 1,
+            dimension: wgpu::TextureDimension::D2,
+            format: wgpu::TextureFormat::Rgba32Float,
+            usage: wgpu::TextureUsages::RENDER_ATTACHMENT | wgpu::TextureUsages::COPY_SRC,
+            view_formats: &[],
+        });
+        let readback = device.create_buffer(&wgpu::BufferDescriptor {
+            label: Some("upscale-readback"),
+            size: height as u64 * 256,
+            usage: wgpu::BufferUsages::COPY_DST | wgpu::BufferUsages::MAP_READ,
+            mapped_at_creation: false,
+        });
+        let view = target.create_view(&Default::default());
+        let mut encoder = device.create_command_encoder(&Default::default());
+        {
+            let mut pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
+                color_attachments: &[Some(wgpu::RenderPassColorAttachment {
+                    view: &view,
+                    depth_slice: None,
+                    resolve_target: None,
+                    ops: wgpu::Operations {
+                        load: wgpu::LoadOp::Clear(wgpu::Color::BLACK),
+                        store: wgpu::StoreOp::Store,
+                    },
+                })],
+                ..Default::default()
+            });
+            tracer.display(&mut pass);
+        }
+        encoder.copy_texture_to_buffer(
+            target.as_image_copy(),
+            wgpu::TexelCopyBufferInfo {
+                buffer: &readback,
+                layout: wgpu::TexelCopyBufferLayout {
+                    offset: 0,
+                    bytes_per_row: Some(256),
+                    rows_per_image: Some(height),
+                },
+            },
+            target.size(),
+        );
+        queue.submit(Some(encoder.finish()));
+        let (send, receive) = std::sync::mpsc::channel();
+        readback
+            .slice(..)
+            .map_async(wgpu::MapMode::Read, move |r| send.send(r).unwrap());
+        device.poll(wgpu::PollType::wait_indefinitely()).unwrap();
+        receive.recv().unwrap().unwrap();
+        let data = readback.slice(..).get_mapped_range().unwrap();
+        let aces =
+            |v: f32| ((v * (2.51 * v + 0.03)) / (v * (2.43 * v + 0.59) + 0.14)).clamp(0., 1.);
+        let check = |x: usize, y: usize, expected: [f32; 3]| {
+            let offset = y * 256 + x * 16;
+            let pixel: &[f32] = bytemuck::cast_slice(&data[offset..offset + 16]);
+            for channel in 0..3 {
+                assert!(
+                    (pixel[channel] - aces(expected[channel])).abs() < 1e-5,
+                    "size {width}x{height}, ({x}, {y}): {pixel:?}"
+                );
+            }
+        };
+        if width == 1 {
+            check(0, 0, [0.5; 3]);
+        } else {
+            check(0, 0, [1., 0., 0.]);
+            check(width as usize - 1, 0, [0., 1., 0.]);
+            check(0, height as usize - 1, [0., 0., 1.]);
+            check(width as usize - 1, height as usize - 1, [1.; 3]);
+            if width == 4 {
+                check(1, 1, [0.625, 0.25, 0.25]);
+            }
+        }
+        drop(data);
+        readback.unmap();
+    }
+}
+
 /// Actual GPU shader regression, not a CPU reimplementation. Explicit opt-in
 /// keeps `cargo test` usable on machines without a GPU/display server.
 #[test]
@@ -185,6 +383,14 @@ fn gpu_transport() {
     let mut frame = frame();
     let black = sample(&device, &queue, &mut tracer, &frame, 1)[0];
     assert_eq!(black, [0.0, 0.0, 0.0, 1.0]);
+
+    // The presentation path checks the viewport on every observing frame.
+    // An unchanged size must preserve both the HDR image and sample history.
+    tracer.resize(&device, (1, 1));
+    assert_eq!(tracer.samples(), 64);
+    assert_eq!(read_pixels(&device, &queue, &tracer), vec![black]);
+    sample(&device, &queue, &mut tracer, &frame, 1);
+    assert_eq!(tracer.samples(), 128);
 
     // Emission, true silhouettes (no minimum size), and inside-sphere roots.
     frame.bodies = vec![body([0.0, 0.0, -1.0], 1e-6, [2.0, 3.0, 4.0], true)];

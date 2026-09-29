@@ -1003,6 +1003,9 @@ mod tests {
             auto_exposure: true,
             ev_bias: 0.0,
             exposure_dragging: false,
+            occluded: false,
+            graphics: crate::graphics::Menu::default(),
+            pacer: crate::graphics::FramePacer::default(),
         };
         app.state.sim_time = 42.0;
         app.state.view_lock = Some(crate::ViewLock::Background(glam::DVec3::X));
