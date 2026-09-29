@@ -466,6 +466,7 @@ impl State {
         true
     }
 
+    #[cfg(test)]
     fn ground_view(&mut self) {
         self.unlock();
         self.observer.star_orientation = None;
@@ -1579,7 +1580,6 @@ impl ApplicationHandler for App {
                     }
                     PhysicalKey::Code(KeyCode::KeyU) => self.state.unlock(),
                     PhysicalKey::Code(KeyCode::KeyR) => self.state.reset_view(),
-                    PhysicalKey::Code(KeyCode::KeyG) => self.state.ground_view(),
                     PhysicalKey::Code(KeyCode::KeyE) => {
                         if let Some(what) = self.state.next_eclipse() {
                             log::info!("found {what} at t = {:.3} d", self.state.sim_time);

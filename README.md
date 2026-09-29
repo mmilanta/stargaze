@@ -121,18 +121,17 @@ compute-capable Metal, Vulkan or DX12 device is sufficient.
 
 ### Ground prototype
 
-Press `G` for a wide view facing north, with the cottage on the right; `R`
-returns to the configured observing view. `G` releases tracking and restores
-surface-relative roll, preserving time and playback speed. The scenery uses
-real stellar lighting, so choose daylight to see it clearly and pause for
-convergence. Trees and windows are opaque diffuse primitives for now; there
-are no leaf meshes, glass transmission, terrain elevation, or walking controls.
+Left-drag to look toward the ground; `R` returns to the configured observing
+view. The scenery uses real stellar lighting, so choose daylight to see it
+clearly and pause for convergence. Trees and windows are opaque diffuse
+primitives for now; there are no leaf meshes, glass transmission, terrain
+elevation, or walking controls.
 Atmospheric scattering remains camera-only, so diffuse surfaces receive
 sunlight and surface bounces rather than sky illumination.
 
 ![Ray-traced meadow, distant trees and a cottage](docs/pathtraced-ground.png)
 
-For the daylight view above, run this command and press `G`:
+For daylight scenery, run this command and left-drag to look toward the ground:
 
 ```sh
 STARGAZE_SYSTEM=earth STARGAZE_TIME=0.599 cargo run --release
@@ -361,7 +360,6 @@ sequence is deterministic for a given pixel and sample index.
 | `E` | search up to ten model years for a visible eclipse |
 | `T` | search for a moon transit (e.g. Phobos/Mars or Io/Jupiter) |
 | `R` | reset view |
-| `G` | wide ground view, facing north with the cottage to the right |
 | `,` `.` | exposure compensation down / up by 0.25 EV |
 | `A` | toggle automatic exposure metering (on by default) |
 | `H` | show / hide HUD |
