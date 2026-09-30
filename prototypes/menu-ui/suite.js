@@ -93,12 +93,12 @@ const S = {
   variant: { systems: 'normal', observe: 'normal', maps: 'normal' },
   titleSel: 0, sel: 0, mapSel: 0, favs: new Set(['halo']), search: '', filter: 'all',
   loaded: 'vesper', map: 'puzzle',
-  best: { puzzle: 72.4, halo: null, 'median-resonance': 41.7, 'solar-system': null, vesper: null },
+  best: { puzzle: 72.4, halo: null, 'median-resonance': 41.7, 'solar-system': null, vesper: 100 },
   obs: null, pobs: null,
   theory: null, dialog: null, pendingMap: null, ctx: null,
   settingsTab: 0,
   settings: { spp: 1, bounces: 8, auto: true, key: .25, pct: .9, ev: 0, hud: 100, labels: true, orient: 'horizon', steps: 'decade', grid: true },
-  toast: null, kept: {},
+  toast: null, theories: {},
 };
 
 function freshObs(sysId, puzzle) {
@@ -126,6 +126,7 @@ function freshTheory(map, demo) {
 S.obs = freshObs('vesper', false);
 S.pobs = freshObs('puzzle', true);
 S.theory = freshTheory('puzzle', true);
+S.theories.puzzle = S.theory;
 
 const sysById = id => SYSTEMS.find(s => s.id === id) || BROKEN;
 const listSystems = () => S.variant.systems === 'empty' ? [] : S.variant.systems === 'invalid' ? [...SYSTEMS, BROKEN] : SYSTEMS;
@@ -133,32 +134,32 @@ const listMaps = () => [...SYSTEMS].sort((a, b) => (a.id === 'puzzle' ? -1 : b.i
 
 /* ---------------------------------------------------------------- screen registry */
 const GROUPS = [
-  ['Start', [['title', 'Title screen', 'new']]],
-  ['Explore', [['systems', 'System browser', 'game', [['invalid', 'Invalid config'], ['empty', 'No systems found']]],
+  ['Start', [['title', 'Main menu', 'new']]],
+  ['Explore', [['systems', 'Explore list', 'game', [['invalid', 'Invalid config'], ['empty', 'No systems found']]],
     ['observe', 'Observation HUD', 'game', [['hidden', 'HUD hidden [H]'], ['search', 'Eclipse search [E]'], ['noday', 'No day found']]]]],
-  ['Field study (puzzle)', [['maps', 'Maps', 'game', [['failed', 'Map failed to load']]], ['pobserve', 'Field study HUD', 'game'],
-    ['theory', 'Your theory', 'game'], ['clear', 'Clear theory?', 'game'], ['result', 'Check results', 'game'], ['leave', 'Leave field study?', 'new']]],
+  ['Play · levels', [['maps', 'Levels', 'game', [['failed', 'Map failed to load']]], ['pobserve', 'Level HUD', 'game'],
+    ['theory', 'Your theory', 'game'], ['clear', 'Clear theory?', 'game'], ['result', 'Check results', 'game'], ['discard', 'Discard progress?', 'new']]],
   ['System', [['settings', 'Settings', 'new'], ['controls', 'Controls', 'new']]],
 ];
 const ORDER = GROUPS.flatMap(g => g[1].map(i => i[0]));
 
 const NOTES = {
-  title: { t: 'Title screen', now: ['Not in the game yet: it opens straight into halo.yaml (or puzzle.yaml with --game).'],
-    add: ['A single front door that joins Explore and Field studies (today two launch modes: default and --game).', 'Continue resumes the last view, with its system and time.', 'Settings and Controls are reachable before playing.'], src: 'src/main.rs · args / game_requested()' },
-  systems: { t: 'System browser', now: ['"STARGAZE / Choose a solar system" and Resume [Esc].', 'Rows [1]–[9] with the system name and filename.', '< [PgUp] / [PgDn] > paging; mouse wheel scrolls.', 'Refreshes configs/ every time it opens; invalid YAML stays listed and shows its error.', 'Time is suspended while it is open.'],
-    add: ['A feature panel with preview, host, sky and field of view.', 'Search [/], favorites [F], and a switch to Field studies [P].', 'Validation errors shown in a readable, dedicated box.'], src: 'src/menu.rs · build(), discover()' },
+  title: { t: 'Main menu', now: ['Not in the game yet: it opens straight into halo.yaml (or puzzle.yaml with --game).'],
+    add: ['Just the wordmark and four entries: Play, Explore, Settings, Quit.', 'Play opens the levels (today launched with --game).', 'The live sky, dimmed, sits behind every menu; in the game this can be the traced view.', 'Keyboard cursor, mouse hover moves it too; console-style key prompts along the bottom.'], src: 'src/main.rs · args / game_requested()' },
+  systems: { t: 'Explore list', now: ['"STARGAZE / Choose a solar system" and Resume [Esc].', 'Rows [1]–[9] with the system name and filename; PgUp/PgDn paging.', 'Refreshes configs/ every time it opens; invalid YAML stays listed and shows its error.'],
+    add: ['One column, one yellow Explore button per system, nothing else.', 'Invalid configs stay in the list with their error and a disabled button.'], src: 'src/menu.rs · build(), discover()' },
   observe: { t: 'Observation HUD', now: ['Bottom bar: [M]enu, [L]abels, Time ← speed →, Stop [Spc], -1d [PgDn], +1d [PgUp], minute clock.', 'Lock indicator: "Locked [U]" + target, or "Unlocked [U] / click sky".', '[S]tars orientation, EV slider [,][.], Auto [A].', 'Right-click locks a body or a fixed sky direction; left-click releases it.', 'H hides the HUD; Menu and the lock stay visible.', 'E/T search eclipses/transits; F1–F9 aim; R resets; scroll zooms.'],
     add: ['Decade speed steps: 1, 10, 100, 1000 min/s, with the minute clock next to the speed (idea.md feat1).', 'Every control shows its key (feat2).', 'Star orientation as a Horizon / Stars choice next to the lock (feat5). With Stars held, the horizon turns instead.', 'Targets panel [G] lists the F-keys and event searches.', 'Samples-per-pixel meter; grain clears as the image converges while time is stopped.'], src: 'src/ui.rs · layout_mode(), build_bar(), build_lock()' },
-  maps: { t: 'Maps', now: ['"MAPS / Choose a map to start a new puzzle".', 'Spoiler-free titles (Amber horizon, Clockwork sky…); every row says "Start a fresh theory".', 'puzzle.yaml sorts first.', '"Choosing a map clears your theory. Resume keeps your current puzzle."', 'Load failure: "Could not load this map. Your current puzzle is unchanged."'],
-    add: ['A mystery preview with no images, names or body counts.', 'Status, best score and attempts for each map.', 'Choosing a new map asks before replacing an in-progress theory (feat4).'], src: 'src/menu.rs · Entry::puzzle_title()' },
-  pobserve: { t: 'Field study HUD', now: ['Top-left status: "STOPPED | +0.0 min/s | View locked".', 'The Labels button becomes Draw [Tab].', 'The lock shows only Star, Planet / moon or Background sky.', 'L, E, T and F1–F9 are disabled; R returns to the initial view.'],
+  maps: { t: 'Levels', now: ['"MAPS / Choose a map to start a new puzzle", spoiler-free titles, "Start a fresh theory".', 'Choosing a map clears the one theory you have.'],
+    add: ['Levels in a column: title, progress bar, status, best score and objects drawn.', 'Yellow Play / Resume per level; progress is kept per level.', 'Discard progress [D] on the side, behind a confirmation.'], src: 'src/menu.rs · Entry::puzzle_title()' },
+  pobserve: { t: 'Level HUD', now: ['Top-left status: "STOPPED | +0.0 min/s | View locked".', 'The Labels button becomes Draw [Tab].', 'The lock shows only Star, Planet / moon or Background sky.', 'L, E, T and F1–F9 are disabled; R returns to the initial view.'],
     add: ['Objective card with the next steps.', 'Theory [Tab] keeps its place in the bottom bar (feat3).'], src: 'src/main.rs · lock_label(), key handling' },
   theory: { t: 'Your theory', now: ['"YOUR THEORY": select a parent, right-click to add [N], drag to order orbits. 1 = innermost.', 'Buttons: [S]tar, Has [R]ings, Redo [Y], [V]iewer here, Delete [Del], Undo [Z], Check [Enter], Clear all [X], [M]enu, Observe [Tab].', 'Gold rays mark stars; an oval marks rings. YOU marks the viewer.', 'Score = 60% ordered structure + 20% star/ring traits + 20% viewer.', 'Limit: 64 objects. 100 undo steps.'],
     add: ['Full-page diagram with every action in one bottom bar (idea.md feat6).', 'Inspector for the selected object; ghost line preview before right-click.', 'No inward / outward buttons: dragging sets the orbit order.'], src: 'src/game.rs · build(), score()' },
   clear: { t: 'Clear the entire theory?', now: ['Exact copy: "Removes all objects and the viewer. Undo can restore everything."', 'Cancel [Esc] · Clear all [Enter].'], add: ['Shows how many objects will be removed.'], src: 'src/game.rs · confirm_clear' },
   result: { t: 'Check results', now: ['A single line: "Score: 72.4/100  Orbits: 80.0%  Traits: 90.0%  Viewer: matches".', 'Without a viewer: "Select an object and choose Viewer here [V] before checking."'],
     add: ['A score dial and a weighted breakdown.', 'Attempt history. The hidden solution is never revealed.'], src: 'src/game.rs · Score::total()' },
-  leave: { t: 'Leave field study?', now: ['Today choosing any map silently clears the theory.'], add: ['idea.md feat4: Esc abandons the map picker, and abandoning asks whether to keep your changes.', 'Keep for later / Discard / Cancel.'], src: 'idea.md · feat4' },
+  discard: { t: 'Discard progress?', now: ['No per-level progress today; picking a map silently clears the theory.'], add: ['Discarding removes the theory, checks and best score for one level.', 'Cancel [Esc] · Discard [Enter].'], src: 'idea.md · feat4' },
   settings: { t: 'Settings', now: ['Only environment variables today: STARGAZE_SPP, _BOUNCES, _AUTO_EXPOSURE, _EXPOSURE, _EV_BIAS, _AUTO_KEY, _AUTO_PERCENTILE, _FOV.'], add: ['The same options in the game, each labelled with its variable.'], src: 'README.md · Quality settings' },
   controls: { t: 'Controls', now: ['Keys are listed in the README and the window title.'], add: ['A complete reference in the game. Keys marked "new" come from this mockup.'], src: 'README.md · Controls' },
 };
@@ -167,7 +168,7 @@ const NOTES = {
 function renderRail() {
   const cur = S.screen, v = S.variant[cur];
   $('#rail').innerHTML = `
-    <div class="rail-head"><a href="index.html">← All concepts</a><h1>Blueprint · all screens</h1><p>Every menu page in Stargaze, in the Celestial Blueprint style.</p></div>
+    <div class="rail-head"><a href="index.html">← All concepts</a> · <a href="buttons.html">Button motion ↗</a><h1>Blueprint · all screens</h1><p>Every menu page in Stargaze, in the Celestial Blueprint style.</p></div>
     ${GROUPS.map(([g, items]) => `<div class="rail-group"><h2>${g}</h2>${items.map(([id, label, tag, subs]) => `
       <button class="rail-item ${cur === id && (!v || v === 'normal') ? 'active' : ''}" data-go="${id}"><span class="n">${String(ORDER.indexOf(id)).padStart(2, '0')}</span>${label}<span class="tag ${tag === 'new' ? 'new' : ''}">${tag === 'new' ? 'NEW' : 'IN GAME'}</span></button>
       ${(subs || []).map(([sv, sl]) => `<button class="rail-item sub ${cur === id && v === sv ? 'active' : ''}" data-go="${id}" data-variant="${sv}">${sl}</button>`).join('')}`).join('')}</div>`).join('')}
@@ -185,9 +186,9 @@ function renderNotes() {
 function go(screen, variant) {
   if (['settings', 'controls'].includes(screen) && !['settings', 'controls'].includes(S.screen)) S.back = S.screen;
   S.ctx = null;
-  const dialogs = { clear: 'clear', result: 'result', leave: 'leave' };
+  const dialogs = { clear: 'clear', result: 'result', discard: 'discard' };
   if (dialogs[screen]) {
-    S.screen = screen === 'leave' ? 'maps' : 'theory';
+    S.screen = screen === 'discard' ? 'maps' : 'theory';
     if (screen === 'result') runCheck(true);
     S.dialog = screen;
   } else { S.screen = screen; S.dialog = null; }
@@ -200,7 +201,7 @@ function go(screen, variant) {
   }
   if (S.screen === 'systems') S.sel = S.variant.systems === 'invalid' ? SYSTEMS.length : clamp(S.sel, 0, Math.max(0, listSystems().length - 1));
   if (S.dialog === 'result' && !T().score) { S.dialog = null; toast('Place the viewer [V] before checking.'); }
-  if (S.dialog === 'leave' && !S.pendingMap) S.pendingMap = 'vesper';
+  if (S.dialog === 'discard' && !S.pendingMap) S.pendingMap = 'puzzle';
   render();
   S.railPick = screen;
 }
@@ -247,109 +248,86 @@ function chartSvg({ ticks = true, labels = true } = {}) {
 const kb = k => `<kbd>${k}</kbd>`;
 const foot = keys => `<div class="foot"><span>■ ${esc(keys[0])}</span><div class="keys">${keys.slice(1).map(([k, l]) => `<span>${k.split(' ').map(kb).join('')} ${l}</span>`).join('')}</div></div>`;
 
+/* ---------------------------------------------------------------- game-screen shell */
+// Menus are full-screen game screens: the live sky dimmed behind, one centred column, a keyboard
+// cursor and console-style prompts. Only rects, lines and text, so they port to src/ui.rs.
+const pad = n => String(n).padStart(2, '0');
+const prompts = list => `<div class="prompts">${list.map(([k, l]) => `<span>${k.split(' ').map(kb).join('')}${l}</span>`).join('')}</div>`;
+const skyBg = id => `<canvas class="menu-sky" data-sky="${id}" data-wide="1"></canvas><div class="menu-veil"></div>`;
+function gameScreen({ title, sub, body, keys, back = 'back-title' }) {
+  return `<div class="gscreen">${skyBg(S.obs.sys)}
+    <header class="ghead"><div><div class="eyebrow">${sub}</div><h1>${title}</h1></div><button class="gback" data-act="${back}">${kb('Esc')}Back</button></header>
+    <div class="gbody">${body}</div>${prompts(keys)}</div>`;
+}
+// Moving the cursor only moves the highlight; re-rendering would restart the sky and entrance animations.
+function setSel(key, i) { S[key] = i; document.querySelectorAll('[data-row]').forEach(r => r.classList.toggle('sel', +r.dataset.row === i)); }
+function moveSel(key, n, dir) { setSel(key, (S[key] + dir + n) % n); }
+
 /* ---------------------------------------------------------------- 00 title */
-const TITLE_ITEMS = [
-  ['C', 'Continue', () => `${sysById(S.obs.sys).short} · T+ ${num(S.obs.t)} min`, 'continue'],
-  ['E', 'Explore', () => 'Observe any system freely. Labels, targets and event search on.'],
-  ['P', 'Field studies', () => 'Reconstruct an unknown sky from what you observe.'],
-  ['O', 'Settings', () => 'Render quality, exposure, time and interface.'],
-  ['K', 'Controls', () => 'Every key and mouse action.'],
-  ['Q', 'Quit', () => 'Close the observatory.'],
-];
+const TITLE_ITEMS = [['P', 'Play', 'Your levels'], ['E', 'Explore', 'Any system, freely'], ['O', 'Settings', 'Quality, exposure, interface'], ['Q', 'Quit', '']];
 function vTitle() {
-  return `<div class="wrap"><div class="topbar">${brand('AN OBSERVATORY ON ANOTHER WORLD')}<span class="spacer"></span><span class="status"><i></i>Last session · ${sysById(S.obs.sys).name}</span></div>
-  <div class="title-grid"><div class="title-copy"><div class="eyebrow">Celestial atlas / plate 000</div><h1>Look up.<br>Work it <span>out.</span></h1>
-    <p class="lede">A path-traced telescope on a distant world. Watch Keplerian orbits, stop time to let the image converge, and rebuild unknown star systems from what you see.</p>
-    <div class="title-menu">${TITLE_ITEMS.map(([k, l, d, cls], i) => `<button class="title-item ${cls || ''} ${S.titleSel === i ? 'sel' : ''}" data-title="${i}"><span class="n">${String(i + 1).padStart(2, '0')}</span><span><b>${l}</b><small>${esc(d())}</small></span>${kb(k)}</button>`).join('')}</div></div>
-    <div class="title-chart"><div class="chart" style="height:100%">${chartSvg()}<canvas data-sky="${S.obs.sys}" data-anim="1" style="position:absolute;inset:8%;width:84%;height:84%;border-radius:50%"></canvas></div>
-      <span class="cap" style="position:absolute;left:0;bottom:0;font-size:8px;letter-spacing:1px;color:var(--accent)">LIVE SKY · ${sysById(S.obs.sys).short.toUpperCase()}</span></div></div>
-  ${foot(['v0.9 · path-traced · wgpu', ['↑ ↓', 'choose'], ['Enter', 'open'], ['C', 'continue']])}</div>`;
+  return `<div class="gscreen title">${skyBg(S.obs.sys)}
+    <h1 class="wordmark">${ICON.logo}stargaze<span>.</span></h1>
+    <nav class="tmenu">${TITLE_ITEMS.map(([k, l, d], i) => `<button class="titem ${S.titleSel === i ? 'sel' : ''}" data-title="${i}" data-row="${i}" style="--i:${i}"><span class="caret">▸</span><b>${l}</b>${d ? `<small>${d}</small>` : ''}${kb(k)}</button>`).join('')}</nav>
+    ${prompts([['↑ ↓', 'Select'], ['Enter', 'Confirm']])}</div>`;
 }
 function titleAction(i) {
+  S.titleSel = i;
   const k = TITLE_ITEMS[i][0];
-  if (k === 'C') go('observe');
+  if (k === 'P') go('maps');
   else if (k === 'E') go('systems');
-  else if (k === 'P') go('maps');
   else if (k === 'O') go('settings');
-  else if (k === 'K') go('controls');
   else toast('In the game, Quit closes the window.');
 }
 
-/* ---------------------------------------------------------------- 01 systems */
-function filteredSystems() {
-  const q = S.search.trim().toLowerCase();
-  return listSystems().map((s, i) => ({ s, i })).filter(({ s }) =>
-    (!q || (s.name + s.file + s.short).toLowerCase().includes(q)) &&
-    (S.filter === 'all' || (S.filter === 'fav' && S.favs.has(s.id)) || (S.filter === 'binary' && s.tags.includes('Binary stars')) || (S.filter === 'rings' && s.tags.includes('Rings'))));
-}
+/* ---------------------------------------------------------------- 01 explore */
 function vSystems() {
-  const list = listSystems(), shown = filteredSystems(), s = list[S.sel];
-  const header = `<div class="topbar">${brand()}<span class="spacer"></span><span class="status"><i></i>Observation paused · ${sysById(S.obs.sys).short}</span><button class="btn" data-act="resume">Resume ${kb('Esc')}</button></div>
-    <div class="intro"><div><div class="eyebrow">Celestial atlas / plate 001</div><h1>Find your coordinates.</h1><p>Choose a solar system. The list is read from configs/ every time this menu opens.</p></div>
-    <div class="seg"><button class="on">${ICON.logo}Explore</button><button data-act="to-maps">Field studies ${kb('P')}</button></div></div>`;
-  if (!list.length) return `<div class="wrap">${header}<div class="empty"><b>No YAML systems found in configs.</b>Add a .yaml or .yml file to <code>configs/</code>, then reopen this menu ${kb('M')}.<br>The define-solar-system skill can write one for you.</div>${foot(['Menu refreshes on open', ['Esc', 'resume']])}</div>`;
-  const feature = s.broken ? `
-      <div class="feature-chart"><div class="chart" style="height:320px">${chartSvg()}<div class="mystery" style="color:#ff9c7a90;border-color:#ff9c7a80">!</div></div></div>
-      <div class="feature-copy"><div class="row"><span>Unreadable</span><span class="muted">${s.file}</span></div><h2>${esc(s.name)}</h2>
-        <div class="error-box"><b>VALIDATION ERROR</b>${esc(s.error)}</div>
-        <p>Fix the file and reopen the menu. It is re-read every time. <code>stargaze --check-config ${s.file}</code> validates without a window.</p>
-        <div class="launch"><button class="btn primary" disabled>Enter observatory ${ICON.arrow}</button><small>${kb('Esc')} resume current view</small></div></div>` : `
-      <div class="feature-chart"><span class="cap eyebrow" style="position:absolute;left:0;top:0">System preview</span><span class="cap" style="position:absolute;right:0;top:0;font-size:8px;color:var(--muted)">${s.id.toUpperCase().slice(0, 4)} / ${String(S.sel + 1).padStart(3, '0')}</span>
-        <div class="chart" style="height:320px">${chartSvg()}<canvas data-sky="${s.id}" style="position:absolute;inset:10%;width:80%;height:80%;border-radius:50%"></canvas></div>
-        <span class="cap" style="position:absolute;left:0;bottom:0;font-size:8px;letter-spacing:1px;color:var(--accent)">ILLUSTRATIVE SKY CHART</span></div>
-      <div class="feature-copy"><div class="row"><span>${s.tags[0] || 'System'}</span><span class="muted">${s.file}</span></div><h2>${esc(s.name)}</h2><p>${esc(s.desc)}</p>
-        <dl class="metrics"><div><dt>Observatory</dt><dd>${s.host} · ${s.lat}</dd></div><div><dt>Sky</dt><dd>${s.stars} star${s.stars > 1 ? 's' : ''} · ${s.bodies} bodies</dd></div><div><dt>Atmosphere</dt><dd>${s.atmo}</dd></div><div><dt>Field of view</dt><dd>${s.fov}°</dd></div></dl>
-        <div class="launch"><button class="btn primary" data-act="open">Enter observatory ${ICON.arrow}</button><small>${kb('Enter')} to observe · ${kb('F')} favorite</small></div>
-        <div class="tags">${s.tags.map(t => `<span>${t}</span>`).join('')}</div></div>`;
-  return `<div class="wrap">${header}
-    <section class="feature">${feature}</section>
-    <div class="index-head"><h3>Solar systems</h3><span class="count">${String(list.length).padStart(2, '0')} AVAILABLE</span>
-      <label class="search">${ICON.search}<input id="q" placeholder="Find a solar system…" value="${esc(S.search)}">${kb('/')}</label></div>
-    <div class="filters">${[['all', 'All systems'], ['fav', '☆ Favorites'], ['binary', 'Binary'], ['rings', 'Rings']].map(([k, l]) => `<button data-filter="${k}" class="${S.filter === k ? 'on' : ''}">${l}</button>`).join('')}</div>
-    <div class="index" style="grid-template-columns:repeat(${Math.max(5, list.length)},minmax(0,1fr))">${list.map((x, i) => {
-      const vis = shown.some(v => v.i === i);
-      return `<button class="index-cell ${i === S.sel ? 'sel' : ''} ${x.broken ? 'bad' : ''}" data-sys="${i}" style="${vis ? '' : 'opacity:.25'}"><span class="n">[${i + 1}]</span><b>${esc(x.short)}</b><small>${x.broken ? '⚠ invalid · ' + x.file : x.file}</small>${x.broken ? '' : `<svg class="fav ${S.favs.has(x.id) ? 'on' : ''}" viewBox="0 0 24 24" data-fav="${i}"><path d="m12 3 2.7 5.6 6.1.9-4.4 4.3 1 6.1L12 17l-5.4 2.9 1-6.1-4.4-4.3 6.1-.9z"/></svg>`}</button>`;
-    }).join('')}</div>
-    <div class="pager"><span>■ ${list.length} worlds · page 1 of 1</span><div class="pg"><button class="btn" disabled>‹ ${kb('PgUp')}</button><button class="btn" disabled>${kb('PgDn')} ›</button></div></div>
-    ${foot(['Esc or home: resume current view', ['1–9', 'select'], ['Enter', 'observe'], ['T', 'title'], ['Esc', 'resume']])}</div>`;
+  const list = listSystems();
+  const body = !list.length
+    ? `<div class="gempty"><b>No systems found</b>Add a .yaml file to configs/, then reopen this menu.</div>`
+    : `<div class="list">${list.map((x, i) => `<div class="lrow ${i === S.sel ? 'sel' : ''} ${x.broken ? 'bad' : ''}" data-row="${i}" style="--i:${i}">
+        <span class="lnum">${pad(i + 1)}</span>
+        <div class="linfo"><b>${esc(x.short)}</b>${x.broken ? `<div class="err">${esc(x.error.split('\n').slice(1, 2).join(''))}</div>` : `<div class="lsub">${esc(x.file)}</div>`}</div>
+        <button class="gbtn play" data-explore="${i}" ${x.broken ? 'disabled' : ''}>${x.broken ? 'Invalid' : 'Explore'}${kb('Enter')}</button></div>`).join('')}</div>`;
+  return gameScreen({ title: 'Explore', sub: 'Any system · labels and targets on', body, keys: [['↑ ↓', 'Select'], ['Enter', 'Explore'], ['Esc', 'Back']] });
 }
-function openSystem() {
-  const s = listSystems()[S.sel];
+function openSystem(i = S.sel) {
+  const s = listSystems()[i];
   if (!s || s.broken) { toast(s ? 'This config has errors and cannot be loaded.' : 'Nothing to open.'); return; }
-  S.loaded = s.id; S.obs = freshObs(s.id, false); go('observe');
+  S.sel = i; S.loaded = s.id; S.obs = freshObs(s.id, false); go('observe');
   toast(`Loaded ${s.name} · camera on ${s.host}, ${s.lat}`);
 }
 
-/* ---------------------------------------------------------------- 03 maps */
-function mapStatus(s) {
-  if ((S.theory.map === s.id && S.theory.nodes.length > 1) || S.kept[s.id]) return 'In progress';
-  return S.best[s.id] != null ? 'Attempted' : 'New';
+/* ---------------------------------------------------------------- 03 field studies */
+function progressOf(id) {
+  const t = S.theories[id], objs = t ? t.nodes.length - 1 : 0, best = S.best[id];
+  const solved = best != null && best >= 99.9, started = objs > 0 || best != null;
+  return { objs, best, solved, started, attempts: t ? t.attempts.length : 0, status: solved ? 'Solved' : started ? 'In progress' : 'Not started' };
 }
 function vMaps() {
-  const maps = listMaps(), s = maps[S.mapSel], best = S.best[s.id];
-  const inProg = S.theory.map === s.id && S.theory.nodes.length > 1;
-  return `<div class="wrap"><div class="topbar">${brand('FIELD STUDIES')}<span class="spacer"></span><span class="status"><i></i>Current study · ${sysById(S.map).puzzle}</span><button class="btn" data-act="resume">Resume ${kb('Esc')}</button></div>
-    <div class="intro"><div><div class="eyebrow">Maps / reconstruction puzzles</div><h1>Choose a map.</h1><p>Start a new puzzle. Names, moon counts and filenames stay hidden until you have solved it.</p></div>
-    <div class="seg"><button data-act="to-systems">${ICON.logo}Explore ${kb('P')}</button><button class="on">Field studies</button></div></div>
-    ${S.variant.maps === 'failed' ? `<div class="error-box"><b>MAP FAILED TO LOAD</b>Could not load this map. Your current puzzle is unchanged.</div>` : ''}
-    <section class="feature"><div class="feature-chart"><span class="cap eyebrow" style="position:absolute;left:0;top:0">Field study ${String(S.mapSel + 1).padStart(2, '0')}</span>
-      <div class="chart" style="height:320px">${chartSvg()}<div class="mystery">?</div></div><span class="cap" style="position:absolute;left:0;bottom:0;font-size:8px;letter-spacing:1px;color:var(--accent)">UNCHARTED · NO PREVIEW BEFORE OBSERVATION</span></div>
-      <div class="feature-copy"><div class="row"><span>${mapStatus(s)}</span><span class="muted">MAP ${String(S.mapSel + 1).padStart(2, '0')}</span></div><h2>${esc(s.puzzle)}</h2>
-        <p>You wake at an unknown observatory. Watch the sky, then draw the system: which bodies are stars, what orbits what, in what order, and where you are standing.</p>
-        <dl class="metrics"><div><dt>Status</dt><dd>${mapStatus(s)}</dd></div><div><dt>Best score</dt><dd>${best != null ? num(best) + ' / 100' : '—'}</dd></div><div><dt>Attempts</dt><dd>${s.id === S.theory.map ? S.theory.attempts.length : best != null ? 1 : 0}</dd></div><div><dt>Difficulty</dt><dd>${'◆'.repeat(Math.min(5, Math.ceil(s.bodies / 4)))}${'◇'.repeat(5 - Math.min(5, Math.ceil(s.bodies / 4)))}</dd></div></dl>
-        <div class="launch"><button class="btn primary" data-act="start-map">${inProg ? 'Resume field study' : 'Start a fresh theory'} ${ICON.arrow}</button><small>${kb('Enter')} ${inProg ? 'resume' : 'begin'}</small></div></div></section>
-    <div class="index-head"><h3>Maps</h3><span class="count">${String(maps.length).padStart(2, '0')} FIELD STUDIES</span><span></span></div>
-    <div class="index">${maps.map((m, i) => `<button class="index-cell ${i === S.mapSel ? 'sel' : ''}" data-map="${i}"><span class="n">[${i + 1}]</span><b>${esc(m.puzzle)}</b><small>${mapStatus(m) === 'In progress' ? 'In progress · resume' : 'Start a fresh theory'}</small>${S.best[m.id] != null ? `<span class="score">${num(S.best[m.id])}</span>` : ''}<div class="bar"><i style="width:${S.best[m.id] || 0}%"></i></div></button>`).join('')}</div>
-    <div class="pager"><span class="warn-line"><i></i>Choosing a map clears your theory. Resume keeps your current puzzle.</span><div class="pg"><button class="btn" disabled>‹ ${kb('PgUp')}</button><button class="btn" disabled>${kb('PgDn')} ›</button></div></div>
-    ${foot(['Spoiler-free titles', ['1–9', 'select'], ['Enter', 'start'], ['T', 'title'], ['Esc', 'resume']])}</div>`;
+  const rows = listMaps().map((m, i) => {
+    const p = progressOf(m.id);
+    return `<div class="lrow ${i === S.mapSel ? 'sel' : ''} ${p.solved ? 'solved' : ''}" data-row="${i}" style="--i:${i}">
+      <span class="lnum">${pad(i + 1)}</span>
+      <div class="linfo"><b>${esc(m.puzzle)}</b><div class="lprog"><span class="pbar"><i style="width:${p.best || 0}%"></i></span><span class="status">${p.status}</span><span>${p.best != null ? `best ${num(p.best)}` : ''}${p.objs ? ` · ${p.objs} objects drawn` : ''}</span></div></div>
+      <button class="gbtn play" data-play="${i}">${p.started ? 'Resume' : 'Play'}${kb('Enter')}</button>
+      <button class="gbtn discard" data-discard="${i}" ${p.started ? '' : 'disabled'} title="Discard progress">✕ Discard${kb('D')}</button></div>`;
+  }).join('');
+  const err = S.variant.maps === 'failed' ? `<div class="gerror">Could not load this map. Your progress is unchanged.</div>` : '';
+  return gameScreen({ title: 'Levels', sub: 'Play · reconstruct unknown skies', body: `${err}<div class="list">${rows}</div>`,
+    keys: [['↑ ↓', 'Select'], ['Enter', 'Play'], ['D', 'Discard progress'], ['Esc', 'Back']] });
 }
-function startMap(force) {
-  const s = listMaps()[S.mapSel];
-  if (S.variant.maps === 'failed') { toast('Could not load this map. Your current puzzle is unchanged.'); return; }
-  if (S.theory.map === s.id && S.theory.nodes.length > 1) { S.map = s.id; go('pobserve'); return; }
-  if (!force && S.theory.nodes.length > 1) { S.pendingMap = s.id; S.dialog = 'leave'; renderDialog(); return; }
-  S.map = s.id; S.theory = S.kept[s.id] || freshTheory(s.id); delete S.kept[s.id]; S.pobs = freshObs(s.id, true); S.dialog = null;
-  go('pobserve'); toast(`Field study started · ${s.puzzle}`);
+function startMap(i = S.mapSel) {
+  const s = listMaps()[i];
+  if (S.variant.maps === 'failed') { toast('Could not load this map. Your progress is unchanged.'); return; }
+  const resumed = progressOf(s.id).started;
+  S.mapSel = i; S.map = s.id; S.theory = S.theories[s.id] ||= freshTheory(s.id); S.pobs = freshObs(s.id, true);
+  go('pobserve'); toast(`${resumed ? 'Resumed' : 'Started'} · ${s.puzzle}`);
+}
+function askDiscard(i = S.mapSel) {
+  const s = listMaps()[i];
+  if (!progressOf(s.id).started) return;
+  S.mapSel = i; S.pendingMap = s.id; S.dialog = 'discard'; render();
 }
 
 /* ---------------------------------------------------------------- 02/04 observation */
@@ -358,7 +336,7 @@ function vObserve() {
   const o = obs(), s = sysById(o.sys);
   return `<div class="observe" id="obs"><canvas id="sky"></canvas><div class="sky-labels" id="labels"></div><div class="brackets" id="brackets" hidden><i></i></div><div class="reticle"></div>
     ${o.puzzle ? `<div class="readout"><span id="pstatus"></span></div>
-      ${o.objective && o.hud ? `<div class="objective" data-stop><div class="eyebrow">Field study · ${esc(s.puzzle)}</div><h4>What is out there?</h4>Observe, then draw the system in your theory.
+      ${o.objective && o.hud ? `<div class="objective" data-stop><div class="eyebrow">Level · ${esc(s.puzzle)}</div><h4>What is out there?</h4>Observe, then draw the system in your theory.
         <ul class="steps"><li class="${S.theory.nodes.length > 1 ? 'done' : ''}">Find every moving light</li><li class="${S.theory.nodes.some(n => n.star) ? 'done' : ''}">Decide which are stars</li><li class="${S.theory.viewer != null ? 'done' : ''}">Mark where you are standing</li><li>Check your theory ${kb('Enter')}</li></ul>
         <div style="margin-top:10px;display:flex;justify-content:space-between;align-items:center"><button class="btn" data-act="theory" style="min-height:30px">Open theory ${kb('Tab')}</button><button class="faint" data-act="hide-obj" style="font-size:9px">hide</button></div></div>` : ''}`
       : `<div class="readout" ${o.hud ? '' : 'hidden'}><span class="eyebrow">${esc(s.name)}</span><b>${s.host} · ${s.lat} · FOV <span id="fov"></span></b><span id="daytxt"></span></div>`}
@@ -422,7 +400,7 @@ function stepDay(dir) {
 function setOrient(v) { const o = obs(); if (o.orient === v) return; o.orient = v; o.capture = skyRot(o); renderHud(); }
 function runSearch(kind) {
   const o = obs(), s = sysById(o.sys);
-  if (o.puzzle) { toast('Event search is disabled during a field study.'); return; }
+  if (o.puzzle) { toast('Event search is disabled during a level.'); return; }
   toast(kind === 'E' ? 'Searching up to ten model years for a visible eclipse…' : 'Searching for a moon transit…', { done: false, sticky: true });
   setTimeout(() => {
     const txt = kind === 'E' ? s.eclipse : s.transit, day = parseFloat(txt.split('day ')[1]);
@@ -432,7 +410,7 @@ function runSearch(kind) {
 }
 function aim(i) {
   const o = obs();
-  if (o.puzzle) { toast('Named targets are disabled during a field study.'); return; }
+  if (o.puzzle) { toast('Named targets are disabled during a level.'); return; }
   const name = sysById(o.sys).targets[i]; if (!name) return;
   const bi = o.sky.bodies.findIndex(b => b.n === name);
   if (bi < 0) { toast(`${name} is below the horizon right now.`); return; }
@@ -579,10 +557,10 @@ function tickObserve(dt) {
   }
 }
 function tickPreviews(dt) {
+  tickPreviews.t = (tickPreviews.t || 0) + dt * 40;
   document.querySelectorAll('canvas[data-sky]').forEach(cv => {
-    const id = cv.dataset.sky, p = SKY[id].preview;
-    cv._t = (cv._t || 0) + (cv.dataset.anim ? dt * 30 : 0);
-    drawSky(cv, { sys: id, sky: SKY[id], t: cv._t, cx: p.cx, cy: p.cy, zoom: p.zoom, orient: 'horizon', capture: 0, spp: 999 });
+    const id = cv.dataset.sky, p = cv.dataset.wide ? { cx: .5, cy: .5, zoom: 1 } : SKY[id].preview;
+    drawSky(cv, { sys: id, sky: SKY[id], t: tickPreviews.t, cx: p.cx, cy: p.cy, zoom: p.zoom, orient: 'horizon', capture: 0, spp: 999 });
   });
 }
 const drag = { down: false, moved: false, x: 0, y: 0 };
@@ -768,11 +746,11 @@ function renderDialog() {
   if (S.dialog === 'clear') el.innerHTML = `<div class="dialog"><div class="eyebrow">Your theory</div><h2>Clear the entire theory?</h2>
     <p>Removes all objects and the viewer. ${t.nodes.length - 1} orbiting object${t.nodes.length === 2 ? '' : 's'} will be removed; the centre stays.</p><p>Undo can restore everything.</p>
     <div class="actions"><button class="btn" data-act="d-cancel">Cancel ${kb('Esc')}</button><button class="btn primary danger" data-act="d-clear" style="gap:24px">Clear all ${kb('Enter')}</button></div></div>`;
-  if (S.dialog === 'leave') {
-    const cur = sysById(t.map), next = sysById(S.pendingMap || 'vesper');
-    el.innerHTML = `<div class="dialog"><div class="eyebrow">Field study in progress</div><h2>Leave ${esc(cur.puzzle)}?</h2>
-      <p>Your theory has ${t.nodes.length} objects and ${t.edits} edits${t.attempts.length ? `, best check ${num(Math.max(...t.attempts.map(a => a.total)))}` : ''}.</p><p>Starting <b style="color:var(--text)">${esc(next.puzzle)}</b> replaces it, unless you keep it for later.</p>
-      <div class="actions"><button class="btn" data-act="d-cancel">Cancel ${kb('Esc')}</button><button class="btn danger" data-act="d-discard">Discard theory ${kb('D')}</button><button class="btn primary" data-act="d-keep" style="gap:24px">Keep for later ${kb('Enter')}</button></div></div>`;
+  if (S.dialog === 'discard') {
+    const m = sysById(S.pendingMap), p = progressOf(m.id);
+    el.innerHTML = `<div class="dialog"><div class="eyebrow">Discard progress</div><h2>Discard ${esc(m.puzzle)}?</h2>
+      <p>Your theory${p.objs ? ` (${p.objs} objects)` : ''}, ${p.attempts} check${p.attempts === 1 ? '' : 's'} and best score ${p.best != null ? num(p.best) : '—'} will be removed. The level starts fresh.</p><p>This cannot be undone.</p>
+      <div class="actions"><button class="btn" data-act="d-cancel">Cancel ${kb('Esc')}</button><button class="btn primary danger" data-act="d-discard" style="gap:24px">Discard ${kb('Enter')}</button></div></div>`;
   }
   if (S.dialog === 'result') {
     const s = t.score, C = 2 * Math.PI * 88;
@@ -790,7 +768,7 @@ function renderDialog() {
 function dialogAct(a) {
   const d = S.dialog; S.dialog = null;
   if (a === 'd-clear') { save(); const t = T(); t.nodes = [{ ...t.nodes.find(n => n.parent == null), star: false, rings: false }]; t.viewer = null; t.sel = t.nodes[0].id; t.msg = 'Theory cleared. Undo [Z] restores everything.'; }
-  if (a === 'd-keep' || a === 'd-discard') { const m = S.pendingMap; if (a === 'd-keep') S.kept[S.theory.map] = S.theory; S.map = m; S.theory = S.kept[m] || freshTheory(m); delete S.kept[m]; S.pobs = freshObs(m, true); go('pobserve'); toast(a === 'd-keep' ? 'Previous theory kept · resume it from Maps' : 'Theory discarded'); return; }
+  if (a === 'd-discard') { const id = S.pendingMap; S.theories[id] = freshTheory(id); S.best[id] = null; if (S.map === id) S.theory = S.theories[id]; S.pendingMap = null; render(); toast(`Progress discarded · ${sysById(id).puzzle}`); return; }
   if (a === 'd-observe') { go('pobserve'); return; }
   if (a === 'd-maps') { go('maps'); return; }
   renderDialog();
@@ -818,28 +796,30 @@ function vSettings() {
       ${seg('orient', [['horizon', 'Keep horizon'], ['sky', 'Keep stars']], 'Default orientation', 'Keep the horizon level, or hold the stars still while the ground turns.', '[S]')}`,
     () => `<h3>Interface</h3><p>The HUD and labels never reset the image.</p>
       ${range('hud', 75, 200, 25, v => v + '%', 'HUD scale', 'Bar and menu scale on top of the display scale factor.', 'window scale factor')}
-      ${toggle('labels', 'Labels in Explore', 'Name bodies in the sky. Field studies always hide them.', '[L]')}
+      ${toggle('labels', 'Labels in Explore', 'Name bodies in the sky. Levels always hide them.', '[L]')}
       ${toggle('grid', 'Chart grid', 'Drafting grid behind menus.', '—')}`,
   ][tab]();
-  return `<div class="wrap"><div class="topbar">${brand('SETTINGS')}<span class="spacer"></span><button class="btn" data-act="back">Back ${kb('Esc')}</button></div>
-    <div class="intro"><div><div class="eyebrow">Observatory settings</div><h1>Calibrate the telescope.</h1><p>Each option matches an existing environment variable; changes apply live.</p></div></div>
-    <div class="settings"><div class="tabs">${SET_TABS.map((l, i) => `<button class="${i === tab ? 'on' : ''}" data-tab="${i}">${l}${kb(i + 1)}</button>`).join('')}</div><div class="setting-sec">${body}</div></div>
-    ${foot(['Settings apply immediately', ['1–4', 'section'], ['Esc', 'back']])}</div>`;
+  return gameScreen({ title: 'Settings', sub: 'Calibrate the telescope', back: 'back',
+    body: `<div class="gsettings"><div class="tabs">${SET_TABS.map((l, i) => `<button class="${i === tab ? 'on' : ''}" data-tab="${i}">${l}${kb(i + 1)}</button>`).join('')}</div><div class="setting-sec">${body}</div></div>`,
+    keys: [['1–4', 'Section'], ['Esc', 'Back']] });
 }
 const KEYS = [
-  ['Menus', [['M Esc', 'open / resume'], ['1–9', 'choose a system or map'], ['PgUp PgDn', 'change page'], ['Enter', 'open selected'], ['/', 'search', 1], ['F', 'favorite', 1], ['P', 'Explore ↔ Field studies', 1], ['T', 'title screen', 1]]],
+  ['Menus', [['M Esc', 'open / resume'], ['1–9', 'choose a system or map'], ['PgUp PgDn', 'change page'], ['Enter', 'open selected'], ['/', 'search', 1], ['F', 'favorite', 1], ['P', 'Explore ↔ Levels', 1], ['T', 'title screen', 1]]],
   ['Observation', [['drag', 'look around'], ['right-click', 'lock body / sky direction'], ['left-click U', 'release lock'], ['scroll = -', 'zoom (to 0.001°)'], ['← →', 'signed speed'], ['Space', 'stop / resume'], ['PgDn PgUp', '−1 / +1 local day'], ['S', 'star orientation'], [', .', 'exposure ±0.25 EV'], ['A', 'auto exposure'], ['L', 'labels'], ['H', 'hide HUD'], ['F1–F9', 'aim at targets'], ['E', 'find eclipse'], ['T', 'find transit'], ['R', 'reset view'], ['G', 'targets panel', 1]]],
   ['Theory editor', [['Tab', 'observe ↔ theory'], ['right-click N', 'add orbiting object'], ['drag', 'reorder orbits'], ['S', 'is star'], ['R', 'has rings'], ['V', 'viewer here'], ['Del', 'delete branch'], ['Z Y', 'undo / redo'], ['X', 'clear all'], ['Enter', 'check theory'], ['M', 'maps']]],
 ];
 function vControls() {
-  return `<div class="wrap"><div class="topbar">${brand('CONTROLS')}<span class="spacer"></span><button class="btn" data-act="back">Back ${kb('Esc')}</button></div>
-    <div class="intro"><div><div class="eyebrow">Reference</div><h1>Every key, one page.</h1><p>Keyboard and mouse controls across Stargaze. Keys marked "new" are proposed in this mockup (idea.md feat2).</p></div></div>
-    <div class="keys-grid">${KEYS.map(([h, rows]) => `<div class="keys-col"><h3>${h.toUpperCase()}</h3>${rows.map(([k, l, n]) => `<div class="k ${n ? 'new' : ''}"><span>${k.split(' ').map(kb).join('')}</span><span>${l}</span></div>`).join('')}</div>`).join('')}</div>
-    ${foot(['Keyboard & mouse', ['Esc', 'back']])}</div>`;
+  return gameScreen({ title: 'Controls', sub: 'Every key, one page', back: 'back',
+    body: `<div class="keys-grid">${KEYS.map(([h, rows]) => `<div class="keys-col"><h3>${h.toUpperCase()}</h3>${rows.map(([k, l, n]) => `<div class="k ${n ? 'new' : ''}"><span>${k.split(' ').map(kb).join('')}</span><span>${l}</span></div>`).join('')}</div>`).join('')}</div>`,
+    keys: [['Esc', 'Back']] });
 }
 
 /* ---------------------------------------------------------------- mount + events */
 function mount() {
+  const key = { title: 'titleSel', systems: 'sel', maps: 'mapSel' }[S.screen];
+  if (key) document.querySelectorAll('[data-row]').forEach(r => r.addEventListener('mouseenter', () => {
+    setSel(key, +r.dataset.row);
+  }));
   if (S.screen === 'observe' || S.screen === 'pobserve') mountObserve();
   if (S.screen === 'theory') mountTheory();
   const q = $('#q');
@@ -853,7 +833,10 @@ document.addEventListener('click', e => {
   const d = b.dataset;
   if (d.go) { go(d.go, d.variant); return; }
   if (d.fav !== undefined) { e.stopPropagation(); const id = listSystems()[+d.fav].id; S.favs.has(id) ? S.favs.delete(id) : S.favs.add(id); render(); return; }
-  if (d.title !== undefined) { S.titleSel = +d.title; titleAction(+d.title); return; }
+  if (d.title !== undefined) { titleAction(+d.title); return; }
+  if (d.explore !== undefined) { openSystem(+d.explore); return; }
+  if (d.play !== undefined) { startMap(+d.play); return; }
+  if (d.discard !== undefined) { askDiscard(+d.discard); return; }
   if (d.sys !== undefined) { if (S.sel === +d.sys && e.detail > 1) openSystem(); S.sel = +d.sys; render(); return; }
   if (d.map !== undefined) { S.mapSel = +d.map; render(); return; }
   if (d.filter) { S.filter = d.filter; render(); return; }
@@ -867,7 +850,7 @@ document.addEventListener('click', e => {
 function act(a) {
   const o = obs();
   const map = {
-    title: () => go('title'), resume: () => go(S.screen === 'maps' ? 'pobserve' : 'observe'), open: openSystem, 'to-maps': () => go('maps'), 'to-systems': () => go('systems'),
+    title: () => go('title'), 'back-title': () => go('title'), resume: () => go(S.screen === 'maps' ? 'pobserve' : 'observe'), open: openSystem, 'to-maps': () => go('maps'), 'to-systems': () => go('systems'),
     'start-map': () => startMap(), back: () => go(S.back || 'title'),
     menu: () => go(S.screen === 'observe' ? 'systems' : 'maps'), labels: () => { o.labels = !o.labels; renderHud(); }, hud: () => { o.hud = !o.hud; render(); },
     theory: () => go('theory'), 'observe-p': () => go('pobserve'), 'hide-obj': () => { o.objective = false; render(); },
@@ -886,7 +869,7 @@ document.addEventListener('keydown', e => {
   if (k === '?' && !inInput) { S.notes = !S.notes; renderNotes(); return; }
   if ((k === '[' || k === ']') && !inInput) { const i = ORDER.indexOf(S.railPick || S.screen); go(ORDER[(i + (k === ']' ? 1 : -1) + ORDER.length) % ORDER.length]); return; }
   if (S.dialog) {
-    const m = { Escape: 'd-cancel', Enter: { clear: 'd-clear', leave: 'd-keep', result: 'd-maps' }[S.dialog], d: S.dialog === 'leave' && 'd-discard', D: S.dialog === 'leave' && 'd-discard', Tab: S.dialog === 'result' && 'd-observe', m: S.dialog === 'result' && 'd-maps' }[k];
+    const m = { Escape: 'd-cancel', Enter: { clear: 'd-clear', discard: 'd-discard', result: 'd-maps' }[S.dialog], Tab: S.dialog === 'result' && 'd-observe', m: S.dialog === 'result' && 'd-maps' }[k];
     if (m) { e.preventDefault(); dialogAct(m); }
     return;
   }
@@ -894,27 +877,22 @@ document.addEventListener('keydown', e => {
   const scr = S.screen, lower = k.length === 1 ? k.toLowerCase() : k;
   const digit = /^[1-9]$/.test(k) ? +k - 1 : -1;
   if (scr === 'title') {
-    if (k === 'ArrowDown' || k === 'ArrowUp') { S.titleSel = (S.titleSel + (k === 'ArrowDown' ? 1 : -1) + TITLE_ITEMS.length) % TITLE_ITEMS.length; render(); e.preventDefault(); }
+    if (k === 'ArrowDown' || k === 'ArrowUp') { e.preventDefault(); moveSel('titleSel', TITLE_ITEMS.length, k === 'ArrowDown' ? 1 : -1); }
     else if (k === 'Enter') titleAction(S.titleSel);
     else { const i = TITLE_ITEMS.findIndex(t => t[0].toLowerCase() === lower); if (i >= 0) titleAction(i); }
   } else if (scr === 'systems') {
     const n = listSystems().length;
-    if (digit >= 0 && digit < n) { S.sel = digit; render(); }
-    else if (k === 'ArrowRight' || k === 'ArrowLeft') { S.sel = clamp(S.sel + (k === 'ArrowRight' ? 1 : -1), 0, n - 1); render(); }
+    if ((k === 'ArrowDown' || k === 'ArrowUp') && n) { e.preventDefault(); moveSel('sel', n, k === 'ArrowDown' ? 1 : -1); }
+    else if (digit >= 0 && digit < n) setSel('sel', digit);
     else if (k === 'Enter') openSystem();
-    else if (k === 'Escape' || lower === 'm') go('observe');
-    else if (k === '/') { e.preventDefault(); $('#q')?.focus(); }
-    else if (lower === 'f' && n) { const id = listSystems()[S.sel].id; S.favs.has(id) ? S.favs.delete(id) : S.favs.add(id); render(); }
-    else if (lower === 'p') go('maps');
-    else if (lower === 't') go('title');
+    else if (k === 'Escape') go('title');
   } else if (scr === 'maps') {
     const n = listMaps().length;
-    if (digit >= 0 && digit < n) { S.mapSel = digit; render(); }
-    else if (k === 'ArrowRight' || k === 'ArrowLeft') { S.mapSel = clamp(S.mapSel + (k === 'ArrowRight' ? 1 : -1), 0, n - 1); render(); }
+    if (k === 'ArrowDown' || k === 'ArrowUp') { e.preventDefault(); moveSel('mapSel', n, k === 'ArrowDown' ? 1 : -1); }
+    else if (digit >= 0 && digit < n) setSel('mapSel', digit);
     else if (k === 'Enter') startMap();
-    else if (k === 'Escape' || lower === 'm') go('pobserve');
-    else if (lower === 'p') go('systems');
-    else if (lower === 't') go('title');
+    else if (lower === 'd' || k === 'Delete') askDiscard();
+    else if (k === 'Escape') go('title');
   } else if (scr === 'observe' || scr === 'pobserve') {
     const o = obs(), puzzle = o.puzzle;
     const F = /^F([1-9])$/.exec(k);
@@ -924,8 +902,8 @@ document.addEventListener('keydown', e => {
       PageDown: () => stepDay(-1), PageUp: () => stepDay(1), u: () => { o.lock = null; renderHud(); }, s: () => setOrient(o.orient === 'sky' ? 'horizon' : 'sky'),
       ',': () => { o.ev = clamp(o.ev - .25, -8, 8); renderHud(); }, '.': () => { o.ev = clamp(o.ev + .25, -8, 8); renderHud(); }, a: () => act('auto'), h: () => act('hud'),
       r: resetView, '=': () => act('zoomin'), '+': () => act('zoomin'), '-': () => { o.zoom = clamp(o.zoom / 1.5, .6, 5000); o.spp = 0; paintClock(); },
-      l: () => puzzle ? toast('Labels are hidden during a field study.') : act('labels'), e: () => runSearch('E'), t: () => runSearch('T'),
-      g: () => !puzzle && act('targets'), Tab: () => puzzle ? go('theory') : toast('Tab opens the theory in a field study.'),
+      l: () => puzzle ? toast('Labels are hidden during a level.') : act('labels'), e: () => runSearch('E'), t: () => runSearch('T'),
+      g: () => !puzzle && act('targets'), Tab: () => puzzle ? go('theory') : toast('Tab opens the theory in a level.'),
     }[lower];
     if (m) { e.preventDefault(); m(); }
   } else if (scr === 'theory') {

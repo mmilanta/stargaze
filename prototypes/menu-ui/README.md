@@ -15,6 +15,8 @@ Eight standalone, interactive HTML prototypes on branch `menu-ui`:
 
 **Celestial Blueprint · every screen** (`suite.html`) takes the Blueprint direction through every menu page in the game. It covers the title screen (new), system browser, observation HUD, maps, field-study HUD, theory editor, the clear / check / leave dialogs, settings (new) and controls (new), plus invalid-config, empty, load-failure, hidden-HUD, eclipse-search and no-day states. Press `` ` `` for the screen index, `?` for per-screen notes (what the game has today vs. what is proposed), and `[` / `]` to step through the screens. `suite.html?screen=theory` opens a screen directly. It includes the idea.md wishes: decade speed steps, a key on every button, Theory in the bottom bar, a keep-or-discard prompt when leaving a field study, a Horizon / Stars orientation next to the lock, and the full-page theory editor. Scoring uses a JS port of `game::score`.
 
+**Button motion** (`buttons.html`) is a small study of 20 hover and press animations in the Blueprint style. Each one is shown on the primary, outline and HUD buttons. Keys shown on the buttons play their press animation, and a speed control slows everything down for inspection.
+
 Open `index.html` directly, or serve this directory:
 
 ```sh
