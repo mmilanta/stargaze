@@ -1,21 +1,22 @@
 //! Orbital-tree puzzle. Relative diagram radii determine the scored sibling order.
+use serde::{Deserialize, Serialize};
 use winit::keyboard::KeyCode;
 
 use crate::sim::{BodyKind, Scene};
 use crate::ui::{Rect, UiVertex, push_rect, push_text};
 
 const MAX_NODES: usize = 64;
-const INK: [f32; 4] = [0.85, 0.91, 0.97, 1.0];
-const MUTED: [f32; 4] = [0.48, 0.61, 0.73, 1.0];
-const ACCENT: [f32; 4] = [0.34, 0.87, 0.75, 1.0];
+const INK: [f32; 4] = crate::ui::INK;
+const MUTED: [f32; 4] = crate::ui::MUTED;
+const ACCENT: [f32; 4] = crate::ui::OK;
 
-#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
 struct Traits {
     star: bool,
     rings: bool,
 }
 
-#[derive(Clone)]
+#[derive(Clone, Serialize, Deserialize)]
 struct Node {
     parent: Option<usize>,
     pos: [f32; 2],
@@ -34,7 +35,7 @@ impl Node {
     }
 }
 
-#[derive(Clone, Copy, Debug)]
+#[derive(Clone, Copy, Debug, Serialize, Deserialize)]
 pub struct Score {
     pub topology: f32,
     pub traits: f32,
@@ -47,6 +48,15 @@ impl Score {
     }
 }
 
+#[derive(Clone, Serialize, Deserialize)]
+pub struct Snapshot {
+    nodes: Vec<Node>,
+    selected: usize,
+    viewer: Option<usize>,
+    attempts: Vec<Score>,
+    best: Option<f32>,
+}
+
 pub struct Game {
     pub open: bool,
     nodes: Vec<Node>,
@@ -57,6 +67,9 @@ pub struct Game {
     undo: Vec<(Vec<Node>, Option<usize>, usize)>,
     redo: Vec<(Vec<Node>, Option<usize>, usize)>,
     pub confirm_clear: bool,
+    pub result_open: bool,
+    attempts: Vec<Score>,
+    best: Option<f32>,
     score: Option<Score>,
     message: String,
 }
@@ -78,6 +91,9 @@ impl Default for Game {
             undo: Vec::new(),
             redo: Vec::new(),
             confirm_clear: false,
+            result_open: false,
+            attempts: Vec::new(),
+            best: None,
             score: None,
             message:
                 "Select a parent, then right-click empty space to add. [N] also adds at the cursor."
@@ -87,6 +103,79 @@ impl Default for Game {
 }
 
 impl Game {
+    pub fn snapshot(&self) -> Snapshot {
+        Snapshot {
+            nodes: self.nodes.clone(),
+            selected: self.selected,
+            viewer: self.viewer,
+            attempts: self.attempts.clone(),
+            best: self.best,
+        }
+    }
+    pub fn restore(snapshot: &Snapshot) -> Option<Self> {
+        let n = snapshot.nodes.len();
+        if n == 0
+            || n > MAX_NODES
+            || snapshot.selected >= n
+            || snapshot.viewer.is_some_and(|v| v >= n)
+            || snapshot.nodes[0].parent.is_some()
+            || snapshot
+                .nodes
+                .iter()
+                .skip(1)
+                .any(|node| node.parent.is_none())
+        {
+            return None;
+        }
+        for (i, node) in snapshot.nodes.iter().enumerate() {
+            if node.pos.iter().any(|p| !p.is_finite() || p.abs() > 10000.0) {
+                return None;
+            }
+            let mut next = Some(i);
+            for step in 0..=n {
+                let Some(j) = next else { break };
+                if j >= n || step == n {
+                    return None;
+                }
+                next = snapshot.nodes[j].parent;
+            }
+        }
+        if snapshot.attempts.len() > 1000
+            || snapshot.attempts.iter().any(|s| {
+                ![s.topology, s.traits]
+                    .iter()
+                    .all(|v| v.is_finite() && (0.0..=100.0).contains(v))
+            })
+            || snapshot
+                .best
+                .is_some_and(|b| !b.is_finite() || !(0.0..=100.0).contains(&b))
+        {
+            return None;
+        }
+        let mut game = Self {
+            nodes: snapshot.nodes.clone(),
+            selected: snapshot.selected,
+            viewer: snapshot.viewer,
+            attempts: snapshot.attempts.clone(),
+            best: snapshot.best,
+            ..Self::default()
+        };
+        game.reorder_by_distance();
+        Some(game)
+    }
+    pub fn progress(&self) -> (usize, usize, Option<f32>) {
+        (self.nodes.len() - 1, self.attempts.len(), self.best)
+    }
+    pub fn has_progress(&self) -> bool {
+        self.nodes.len() > 1
+            || self.viewer.is_some()
+            || self.nodes[0].traits != Traits::default()
+            || !self.attempts.is_empty()
+    }
+    pub fn dismiss_result(&mut self) {
+        self.result_open = false;
+    }
+
     pub fn layout(&self, w: f32, h: f32, scale: f32) -> Layout {
         let mut l = Layout::new(w, h, scale);
         let margin = 38.0 * l.scale;
@@ -125,6 +214,7 @@ impl Game {
         self.undo
             .push((self.nodes.clone(), self.viewer, self.selected));
         self.score = None;
+        self.result_open = false;
     }
 
     pub fn toggle(&mut self) {
@@ -288,6 +378,13 @@ impl Game {
                         &Topology::from_scene(scene),
                         scene.host,
                     ));
+                    let score = self.score.unwrap();
+                    self.best = Some(self.best.unwrap_or(0.0).max(score.total()));
+                    if self.attempts.len() == 1000 {
+                        self.attempts.remove(0);
+                    }
+                    self.attempts.push(score);
+                    self.result_open = true;
                     self.message =
                         "Edit your theory and check again, or return to observing.".into();
                 } else {
@@ -321,7 +418,11 @@ impl Game {
     }
 
     pub fn right_click(&mut self, l: &Layout, cursor: (f64, f64)) {
-        if !self.open || self.confirm_clear || !l.canvas.contains(cursor.0, cursor.1) {
+        if !self.open
+            || self.confirm_clear
+            || self.result_open
+            || !l.canvas.contains(cursor.0, cursor.1)
+        {
             return;
         }
         self.release();
@@ -335,6 +436,12 @@ impl Game {
     }
 
     pub fn key(&mut self, key: KeyCode, l: &Layout, cursor: (f64, f64), scene: &Scene) {
+        if self.result_open {
+            if matches!(key, KeyCode::Escape | KeyCode::Enter) {
+                self.result_open = false;
+            }
+            return;
+        }
         if self.confirm_clear {
             match key {
                 KeyCode::Enter => self.clear(),
@@ -359,6 +466,15 @@ impl Game {
 
     /// Modal editor clicks never leak into the observing view.
     pub fn click(&mut self, l: &Layout, cursor: (f64, f64), scene: &Scene) -> bool {
+        if self.result_open {
+            if l.result_close.contains(cursor.0, cursor.1) {
+                self.result_open = false;
+            } else if l.result_observe.contains(cursor.0, cursor.1) {
+                self.result_open = false;
+                self.open = false;
+            }
+            return true;
+        }
         if self.confirm_clear {
             if l.confirm.contains(cursor.0, cursor.1) {
                 self.clear();
@@ -393,7 +509,7 @@ impl Game {
     }
 
     pub fn motion(&mut self, l: &Layout, cursor: (f64, f64)) {
-        if self.confirm_clear {
+        if self.confirm_clear || self.result_open {
             return;
         }
         if let Some(i) = self.dragging {
@@ -493,6 +609,9 @@ fn score(guess: &Topology, viewer: usize, truth: &Topology, host: usize) -> Scor
 pub struct Layout {
     pub toggle: Rect,
     pub maps: Rect,
+    pub result_close: Rect,
+    pub result_observe: Rect,
+    pub result_maps: Rect,
     bar: Rect,
     canvas: Rect,
     buttons: [Rect; 6],
@@ -543,6 +662,24 @@ impl Layout {
             h: 160.0 * s,
         };
         Self {
+            result_close: Rect {
+                x: (w - 580.0 * s) * 0.5 + 20.0 * s,
+                y: (h - 380.0 * s) * 0.5 + 326.0 * s,
+                w: 166.0 * s,
+                h: 34.0 * s,
+            },
+            result_observe: Rect {
+                x: (w - 580.0 * s) * 0.5 + 196.0 * s,
+                y: (h - 380.0 * s) * 0.5 + 326.0 * s,
+                w: 166.0 * s,
+                h: 34.0 * s,
+            },
+            result_maps: Rect {
+                x: (w - 580.0 * s) * 0.5 + 372.0 * s,
+                y: (h - 380.0 * s) * 0.5 + 326.0 * s,
+                w: 188.0 * s,
+                h: 34.0 * s,
+            },
             toggle,
             maps,
             bar,
@@ -705,7 +842,7 @@ pub fn build(
         );
     };
     if game.open {
-        push_rect(verts, 0.0, 0.0, w, h, [0.012, 0.023, 0.04, 1.0], viewport);
+        crate::ui::blueprint(verts, viewport, s);
         crate::ui::toolbar_panel(
             verts,
             l.bar,
@@ -713,7 +850,15 @@ pub fn build(
             &[l.buttons[1], l.buttons[3], l.buttons[4]],
             viewport,
         );
-        text(verts, 20.0 * s, 20.0 * s, 1.6, "YOUR THEORY", INK);
+        crate::ui::heading(
+            verts,
+            20.0 * s,
+            14.0 * s,
+            25.0 * s,
+            "Your theory",
+            INK,
+            viewport,
+        );
         text(
             verts,
             200.0 * s,
@@ -723,10 +868,14 @@ pub fn build(
             MUTED,
         );
         for (r, label, active) in [
-            (l.traits[0], "[S]tar", game.nodes[game.selected].traits.star),
+            (
+                l.traits[0],
+                "Is star [S]",
+                game.nodes[game.selected].traits.star,
+            ),
             (
                 l.traits[1],
-                "Has [R]ings",
+                "Rings [R]",
                 game.nodes[game.selected].traits.rings,
             ),
         ] {
@@ -751,21 +900,13 @@ pub fn build(
             );
         }
         let c = l.canvas;
-        push_rect(
-            verts,
-            c.x,
-            c.y,
-            c.w,
-            c.h,
-            [0.021, 0.039, 0.062, 1.0],
-            viewport,
-        );
+        push_rect(verts, c.x, c.y, c.w, c.h, crate::ui::DEEP, viewport);
         let step = 32.0 * s;
         let mut x = c.x + step;
         while x < c.x + c.w {
             let mut y = c.y + step;
             while y < c.y + c.h {
-                push_rect(verts, x, y, 1.0, 1.0, [0.14, 0.21, 0.28, 1.0], viewport);
+                push_rect(verts, x, y, 1.0, 1.0, [0.7, 0.8, 1.0, 0.08], viewport);
                 y += step;
             }
             x += step;
@@ -789,7 +930,7 @@ pub fn build(
             if let Some(parent) = node.parent {
                 let a = l.point(game.nodes[parent].pos);
                 let b = l.point(node.pos);
-                line(verts, a, b, 1.5 * s, [0.23, 0.40, 0.48, 1.0], viewport);
+                line(verts, a, b, 1.5 * s, crate::ui::LINE, viewport);
             }
         }
         for (i, node) in game.nodes.iter().enumerate() {
@@ -802,11 +943,11 @@ pub fn build(
                 p[1] - r,
                 r * 2.0,
                 r * 2.0,
-                [0.021, 0.039, 0.062, 1.0],
+                crate::ui::DEEP,
                 viewport,
             );
             let color = if node.traits.star {
-                [1.0, 0.77, 0.28, 1.0]
+                crate::ui::ACCENT
             } else {
                 MUTED
             };
@@ -859,7 +1000,7 @@ pub fn build(
                     y - 2.0 * s,
                     width + 4.0 * s,
                     12.0 * s,
-                    [0.021, 0.039, 0.062, 1.0],
+                    crate::ui::DEEP,
                     viewport,
                 );
                 text(
@@ -906,20 +1047,100 @@ pub fn build(
                 MUTED,
             );
         }
-        button(verts, l.maps, "[M]enu", false);
+        button(verts, l.maps, "Levels [M]", false);
         button(verts, l.toggle, "Observe [Tab]", false);
+        if game.result_open
+            && let Some(score) = game.score
+        {
+            push_rect(verts, 0.0, 0.0, w, h, [0.0, 0.002, 0.016, 0.72], viewport);
+            let d = Rect {
+                x: (w - 580.0 * s) * 0.5,
+                y: (h - 380.0 * s) * 0.5,
+                w: 580.0 * s,
+                h: 380.0 * s,
+            };
+            push_rect(verts, d.x, d.y, d.w, d.h, crate::ui::DEEP, viewport);
+            crate::ui::outline(verts, d, s, crate::ui::LINE, viewport);
+            text(
+                verts,
+                d.x + 24.0 * s,
+                d.y + 20.0 * s,
+                0.9,
+                &format!("THEORY CHECK / ATTEMPT {}", game.attempts.len()),
+                crate::ui::ACCENT,
+            );
+            crate::ui::heading(
+                verts,
+                d.x + 24.0 * s,
+                d.y + 50.0 * s,
+                28.0 * s,
+                if score.total() > 99.9 {
+                    "Solved. The sky makes sense."
+                } else {
+                    "Keep observing."
+                },
+                INK,
+                viewport,
+            );
+            crate::ui::heading(
+                verts,
+                d.x + 24.0 * s,
+                d.y + 104.0 * s,
+                64.0 * s,
+                &format!("{:.1}", score.total()),
+                crate::ui::ACCENT,
+                viewport,
+            );
+            text(verts, d.x + 210.0 * s, d.y + 146.0 * s, 1.0, "/ 100", MUTED);
+            for (i, (label, value)) in [
+                ("Ordered structure / 60%", score.topology),
+                ("Star & ring traits / 20%", score.traits),
+                (
+                    "Viewer position / 20%",
+                    if score.viewer { 100.0 } else { 0.0 },
+                ),
+            ]
+            .iter()
+            .enumerate()
+            {
+                let y = d.y + (192.0 + i as f32 * 35.0) * s;
+                text(verts, d.x + 24.0 * s, y, 0.9, label, MUTED);
+                text(verts, d.x + 466.0 * s, y, 0.9, &format!("{value:.1}%"), INK);
+                push_rect(
+                    verts,
+                    d.x + 24.0 * s,
+                    y + 19.0 * s,
+                    530.0 * s,
+                    2.0 * s,
+                    crate::ui::LINE,
+                    viewport,
+                );
+                push_rect(
+                    verts,
+                    d.x + 24.0 * s,
+                    y + 19.0 * s,
+                    530.0 * s * value / 100.0,
+                    2.0 * s,
+                    crate::ui::ACCENT,
+                    viewport,
+                );
+            }
+            button(verts, l.result_close, "Edit [Esc]", false);
+            button(verts, l.result_observe, "Observe [Tab]", false);
+            crate::ui::button(
+                verts,
+                l.result_maps,
+                "Levels [M]",
+                s,
+                true,
+                l.result_maps.contains(cursor.0, cursor.1),
+                viewport,
+            );
+        }
         if game.confirm_clear {
             push_rect(verts, 0.0, 0.0, w, h, [0.0, 0.0, 0.0, 0.72], viewport);
             let d = l.dialog;
-            push_rect(
-                verts,
-                d.x,
-                d.y,
-                d.w,
-                d.h,
-                [0.035, 0.065, 0.10, 1.0],
-                viewport,
-            );
+            push_rect(verts, d.x, d.y, d.w, d.h, crate::ui::DEEP, viewport);
             text(
                 verts,
                 d.x + 20.0 * s,
@@ -1006,6 +1227,13 @@ mod tests {
             occluded: false,
             graphics: crate::graphics::Menu::default(),
             pacer: crate::graphics::FramePacer::default(),
+            progress: crate::progress::Book::default(),
+            active_path: None,
+            leave: None,
+            discard: None,
+            controls_back: crate::menu::Page::Title,
+            targets_open: false,
+            toast: None,
         };
         app.state.sim_time = 42.0;
         app.state.view_lock = Some(crate::ViewLock::Background(glam::DVec3::X));
@@ -1178,6 +1406,9 @@ mod tests {
         assert_eq!(g.viewer, Some(1));
         g.click(&l, center(l.buttons[4]), &scene);
         assert!(g.score.is_some());
+        assert!(g.result_open);
+        g.key(KeyCode::Escape, &l, (0.0, 0.0), &scene);
+        assert!(!g.result_open);
         g.click(&l, center(l.buttons[3]), &scene);
         assert_eq!(g.viewer, None);
         assert!(g.score.is_none());

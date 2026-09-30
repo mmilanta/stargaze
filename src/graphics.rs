@@ -20,6 +20,7 @@ pub struct Settings {
     pub samples_per_frame: u32,
     /// Zero means continuous refinement, up to the integrator's precision limit.
     pub still_samples: u32,
+    pub hud_scale_percent: u32,
 }
 
 impl Default for Settings {
@@ -36,6 +37,7 @@ impl Settings {
             max_bounces: 2,
             samples_per_frame: 1,
             still_samples: 128,
+            hud_scale_percent: 100,
         },
         Self {
             max_fps: 30,
@@ -43,6 +45,7 @@ impl Settings {
             max_bounces: 4,
             samples_per_frame: 1,
             still_samples: 256,
+            hud_scale_percent: 100,
         },
         Self {
             max_fps: 60,
@@ -50,6 +53,7 @@ impl Settings {
             max_bounces: 8,
             samples_per_frame: 1,
             still_samples: 1024,
+            hud_scale_percent: 100,
         },
     ];
 
@@ -59,6 +63,7 @@ impl Settings {
         self.max_bounces = self.max_bounces.clamp(1, 64);
         self.samples_per_frame = self.samples_per_frame.clamp(1, 64);
         self.still_samples = self.still_samples.min(MAX_SAMPLES);
+        self.hud_scale_percent = self.hud_scale_percent.clamp(75, 200);
         self
     }
 
@@ -111,6 +116,11 @@ impl Settings {
                 &[64, 128, 256, 512, 1024, 4096, 0],
                 forward,
             ),
+            5 => step(
+                &mut self.hud_scale_percent,
+                &[75, 100, 125, 150, 175, 200],
+                forward,
+            ),
             _ => {}
         }
     }
@@ -143,6 +153,8 @@ fn settings_path() -> Option<PathBuf> {
 #[derive(Default)]
 pub struct Menu {
     pub settings: Settings,
+    pub draft: Settings,
+    pub dragging: Option<usize>,
     pub open: bool,
     pub selected: usize,
     pub message: String,
@@ -187,42 +199,97 @@ impl Menu {
         };
     }
 
-    pub fn click(&mut self, layout: &Layout, cursor: (f64, f64)) -> bool {
-        let before = self.settings;
-        if layout.back.contains(cursor.0, cursor.1) {
-            self.open = false;
+    pub fn begin(&mut self) {
+        self.draft = self.settings;
+        self.selected = 0;
+        self.open = true;
+        self.dragging = None;
+    }
+    pub fn cancel(&mut self) {
+        self.draft = self.settings;
+        self.open = false;
+        self.dragging = None;
+    }
+    fn preset(&mut self, index: usize) {
+        let hud = self.draft.hud_scale_percent;
+        self.draft = Settings::PRESETS[index];
+        self.draft.hud_scale_percent = hud;
+    }
+    pub fn apply(&mut self) -> bool {
+        let changed = self.settings != self.draft;
+        self.settings = self.draft.normalized();
+        self.open = false;
+        self.dragging = None;
+        changed
+    }
+    fn slider(&mut self, l: &Layout, row: usize, x: f64) {
+        let r = l.tracks[row];
+        let f = ((x as f32 - r.x) / r.w).clamp(0.0, 1.0);
+        let options: &[u32] = match row {
+            0 => &[15, 30, 60, 90, 120, 240, 0],
+            1 => &[25, 50, 75, 100],
+            2 => &[1, 2, 4, 8, 12, 16, 32, 64],
+            3 => &[1, 2, 4, 8, 16, 32, 64],
+            4 => &[64, 128, 256, 512, 1024, 4096, 0],
+            _ => &[75, 100, 125, 150, 175, 200],
+        };
+        let value = options[(f * (options.len() - 1) as f32).round() as usize];
+        match row {
+            0 => self.draft.max_fps = value,
+            1 => self.draft.resolution_percent = value,
+            2 => self.draft.max_bounces = value,
+            3 => self.draft.samples_per_frame = value,
+            4 => self.draft.still_samples = value,
+            _ => self.draft.hud_scale_percent = value,
         }
-        for (i, rect) in layout.presets.iter().enumerate() {
-            if rect.contains(cursor.0, cursor.1) {
-                self.settings = Settings::PRESETS[i];
+    }
+    pub fn motion(&mut self, l: &Layout, x: f64) {
+        if let Some(row) = self.dragging {
+            self.slider(l, row, x);
+        }
+    }
+    pub fn click(&mut self, layout: &Layout, cursor: (f64, f64)) -> bool {
+        if layout.back.contains(cursor.0, cursor.1) {
+            self.cancel();
+            return false;
+        }
+        if layout.apply.contains(cursor.0, cursor.1) {
+            return self.apply();
+        }
+        for (i, r) in layout.presets.iter().enumerate() {
+            if r.contains(cursor.0, cursor.1) {
+                self.preset(i);
             }
         }
         for (i, [decrease, increase]) in layout.arrows.iter().enumerate() {
             if decrease.contains(cursor.0, cursor.1) {
                 self.selected = i;
-                self.settings.change(i, false);
+                self.draft.change(i, false);
             } else if increase.contains(cursor.0, cursor.1) {
                 self.selected = i;
-                self.settings.change(i, true);
+                self.draft.change(i, true);
+            } else if layout.tracks[i].contains(cursor.0, cursor.1) {
+                self.selected = i;
+                self.dragging = Some(i);
+                self.slider(layout, i, cursor.0);
             }
         }
-        self.settings != before
+        false
     }
-
     pub fn key(&mut self, key: KeyCode) -> bool {
-        let before = self.settings;
         match key {
-            KeyCode::Escape | KeyCode::KeyM | KeyCode::KeyG | KeyCode::Enter => self.open = false,
+            KeyCode::Escape | KeyCode::KeyM | KeyCode::KeyG => self.cancel(),
+            KeyCode::Enter => return self.apply(),
             KeyCode::ArrowUp => self.selected = self.selected.saturating_sub(1),
-            KeyCode::ArrowDown => self.selected = (self.selected + 1).min(4),
-            KeyCode::ArrowLeft => self.settings.change(self.selected, false),
-            KeyCode::ArrowRight => self.settings.change(self.selected, true),
-            KeyCode::Digit1 => self.settings = Settings::PRESETS[0],
-            KeyCode::Digit2 => self.settings = Settings::PRESETS[1],
-            KeyCode::Digit3 => self.settings = Settings::PRESETS[2],
+            KeyCode::ArrowDown => self.selected = (self.selected + 1).min(5),
+            KeyCode::ArrowLeft => self.draft.change(self.selected, false),
+            KeyCode::ArrowRight => self.draft.change(self.selected, true),
+            KeyCode::Digit1 => self.preset(0),
+            KeyCode::Digit2 => self.preset(1),
+            KeyCode::Digit3 => self.preset(2),
             _ => {}
         }
-        self.settings != before
+        false
     }
 }
 
@@ -269,152 +336,172 @@ pub struct Layout {
     pub scale: f32,
     pub x: f32,
     pub presets: [Rect; 3],
-    pub arrows: [[Rect; 2]; 5],
+    pub arrows: [[Rect; 2]; 6],
+    pub tracks: [Rect; 6],
     pub back: Rect,
+    pub apply: Rect,
 }
 
 impl Layout {
     pub fn new(w: f32, h: f32, scale: f32) -> Self {
-        let s = scale.min(w / 720.0).min(h / 620.0);
-        let width = 680.0 * s;
-        let x = (w - width) * 0.5;
+        let s = scale.min(w / 1060.0).min(h / 760.0);
+        let x = (w - 900.0 * s) * 0.5;
         Self {
             scale: s,
             x,
             presets: std::array::from_fn(|i| Rect {
-                x: x + i as f32 * 228.0 * s,
-                y: 80.0 * s,
-                w: 220.0 * s,
-                h: 32.0 * s,
+                x: x + (480.0 + i as f32 * 134.0) * s,
+                y: 128.0 * s,
+                w: 124.0 * s,
+                h: 36.0 * s,
             }),
             arrows: std::array::from_fn(|i| {
                 std::array::from_fn(|j| Rect {
-                    x: x + (440.0 + j as f32 * 196.0) * s,
-                    y: (142.0 + i as f32 * 78.0) * s,
-                    w: 44.0 * s,
+                    x: x + (480.0 + j as f32 * 374.0) * s,
+                    y: (196.0 + i as f32 * 68.0) * s,
+                    w: 36.0 * s,
                     h: 32.0 * s,
                 })
             }),
-            back: Rect {
-                x: x + width - 140.0 * s,
-                y: 26.0 * s,
-                w: 140.0 * s,
+            tracks: std::array::from_fn(|i| Rect {
+                x: x + 536.0 * s,
+                y: (196.0 + i as f32 * 68.0) * s,
+                w: 294.0 * s,
                 h: 32.0 * s,
+            }),
+            back: Rect {
+                x: x + 582.0 * s,
+                y: 652.0 * s,
+                w: 144.0 * s,
+                h: 42.0 * s,
+            },
+            apply: Rect {
+                x: x + 742.0 * s,
+                y: 652.0 * s,
+                w: 144.0 * s,
+                h: 42.0 * s,
             },
         }
     }
 }
 
-pub fn build(
-    vertices: &mut Vec<UiVertex>,
-    viewport: [f32; 2],
-    scale: f32,
-    menu: &Menu,
-    cursor: (f64, f64),
-) {
-    let [w, h] = viewport;
+pub fn build(v: &mut Vec<UiVertex>, vp: [f32; 2], scale: f32, menu: &Menu, cursor: (f64, f64)) {
+    let [w, h] = vp;
     let l = Layout::new(w, h, scale);
     let s = l.scale;
-    ui::push_rect(
-        vertices,
-        0.0,
-        0.0,
-        w,
-        h,
-        [0.008, 0.015, 0.03, 1.0],
-        viewport,
-    );
-    let text = |v: &mut Vec<UiVertex>, x, y, size, value: &str| {
-        ui::push_text(v, x, y, size * s, value, [0.83, 0.90, 1.0, 1.0], viewport);
+    let x = l.x;
+    ui::menu_background(v, vp, s);
+    let text = |v: &mut Vec<UiVertex>, x: f32, y: f32, size: f32, value: &str, color| {
+        ui::push_text(v, x, y, size * s, value, color, vp)
     };
-    let button = |v: &mut Vec<UiVertex>, r: Rect, label, active| {
-        ui::toolbar_button(
-            v,
-            r,
-            label,
-            s,
-            active,
-            r.contains(cursor.0, cursor.1),
-            viewport,
-        );
+    let button = |v: &mut Vec<UiVertex>, r: Rect, label: &str, primary: bool| {
+        ui::button(v, r, label, s, primary, r.contains(cursor.0, cursor.1), vp)
     };
-    text(vertices, l.x, 28.0 * s, 2.5, "GRAPHICS");
-    button(vertices, l.back, "Back [Esc]", false);
+    text(v, x, 42.0 * s, 0.75, "CALIBRATE THE TELESCOPE", ui::ACCENT);
+    ui::heading(v, x, 72.0 * s, 48.0 * s, "Settings", ui::INK, vp);
+    ui::heading(v, x, 136.0 * s, 21.0 * s, "Quality preset", ui::INK, vp);
+    let st = menu.draft;
+    let preset = Settings::PRESETS.iter().position(|p| {
+        p.max_fps == st.max_fps
+            && p.resolution_percent == st.resolution_percent
+            && p.max_bounces == st.max_bounces
+            && p.samples_per_frame == st.samples_per_frame
+            && p.still_samples == st.still_samples
+    });
     for (i, label) in ["Eco [1]", "Balanced [2]", "High [3]"].iter().enumerate() {
-        button(
-            vertices,
-            l.presets[i],
-            label,
-            menu.settings == Settings::PRESETS[i],
-        );
+        button(v, l.presets[i], label, preset == Some(i));
     }
-    let settings = menu.settings;
+    if preset.is_none() {
+        text(v, x + 210.0 * s, 143.0 * s, 0.85, "Custom", ui::ACCENT);
+    }
     let values = [
-        if settings.max_fps == 0 {
+        if st.max_fps == 0 {
             "Unlimited".into()
         } else {
-            format!("{} FPS", settings.max_fps)
+            format!("{} FPS", st.max_fps)
         },
-        format!("{}%", settings.resolution_percent),
-        format!("{} bounces", settings.max_bounces),
-        settings.samples_per_frame.to_string(),
-        if settings.still_samples == 0 {
+        format!("{}%", st.resolution_percent),
+        format!("{}", st.max_bounces),
+        format!("{} spp", st.samples_per_frame),
+        if st.still_samples == 0 {
             "Continuous".into()
         } else {
-            format!("{} samples", settings.still_samples)
+            format!("{} spp", st.still_samples)
         },
+        format!("{}%", st.hud_scale_percent),
     ];
-    for (i, (label, help)) in [
-        ("Frame rate", "Lower limits leave more time for other apps."),
+    let rows = [
+        ("Frame rate", "Give the sky a frame budget."),
         (
             "Render resolution",
-            "Lower resolution reduces work. The UI stays sharp.",
+            "Menus and labels stay at native resolution.",
         ),
         (
-            "Light detail",
-            "More bounces improve indirect light and cost more.",
+            "Maximum bounces",
+            "More light paths add indirect illumination.",
         ),
-        (
-            "Samples per frame",
-            "More samples refine faster but make each frame heavier.",
-        ),
+        ("Samples per frame", "More samples make each frame heavier."),
         (
             "Still image limit",
-            "A stationary view finishes refining, then rests.",
+            "Pause to converge, then let the GPU rest.",
         ),
-    ]
-    .iter()
-    .enumerate()
-    {
-        let y = (142.0 + i as f32 * 78.0) * s;
-        text(vertices, l.x, y + 7.0 * s, 1.6, label);
-        text(vertices, l.x, y + 43.0 * s, 1.05, help);
-        for j in 0..2 {
-            button(
-                vertices,
-                l.arrows[i][j],
-                if j == 0 { "<" } else { ">" },
-                menu.selected == i,
-            );
+        ("HUD scale", "Size of the interface on your display."),
+    ];
+    for (i, (label, help)) in rows.iter().enumerate() {
+        let y = (190.0 + i as f32 * 68.0) * s;
+        let r = Rect {
+            x,
+            y: y - 2.0 * s,
+            w: 900.0 * s,
+            h: 58.0 * s,
+        };
+        if menu.selected == i {
+            ui::push_rect(v, r.x, r.y, r.w, r.h, [0.6, 0.7, 1.0, 0.04], vp);
+            ui::brackets(v, r, ui::OK, s, vp);
         }
-        let value_scale = 1.25;
-        let value_width = ui::text_width(&values[i], value_scale * s);
+        ui::heading(v, x + 12.0 * s, y + 4.0 * s, 21.0 * s, label, ui::INK, vp);
+        text(v, x + 12.0 * s, y + 35.0 * s, 0.75, help, ui::MUTED);
+        button(v, l.arrows[i][0], "←", false);
+        button(v, l.arrows[i][1], "→", false);
+        let track = l.tracks[i];
+        ui::push_rect(
+            v,
+            track.x,
+            track.y + 26.0 * s,
+            track.w,
+            2.0 * s,
+            ui::LINE,
+            vp,
+        );
         text(
-            vertices,
-            l.x + 560.0 * s - value_width * 0.5,
-            y + 10.0 * s,
-            value_scale,
+            v,
+            track.x + 100.0 * s,
+            track.y + 3.0 * s,
+            0.9,
             &values[i],
+            ui::INK,
         );
     }
+    if st != menu.settings {
+        text(
+            v,
+            x + 12.0 * s,
+            668.0 * s,
+            0.8,
+            "Unsaved changes",
+            ui::ACCENT,
+        );
+    }
+    button(v, l.back, "Back [Esc]", false);
+    button(v, l.apply, "Apply [Enter]", true);
     text(
-        vertices,
-        l.x,
-        555.0 * s,
-        1.05,
-        "Up / Down: select   Left / Right: adjust   Esc: back",
+        v,
+        x,
+        h - 30.0 * s,
+        0.75,
+        "[↑ ↓] select   [← →] adjust   [1–3] preset",
+        ui::MUTED,
     );
-    text(vertices, l.x, 580.0 * s, 1.0, &menu.message);
 }
 
 #[cfg(test)]
@@ -506,16 +593,24 @@ mod tests {
                 ..Menu::default()
             };
             let center = |r: Rect| ((r.x + r.w * 0.5) as f64, (r.y + r.h * 0.5) as f64);
-            assert!(menu.click(&layout, center(layout.presets[0])));
-            assert_eq!(menu.settings, Settings::PRESETS[0]);
-            assert!(menu.click(&layout, center(layout.arrows[1][1])));
-            assert_eq!(menu.settings.resolution_percent, 75);
-            assert!(menu.key(KeyCode::ArrowRight));
-            assert_eq!(menu.settings.resolution_percent, 100);
+            menu.begin();
+            let committed = menu.settings;
+            assert!(!menu.click(&layout, center(layout.presets[0])));
+            assert_eq!(menu.draft, Settings::PRESETS[0]);
+            assert_eq!(menu.settings, committed);
+            assert!(!menu.click(&layout, center(layout.arrows[1][1])));
+            assert_eq!(menu.draft.resolution_percent, 75);
             assert!(!menu.key(KeyCode::ArrowRight));
-            assert!(menu.key(KeyCode::Digit3));
-            assert_eq!(menu.settings, Settings::PRESETS[2]);
+            assert_eq!(menu.draft.resolution_percent, 100);
+            assert!(!menu.key(KeyCode::Digit3));
+            assert_eq!(menu.draft, Settings::PRESETS[2]);
             assert!(!menu.click(&layout, center(layout.back)));
+            assert!(!menu.open);
+            assert_eq!(menu.settings, committed, "Back discards the draft");
+            menu.begin();
+            menu.key(KeyCode::Digit3);
+            assert!(menu.key(KeyCode::Enter));
+            assert_eq!(menu.settings, Settings::PRESETS[2]);
             assert!(!menu.open);
         }
     }

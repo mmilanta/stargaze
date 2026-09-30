@@ -12,7 +12,8 @@ The Amber horizon camera sits beneath an Earth-like atmosphere on Halo.
 Halo's circular orbit and matching rotation keep Calyx fixed in the sky,
 without camera tracking. The observatory is two metres above the surface at
 35° N on the planet-facing hemisphere, with an initial 80° field of view.
-Press `1` to aim at Calyx. Run `cargo run --release` to start here.
+Press `F1` to aim at Calyx. Run `cargo run --release` for the main menu,
+or `STARGAZE_SYSTEM=halo cargo run --release` to open this observatory directly.
 
 `STARGAZE_SYSTEM=halo` or `binary` explicitly selects this view.
 `STARGAZE_SYSTEM=solar` selects Saturn at 20° N;
@@ -282,9 +283,37 @@ and photographic/cloud-band textures are not yet modeled. Rings are an
 infinitesimally thin sheet, so an exactly edge-on view loses them. `Rings`
 is attached to Saturn and to Calyx in the Halo preset; any body may carry one. The background star catalogue is procedural.
 
+### Blueprint menus and saved levels
+
+The native menus follow `prototypes/menu-ui/suite.html`: **Play** opens anonymous
+field studies, **Explore** opens named systems, and **Settings** edits a draft.
+Use Up/Down to select, Enter to open, and Esc to go back. In Explore, `/` searches,
+`F` favorites the selected system, and `B` filters favorites. `P` switches between
+Explore and Levels, `C` opens the controls reference, and `T` returns to the main menu.
+Explicit `--config`, `STARGAZE_CONFIG`, and `STARGAZE_SYSTEM` selections still open
+an observatory directly. `--game` opens Levels.
+
+In a field study, **Theory [Tab]** opens the full-page diagram. Right-click adds
+an orbiting body under the selected parent; drag changes orbit order. The bar
+includes star/ring traits, viewer placement, undo/redo, delete, clear and check.
+Leaving offers **Keep & leave**, **Discard & leave**, or **Cancel**. Each level
+keeps its own theory, score history, best score, camera, exposure and observation
+time. Named targets and physical details remain hidden in puzzle mode.
+
+Progress saves to `$XDG_DATA_HOME/stargaze/progress.yaml` (normally
+`~/.local/share/stargaze/progress.yaml`). `STARGAZE_PROGRESS` overrides the path.
+Saves are versioned and replaced atomically; unreadable saves are preserved.
+The Levels screen shows progress and has a separate confirmed discard action.
+
+To render the native UI screens offscreen on a GPU:
+
+```sh
+STARGAZE_UI_PREVIEWS=/tmp/stargaze-ui cargo test gpu_blueprint_screens -- --ignored --nocapture
+```
+
 ### Quality settings
 
-Open **Menu → Graphics** (M, then G) in either game or observatory mode.
+Open **Settings** from the main menu, or **Menu → Settings** (M, then G) in either game or observatory mode.
 Choose **Eco**, **Balanced**, or **High**, or use the arrows to customize:
 
 | Setting | Eco | Balanced (default) | High |
@@ -305,14 +334,15 @@ Lower limits converge sooner but can leave more noise. Select Continuous for
 long exposures. A frame cap cannot guarantee spare GPU capacity when a single
 frame is expensive; reduce resolution or choose Eco if usage remains high.
 
-Settings apply to all maps and save automatically to
+Choose **Apply [Enter]** to apply settings to all maps and save them to
 `$XDG_CONFIG_HOME/stargaze/graphics.yaml` (normally
 `~/.config/stargaze/graphics.yaml`). `STARGAZE_SETTINGS` overrides that file path.
 The settings screen supports Up/Down to select a row, Left/Right to adjust,
-1/2/3 for presets, and Esc to return to the map menu. Changing resolution or
+1/2/3 for presets, Enter to apply, and Esc to discard the draft and return.
+HUD scale ranges from 75% to 200% on top of your display scale. Changing resolution or
 light detail restarts accumulation; frame rate, batch size, and sample limits
 preserve valid samples. Existing `STARGAZE_SPP` and `STARGAZE_BOUNCES` overrides
-take precedence at startup; the Graphics controls remain adjustable afterward.
+take precedence at startup; the Settings controls remain adjustable afterward.
 
 ```sh
 # Eight new samples per pixel per frame; up to 12 surface vertices per path.
@@ -348,18 +378,20 @@ sequence is deterministic for a given pixel and sample index.
 | right-click (sky) | track the clicked body, or hold a fixed direction against the background stars |
 | left-click (sky) | release the view lock |
 | Lock indicator / `U` | show the target and release the lock |
-| Stars / `S` | toggle compensation for star-field rotation; keep the locked target centered |
+| Horizon / Stars / `R` | keep the horizon level or the stars fixed while following a target |
 | scroll / `=` / `-` | zoom, down to 0.001° |
 | Labels toggle (bar) | show / hide names |
 | Exposure slider (right of playback controls) | brightness compensation, −8 to +8 EV in quarter stops, in either mode |
 | Auto checkbox (bar) | enable / disable automatic exposure metering |
-| Stop / Space | set playback speed to 0; pressing again leaves it at 0 |
+| Stop / Play / Space | pause or resume the previous signed playback speed |
 | −1 day / Page Down; +1 day / Page Up | jump backward / forward by one local solar day, preserving speed and tracking |
-| Left / Right arrow (bar) | decrease / increase signed speed through negative values, 0, and positive values |
+| Left / Right arrow (bar) | choose −1000, −100, −10, −1, 0, +1, +10, +100 or +1000 minutes per second |
 | `F1`–`F9` | aim at scene targets (`F9` is solar-only) |
 | `E` | search up to ten model years for a visible eclipse |
 | `T` | search for a moon transit (e.g. Phobos/Mars or Io/Jupiter) |
-| `R` | reset view |
+| `Home` | reset view |
+| `G` | show / hide the target panel in Explore |
+| `F10` | main menu; puzzles offer keep / discard first |
 | `,` `.` | exposure compensation down / up by 0.25 EV |
 | `A` | toggle automatic exposure metering (on by default) |
 | `H` | show / hide HUD |

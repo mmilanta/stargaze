@@ -1,16 +1,22 @@
 //! stargaze — an observatory on a planet, looking out at a solar system.
 
+mod app_ui;
 mod camera;
 mod config;
 mod game;
 mod graphics;
 mod ground;
+mod gui;
 mod menu;
 mod pathtracer;
+mod progress;
 mod renderer;
 mod sim;
 mod stars;
+mod typeface;
 mod ui;
+#[cfg(test)]
+mod ui_previews;
 
 use std::sync::Arc;
 use std::time::Instant;
@@ -30,11 +36,18 @@ use stars::CatalogueStar;
 use ui::Label;
 
 /// Signed simulation speeds in days per real second, including a true stop.
-const WARPS: [f64; 17] = [
-    -40.0, -10.0, -2.0, -0.5, -0.1, -0.02, -0.005, -0.001, 0.0, 0.001, 0.005, 0.02, 0.1, 0.5, 2.0,
-    10.0, 40.0,
+const WARPS: [f64; 9] = [
+    -1000.0 / 1440.0,
+    -100.0 / 1440.0,
+    -10.0 / 1440.0,
+    -1.0 / 1440.0,
+    0.0,
+    1.0 / 1440.0,
+    10.0 / 1440.0,
+    100.0 / 1440.0,
+    1000.0 / 1440.0,
 ];
-const STOP_WARP: usize = 8;
+const STOP_WARP: usize = 4;
 /// Telescope magnification limits and the per-notch zoom factor.
 const MIN_FOV_DEG: f64 = 0.001;
 const MAX_FOV_DEG: f64 = 90.0;
@@ -132,6 +145,7 @@ struct State {
     observer: Observer,
     sim_time: f64,
     warp: usize,
+    resume_warp: usize,
     day_step_failed: bool,
     last: Instant,
     /// True only after a sky press crosses the drag threshold.
@@ -154,6 +168,7 @@ impl State {
             observer,
             sim_time: 0.0,
             warp: STOP_WARP,
+            resume_warp: STOP_WARP + 1,
             day_step_failed: false,
             last: Instant::now(),
             dragging: false,
@@ -454,11 +469,21 @@ impl State {
         };
     }
 
+    fn toggle_stop(&mut self) {
+        if self.warp == STOP_WARP {
+            self.warp = self.resume_warp;
+            self.last = Instant::now();
+        } else {
+            self.resume_warp = self.warp;
+            self.warp = STOP_WARP;
+        }
+    }
+
     fn time_key(&mut self, key: KeyCode) -> bool {
         match key {
             KeyCode::ArrowLeft => self.change_speed(false),
             KeyCode::ArrowRight => self.change_speed(true),
-            KeyCode::Space => self.warp = STOP_WARP,
+            KeyCode::Space => self.toggle_stop(),
             KeyCode::PageDown => self.step_local_day(false),
             KeyCode::PageUp => self.step_local_day(true),
             _ => return false,
@@ -865,6 +890,13 @@ impl State {
     }
 }
 
+#[derive(Clone, Copy)]
+enum Leave {
+    Levels,
+    Title,
+    Quit,
+}
+
 struct App {
     state: State,
     menu: menu::Menu,
@@ -883,11 +915,21 @@ struct App {
     occluded: bool,
     graphics: graphics::Menu,
     pacer: graphics::FramePacer,
+    progress: progress::Book,
+    active_path: Option<std::path::PathBuf>,
+    leave: Option<Leave>,
+    discard: Option<std::path::PathBuf>,
+    controls_back: menu::Page,
+    targets_open: bool,
+    toast: Option<(String, Instant)>,
 }
 
 impl App {
     fn world_visible(&self) -> bool {
-        !self.graphics.open && !self.menu.open && !self.game.as_ref().is_some_and(|game| game.open)
+        !self.graphics.open
+            && !self.menu.open
+            && self.leave.is_none()
+            && !self.game.as_ref().is_some_and(|game| game.open)
     }
 
     fn continuous_redraw(&self, size: (u32, u32)) -> bool {
@@ -911,6 +953,20 @@ impl App {
                 &self.graphics,
                 self.cursor,
             );
+            self.build_dialogs(&mut vertices, [w as f32, h as f32]);
+            return (None, vertices);
+        }
+        if self.menu.open {
+            let mut vertices = Vec::new();
+            menu::build(
+                &mut vertices,
+                [w as f32, h as f32],
+                self.scale,
+                &self.menu,
+                self.cursor,
+                self.game.is_some(),
+            );
+            self.build_dialogs(&mut vertices, [w as f32, h as f32]);
             return (None, vertices);
         }
         let frame = self.world_visible().then(|| self.state.build_frame(w, h));
@@ -984,11 +1040,13 @@ impl App {
             self.cursor,
             self.game.is_some(),
         );
+        self.build_observation_extras(&mut vertices, [w as f32, h as f32]);
+        self.build_dialogs(&mut vertices, [w as f32, h as f32]);
         (frame, vertices)
     }
 
     fn right_click(&mut self) {
-        if self.menu.open {
+        if self.menu.open || self.graphics.open || self.leave.is_some() || self.discard.is_some() {
             return;
         }
         let Some(r) = self.renderer.as_ref() else {
@@ -1026,51 +1084,243 @@ impl App {
         self.exposure_dragging = false;
     }
 
-    fn toggle_menu(&mut self) {
-        if self.graphics.open {
-            self.graphics.open = false;
-            return;
+    fn refresh_progress(&mut self) {
+        self.menu.favorites = self.progress.favorites.clone();
+        self.menu.progress = self
+            .progress
+            .levels
+            .iter()
+            .map(|(k, s)| (k.clone(), s.summary()))
+            .collect();
+        if let (Some(path), Some(game)) = (&self.active_path, &self.game)
+            && game.has_progress()
+        {
+            self.menu
+                .progress
+                .insert(progress::key(path), game.progress());
         }
+    }
+
+    fn save_progress(&mut self) {
+        if let (Some(path), Some(game)) = (&self.active_path, &self.game)
+            && (game.has_progress() || self.progress.levels.contains_key(&progress::key(path)))
+        {
+            let s = progress::Session {
+                theory: game.snapshot(),
+                time: self.state.sim_time,
+                az: self.state.observer.az,
+                alt: self.state.observer.alt,
+                fov: self.state.observer.fov_y,
+                orientation: self
+                    .state
+                    .observer
+                    .star_orientation
+                    .map(|(f, u)| [f.to_array(), u.to_array()]),
+                lock: self.state.view_lock.map(|lock| match lock {
+                    ViewLock::Body(i) => progress::SavedLock::Body(i),
+                    ViewLock::Background(v) => progress::SavedLock::Sky(v.to_array()),
+                }),
+                ev: self.ev_bias,
+                auto: self.auto_exposure,
+            };
+            self.progress.levels.insert(progress::key(path), s);
+        }
+        if let Err(err) = self.progress.persist() {
+            log::warn!("{err:#}");
+            self.toast = Some((
+                "Progress kept for this session; saving to disk failed.".into(),
+                Instant::now(),
+            ));
+        }
+        self.refresh_progress();
+    }
+
+    fn open_page(&mut self, page: menu::Page) {
         self.state.end_sky_press();
-        if let Some(game) = self.game.as_mut() {
+        self.exposure_dragging = false;
+        if let Some(game) = &mut self.game {
             game.release();
         }
-        self.exposure_dragging = false;
+        self.menu.refresh();
+        self.menu.page = page;
+        if page == menu::Page::Levels {
+            self.menu
+                .entries
+                .sort_by_key(|e| e.path.file_stem().is_none_or(|s| s != "puzzle"));
+        }
+        self.refresh_progress();
+    }
+
+    fn toggle_menu(&mut self) {
+        if self.graphics.open {
+            self.graphics.cancel();
+            return;
+        }
         if self.menu.open {
             self.menu.open = false;
+            self.menu.searching = false;
             self.state.last = Instant::now();
         } else {
-            self.menu.refresh();
-            if self.game.is_some() {
-                self.menu
-                    .entries
-                    .sort_by_key(|e| e.path.file_stem().is_none_or(|name| name != "puzzle"));
+            self.menu.can_resume = true;
+            self.open_page(if self.game.is_some() {
+                menu::Page::Levels
+            } else {
+                menu::Page::Explore
+            });
+        }
+    }
+
+    fn request_leave(&mut self, to: Leave) {
+        if self.game.as_ref().is_some_and(|g| g.has_progress()) && self.active_path.is_some() {
+            self.leave = Some(to);
+            self.state.end_sky_press();
+            self.exposure_dragging = false;
+            if let Some(game) = &mut self.game {
+                game.release();
+                game.dismiss_result();
             }
+        } else {
+            self.finish_leave(to, true);
+        }
+    }
+
+    fn finish_leave(&mut self, to: Leave, keep: bool) {
+        if keep {
+            if self.game.is_some() {
+                self.save_progress();
+            }
+        } else if let Some(path) = &self.active_path {
+            self.progress.levels.remove(&progress::key(path));
+            self.game = self.game.as_ref().map(|_| game::Game::default());
+            if let Err(err) = self.progress.persist() {
+                self.toast = Some((
+                    format!("Could not save discarded progress: {err}"),
+                    Instant::now(),
+                ));
+            }
+        }
+        self.leave = None;
+        match to {
+            Leave::Levels => self.open_page(menu::Page::Levels),
+            Leave::Title => self.open_page(menu::Page::Title),
+            Leave::Quit => {}
         }
     }
 
     fn select_map(&mut self, path: &std::path::Path) {
-        // Load successfully before replacing any of the player's current state.
         match config::load(path) {
             Ok(scene) => {
-                self.state = State::with_scene(scene);
+                let puzzle = self.menu.page == menu::Page::Levels;
                 if self.game.is_some() {
-                    self.game = Some(game::Game::default());
+                    self.save_progress();
+                }
+                self.state = State::with_scene(scene);
+                self.active_path = Some(path.to_owned());
+                self.game = if puzzle {
+                    Some(game::Game::default())
+                } else {
+                    None
+                };
+                if puzzle
+                    && let Some(saved) = self
+                        .progress
+                        .levels
+                        .get(&progress::key(path))
+                        .filter(|s| s.valid())
+                {
+                    self.game = game::Game::restore(&saved.theory);
+                    self.state.sim_time = saved.time;
+                    self.state.observer.az = saved.az;
+                    self.state.observer.alt = saved.alt;
+                    self.state.observer.fov_y = saved.fov;
+                    self.state.observer.star_orientation = saved.orientation.map(|v| {
+                        (
+                            DVec3::from_array(v[0]).normalize(),
+                            DVec3::from_array(v[1]).normalize(),
+                        )
+                    });
+                    self.state.view_lock = saved.lock.as_ref().and_then(|lock| match lock {
+                        progress::SavedLock::Body(i)
+                            if *i < self.state.scene.bodies.len()
+                                && *i != self.state.scene.host =>
+                        {
+                            Some(ViewLock::Body(*i))
+                        }
+                        progress::SavedLock::Sky(v) => {
+                            Some(ViewLock::Background(DVec3::from_array(*v).normalize()))
+                        }
+                        _ => None,
+                    });
+                    self.auto_exposure = saved.auto;
+                    self.ev_bias = saved.ev;
+                    self.state.track();
                 }
                 self.menu.open = false;
+                self.menu.can_resume = true;
                 self.menu.error = None;
                 self.exposure_dragging = false;
+                self.show_hud = true;
+                self.sync_exposure();
+                self.targets_open = false;
+                self.toast = Some((
+                    if puzzle {
+                        "Field study ready. Observe, then draw your theory.".into()
+                    } else {
+                        "Observatory ready.".into()
+                    },
+                    Instant::now(),
+                ));
             }
-            Err(error) => {
-                self.menu.error = Some(if self.game.is_some() {
-                    "Could not load this map. Your current puzzle is unchanged.".into()
+            Err(err) => {
+                self.menu.error = Some(if self.menu.page == menu::Page::Levels {
+                    "Could not load this map. Your progress is unchanged.".into()
                 } else {
                     format!(
-                        "Could not load {}: {error:#}",
+                        "Could not load {}: {err:#}",
                         path.file_name().unwrap_or_default().to_string_lossy()
                     )
-                });
+                })
             }
+        }
+    }
+
+    fn favorite(&mut self) {
+        if let Some(path) = self.menu.selected_path() {
+            let key = progress::key(&path);
+            if !self.progress.favorites.remove(&key) {
+                self.progress.favorites.insert(key);
+            }
+            if let Err(err) = self.progress.persist() {
+                self.menu.error = Some(format!("Favorite kept for this session: {err}"));
+            }
+            self.refresh_progress();
+        }
+    }
+
+    fn discard_selected(&mut self) {
+        if let Some(path) = self.menu.selected_path()
+            && self.menu.summary(&path).is_some()
+        {
+            self.discard = Some(path);
+        }
+    }
+
+    fn confirm_discard(&mut self) {
+        if let Some(path) = self.discard.take() {
+            self.progress.levels.remove(&progress::key(&path));
+            if self
+                .active_path
+                .as_ref()
+                .is_some_and(|p| progress::key(p) == progress::key(&path))
+                && self.game.is_some()
+            {
+                self.game = Some(game::Game::default());
+                self.menu.can_resume = false;
+            }
+            if let Err(err) = self.progress.persist() {
+                self.menu.error = Some(format!("Could not save discarded progress: {err}"));
+            }
+            self.refresh_progress();
         }
     }
 
@@ -1080,64 +1330,100 @@ impl App {
     }
 
     fn menu_click(&mut self, cx: f64, cy: f64) -> bool {
+        let Some(layout) = self.menu_layout() else {
+            return self.menu.open;
+        };
+        if self.leave.is_some() || self.discard.is_some() {
+            return true;
+        }
         if self.graphics.open {
             if let Some(r) = &self.renderer {
                 let (w, h) = r.size();
-                if w > 0
-                    && h > 0
-                    && self.graphics.click(
-                        &graphics::Layout::new(w as f32, h as f32, self.scale),
-                        (cx, cy),
-                    )
-                {
+                if self.graphics.click(
+                    &graphics::Layout::new(w as f32, h as f32, self.scale),
+                    (cx, cy),
+                ) {
                     self.sync_graphics();
                 }
             }
             return true;
         }
-        let Some(layout) = self.menu_layout() else {
-            return self.menu.open;
-        };
         if self.game.as_ref().is_some_and(|g| g.confirm_clear) {
             return false;
         }
         if self.game.as_ref().is_some_and(|g| g.open) && !self.menu.open {
-            if let Some(r) = self.renderer.as_ref() {
+            if let Some(r) = &self.renderer {
                 let (w, h) = r.size();
-                if game::Layout::new(w as f32, h as f32, self.scale)
-                    .maps
-                    .contains(cx, cy)
+                let l = game::Layout::new(w as f32, h as f32, self.scale);
+                if l.maps.contains(cx, cy)
+                    || (self.game.as_ref().is_some_and(|g| g.result_open)
+                        && l.result_maps.contains(cx, cy))
                 {
-                    self.toggle_menu();
+                    self.request_leave(Leave::Levels);
                     return true;
                 }
             }
             return false;
         }
-        if (!self.menu.open && layout.home.contains(cx, cy))
-            || (self.menu.open && layout.resume.contains(cx, cy))
-        {
-            self.toggle_menu();
-            return true;
-        }
         if !self.menu.open {
             return false;
         }
+        if self.menu.can_resume && layout.resume.contains(cx, cy) {
+            self.toggle_menu();
+            return true;
+        }
+        if self.menu.page == menu::Page::Title {
+            return true;
+        }
         if layout.graphics.contains(cx, cy) {
-            self.graphics.open = true;
+            self.graphics.begin();
+            return true;
+        }
+        if layout.controls.contains(cx, cy) {
+            self.controls_back = self.menu.page;
+            self.menu.page = menu::Page::Controls;
+            return true;
+        }
+        if layout.switch.contains(cx, cy) {
+            self.open_page(if self.menu.page == menu::Page::Levels {
+                menu::Page::Explore
+            } else {
+                menu::Page::Levels
+            });
+            return true;
+        }
+        if layout.search.contains(cx, cy) && self.menu.page == menu::Page::Explore {
+            self.menu.searching = true;
+            return true;
+        }
+        if layout.favorites.contains(cx, cy) && self.menu.page == menu::Page::Explore {
+            self.menu.favorites_only = !self.menu.favorites_only;
+            self.menu.selected = 0;
+            self.menu.offset = 0;
             return true;
         }
         let page = layout.rows.len();
         if layout.previous.contains(cx, cy) {
             self.menu.offset = self.menu.offset.saturating_sub(page);
-        } else if layout.next.contains(cx, cy) && self.menu.offset + page < self.menu.entries.len()
+            self.menu.selected = self.menu.offset;
+        } else if layout.next.contains(cx, cy)
+            && self.menu.offset + page < self.menu.visible().len()
         {
             self.menu.offset += page;
-        } else if let Some(row) = layout.rows.iter().position(|r| r.contains(cx, cy))
-            && let Some(entry) = self.menu.entries.get(self.menu.offset + row)
-        {
-            let path = entry.path.clone();
-            self.select_map(&path);
+            self.menu.selected = self.menu.offset;
+        } else if let Some(row) = layout.rows.iter().position(|r| r.contains(cx, cy)) {
+            self.menu.selected = self.menu.offset + row;
+            if layout.discard[row].contains(cx, cy) {
+                if self.menu.page == menu::Page::Levels {
+                    self.discard_selected();
+                } else {
+                    self.favorite();
+                }
+            } else if layout.play[row].contains(cx, cy)
+                && let Some(path) = self.menu.selected_path()
+            {
+                self.select_map(&path);
+            }
         }
         true
     }
@@ -1151,14 +1437,20 @@ impl App {
         if !self.show_hud || !layout.bar.contains(x, y) {
             return false;
         }
-        if layout.orientation.contains(x, y) {
+        if layout.home.contains(x, y) {
+            if self.game.is_some() {
+                self.request_leave(Leave::Levels);
+            } else {
+                self.toggle_menu();
+            }
+        } else if layout.orientation.contains(x, y) {
             self.state.toggle_star_orientation();
         } else if layout.slower.contains(x, y) {
             self.state.change_speed(false);
         } else if layout.faster.contains(x, y) {
             self.state.change_speed(true);
         } else if layout.stop.contains(x, y) {
-            self.state.warp = STOP_WARP;
+            self.state.toggle_stop();
         } else if layout.previous_day.contains(x, y) {
             self.state.step_local_day(false);
         } else if layout.next_day.contains(x, y) {
@@ -1192,6 +1484,11 @@ impl App {
         if let Some(r) = &mut self.renderer {
             r.set_graphics(self.graphics.settings);
         }
+        if let Some(window) = &self.window {
+            self.scale = window.scale_factor() as f32
+                * self.graphics.settings.hud_scale_percent as f32
+                / 100.0;
+        }
         self.graphics.persist();
         self.pacer.request();
     }
@@ -1221,11 +1518,19 @@ impl ApplicationHandler for App {
         );
 
         match Renderer::new(window.clone(), &self.stars, self.graphics.settings) {
-            Ok(renderer) => {
+            Ok(mut renderer) => {
                 log::info!("renderer ready: {:?}", window.inner_size());
-                self.scale = window.scale_factor() as f32;
+                self.scale = window.scale_factor() as f32
+                    * self.graphics.settings.hud_scale_percent as f32
+                    / 100.0;
                 self.auto_exposure = renderer.auto_exposure();
                 self.ev_bias = renderer.ev_bias();
+                let size = window.inner_size();
+                renderer.prepare_background(
+                    &self
+                        .state
+                        .build_frame(size.width.max(1), size.height.max(1)),
+                );
                 self.renderer = Some(renderer);
                 window.request_redraw();
                 self.window = Some(window);
@@ -1243,7 +1548,8 @@ impl ApplicationHandler for App {
         // coalesces requests when several input events arrive together.
         if matches!(
             event,
-            WindowEvent::MouseInput { .. }
+            WindowEvent::CloseRequested
+                | WindowEvent::MouseInput { .. }
                 | WindowEvent::CursorMoved { .. }
                 | WindowEvent::CursorLeft { .. }
                 | WindowEvent::MouseWheel { .. }
@@ -1258,9 +1564,19 @@ impl ApplicationHandler for App {
             window.request_redraw();
         }
         match event {
-            WindowEvent::CloseRequested => event_loop.exit(),
+            WindowEvent::CloseRequested => {
+                if self.game.as_ref().is_some_and(|g| g.has_progress())
+                    && self.active_path.is_some()
+                {
+                    self.request_leave(Leave::Quit);
+                } else {
+                    self.save_progress();
+                    event_loop.exit();
+                }
+            }
             WindowEvent::ScaleFactorChanged { scale_factor, .. } => {
-                self.scale = scale_factor as f32;
+                self.scale =
+                    scale_factor as f32 * self.graphics.settings.hud_scale_percent as f32 / 100.0;
             }
             WindowEvent::Resized(size) => {
                 if let Some(r) = self.renderer.as_mut() {
@@ -1354,6 +1670,22 @@ impl ApplicationHandler for App {
                 match state {
                     ElementState::Pressed => {
                         let (cx, cy) = self.cursor;
+                        if self.modal_click(event_loop) {
+                            return;
+                        }
+                        if self.menu.open
+                            && self.menu.page == menu::Page::Title
+                            && !self.graphics.open
+                            && let Some(l) = self.menu_layout()
+                            && let Some(i) = l.titles.iter().position(|r| r.contains(cx, cy))
+                        {
+                            self.title_action(i, Some(event_loop));
+                            return;
+                        }
+                        if self.targets_click() {
+                            self.state.end_sky_press();
+                            return;
+                        }
                         if self.menu_click(cx, cy) {
                             self.state.end_sky_press();
                             return;
@@ -1382,6 +1714,7 @@ impl ApplicationHandler for App {
                         if let Some(game) = self.game.as_mut() {
                             game.release();
                         }
+                        self.graphics.dragging = None;
                         self.exposure_dragging = false;
                         self.state.end_sky_press();
                     }
@@ -1389,7 +1722,17 @@ impl ApplicationHandler for App {
             }
             WindowEvent::CursorMoved { position, .. } => {
                 self.cursor = (position.x, position.y);
-                if self.menu.open || self.graphics.open {
+                if self.graphics.open {
+                    if let Some(r) = &self.renderer {
+                        let (w, h) = r.size();
+                        self.graphics.motion(
+                            &graphics::Layout::new(w as f32, h as f32, self.scale),
+                            position.x,
+                        );
+                    }
+                    return;
+                }
+                if self.menu.open || self.leave.is_some() || self.discard.is_some() {
                     return;
                 }
                 if let (Some(game), Some(r)) = (self.game.as_mut(), self.renderer.as_ref())
@@ -1452,6 +1795,9 @@ impl ApplicationHandler for App {
                 let PhysicalKey::Code(key) = event.physical_key else {
                     return;
                 };
+                if self.modal_key(key, event_loop) {
+                    return;
+                }
                 if self.graphics.open {
                     if !event.repeat && self.graphics.key(key) {
                         self.sync_graphics();
@@ -1472,53 +1818,30 @@ impl ApplicationHandler for App {
                     }
                     return;
                 }
-                if matches!(key, KeyCode::Escape | KeyCode::KeyM) {
-                    if !event.repeat {
-                        self.toggle_menu();
+                if self.game.as_ref().is_some_and(|g| g.result_open) && key == KeyCode::Escape {
+                    if let Some(game) = &mut self.game {
+                        game.dismiss_result();
                     }
                     return;
                 }
-                if self.menu.open {
-                    if key == KeyCode::KeyG && !event.repeat {
-                        self.graphics.open = true;
-                        return;
-                    }
-                    if let Some(layout) = self.menu_layout() {
-                        let page = layout.rows.len();
-                        match key {
-                            KeyCode::PageUp => {
-                                self.menu.offset = self.menu.offset.saturating_sub(page)
-                            }
-                            KeyCode::PageDown
-                                if self.menu.offset + page < self.menu.entries.len() =>
-                            {
-                                self.menu.offset += page
-                            }
-                            _ => {
-                                let keys = [
-                                    KeyCode::Digit1,
-                                    KeyCode::Digit2,
-                                    KeyCode::Digit3,
-                                    KeyCode::Digit4,
-                                    KeyCode::Digit5,
-                                    KeyCode::Digit6,
-                                    KeyCode::Digit7,
-                                    KeyCode::Digit8,
-                                    KeyCode::Digit9,
-                                ];
-                                if let Some(row) =
-                                    keys.iter().position(|&k| k == key).filter(|&i| i < page)
-                                    && let Some(entry) =
-                                        self.menu.entries.get(self.menu.offset + row)
-                                {
-                                    let path = entry.path.clone();
-                                    if !event.repeat {
-                                        self.select_map(&path);
-                                    }
-                                }
-                            }
+                if self.menu_key(key, event.text.as_deref(), Some(event_loop)) {
+                    return;
+                }
+                if matches!(key, KeyCode::Escape | KeyCode::KeyM) {
+                    if !event.repeat {
+                        if self.game.is_some() {
+                            self.request_leave(Leave::Levels);
+                        } else {
+                            self.toggle_menu();
                         }
                     }
+                    return;
+                }
+                if self.game.as_ref().is_some_and(|g| g.result_open) && key == KeyCode::Tab {
+                    if let Some(game) = &mut self.game {
+                        game.dismiss_result();
+                    }
+                    self.toggle_notebook();
                     return;
                 }
                 if self.game.is_some() {
@@ -1561,10 +1884,6 @@ impl ApplicationHandler for App {
                     ) {
                         return;
                     }
-                    if key == KeyCode::KeyR {
-                        self.state.point_initial_view();
-                        return;
-                    }
                 }
                 if event.repeat && matches!(key, KeyCode::PageUp | KeyCode::PageDown) {
                     return;
@@ -1573,23 +1892,17 @@ impl ApplicationHandler for App {
                     return;
                 }
                 match event.physical_key {
-                    PhysicalKey::Code(KeyCode::KeyS | KeyCode::KeyO) => {
+                    PhysicalKey::Code(KeyCode::KeyR | KeyCode::KeyS | KeyCode::KeyO) => {
                         if !event.repeat {
                             self.state.toggle_star_orientation();
                         }
                     }
                     PhysicalKey::Code(KeyCode::KeyU) => self.state.unlock(),
-                    PhysicalKey::Code(KeyCode::KeyR) => self.state.reset_view(),
-                    PhysicalKey::Code(KeyCode::KeyE) => {
-                        if let Some(what) = self.state.next_eclipse() {
-                            log::info!("found {what} at t = {:.3} d", self.state.sim_time);
-                        }
-                    }
-                    PhysicalKey::Code(KeyCode::KeyT) => {
-                        if let Some(what) = self.state.next_moon_transit() {
-                            log::info!("found {what} at t = {:.3} d", self.state.sim_time);
-                        }
-                    }
+                    PhysicalKey::Code(KeyCode::Home) => self.state.reset_view(),
+                    PhysicalKey::Code(KeyCode::F10) => self.request_leave(Leave::Title),
+                    PhysicalKey::Code(KeyCode::KeyG) => self.targets_open = !self.targets_open,
+                    PhysicalKey::Code(KeyCode::KeyE) => self.find_event(false),
+                    PhysicalKey::Code(KeyCode::KeyT) => self.find_event(true),
                     PhysicalKey::Code(KeyCode::KeyH) => {
                         self.show_hud = !self.show_hud;
                         self.exposure_dragging = false;
@@ -1648,6 +1961,15 @@ impl ApplicationHandler for App {
             0
         };
         let now = Instant::now();
+        if let Some((_, started)) = &self.toast {
+            let expires = *started + std::time::Duration::from_secs(4);
+            if expires <= now {
+                self.toast = None;
+                self.pacer.request();
+            } else {
+                event_loop.set_control_flow(ControlFlow::WaitUntil(expires));
+            }
+        }
         if let Some(deadline) = self.pacer.deadline(now, self.continuous_redraw(size), fps) {
             if deadline > now {
                 event_loop.set_control_flow(ControlFlow::WaitUntil(deadline));
@@ -1688,10 +2010,38 @@ fn main() -> Result<()> {
         occluded: false,
         graphics: graphics::Menu::load(),
         pacer: graphics::FramePacer::default(),
+        progress: progress::Book::default(),
+        active_path: None,
+        leave: None,
+        discard: None,
+        controls_back: menu::Page::Title,
+        targets_open: false,
+        toast: None,
     };
 
-    if app.game.is_some() {
-        app.toggle_menu();
+    app.progress = progress::Book::load();
+    let args: Vec<_> = std::env::args_os().collect();
+    let explicit = args
+        .windows(2)
+        .find(|a| a[0] == "--config")
+        .map(|a| std::path::PathBuf::from(&a[1]))
+        .or_else(|| std::env::var_os("STARGAZE_CONFIG").map(Into::into));
+    if let Some(path) = explicit {
+        app.menu.page = if app.game.is_some() {
+            menu::Page::Levels
+        } else {
+            menu::Page::Explore
+        };
+        app.select_map(&path);
+    } else if app.game.is_some() {
+        app.open_page(menu::Page::Levels);
+    } else if std::env::var_os("STARGAZE_SYSTEM").is_none() {
+        app.open_page(menu::Page::Title);
+    } else {
+        app.menu.can_resume = true;
+    }
+    if let Some(message) = &app.progress.message {
+        app.menu.error = Some(message.clone());
     }
 
     if app.game.is_none() {
@@ -1759,6 +2109,13 @@ mod app_tests {
             occluded: false,
             graphics: graphics::Menu::default(),
             pacer: graphics::FramePacer::default(),
+            progress: progress::Book::default(),
+            active_path: None,
+            leave: None,
+            discard: None,
+            controls_back: menu::Page::Title,
+            targets_open: false,
+            toast: None,
         }
     }
 
@@ -1977,22 +2334,22 @@ mod app_tests {
         let start = state.sim_time;
         assert_eq!(WARPS[state.warp], 0.0);
         assert!(state.time_key(KeyCode::ArrowLeft));
-        assert_eq!(WARPS[state.warp], -0.001);
+        assert_eq!(WARPS[state.warp], -1.0 / 1440.0);
         assert_eq!(state.sim_time, start, "speed changes must not jump time");
         assert!(state.time_key(KeyCode::ArrowRight));
         assert_eq!(WARPS[state.warp], 0.0);
         assert!(state.time_key(KeyCode::ArrowRight));
-        assert_eq!(WARPS[state.warp], 0.001);
+        assert_eq!(WARPS[state.warp], 1.0 / 1440.0);
         for _ in 0..30 {
             state.time_key(KeyCode::ArrowLeft);
         }
         assert_eq!(state.warp, 0);
-        assert_eq!(WARPS[state.warp], -40.0);
+        assert_eq!(WARPS[state.warp], -1000.0 / 1440.0);
         for _ in 0..30 {
             state.time_key(KeyCode::ArrowRight);
         }
         assert_eq!(state.warp, WARPS.len() - 1);
-        assert_eq!(WARPS[state.warp], 40.0);
+        assert_eq!(WARPS[state.warp], 1000.0 / 1440.0);
         assert_eq!(state.view_lock, Some(ViewLock::Body(2)));
         assert!(!state.time_key(KeyCode::Digit1));
         assert!(!state.time_key(KeyCode::Digit2));
@@ -2004,11 +2361,11 @@ mod app_tests {
         state.sim_time = 0.0;
         state.view_lock = Some(ViewLock::Body(2));
         let initial_positions = state.scene.positions(state.sim_time);
-        state.warp = 7; // slowest reverse speed
+        state.warp = STOP_WARP - 1; // slowest reverse speed
         state.advance_by(10.0);
         state.track();
         assert!(
-            (state.sim_time + 0.01).abs() < 1e-12,
+            (state.sim_time + 10.0 / 1440.0).abs() < 1e-12,
             "reverse can cross time zero"
         );
         let positions = state.scene.positions(state.sim_time);
@@ -2023,10 +2380,11 @@ mod app_tests {
         );
         assert!(state.time_key(KeyCode::Space));
         assert_eq!(WARPS[state.warp], 0.0);
-        assert!(state.time_key(KeyCode::Space)); // stopping again never resumes
-        assert_eq!(WARPS[state.warp], 0.0);
         state.advance_by(10.0);
-        assert!((state.sim_time + 0.01).abs() < 1e-12);
+        assert!((state.sim_time + 10.0 / 1440.0).abs() < 1e-12);
+        assert!(state.time_key(KeyCode::Space)); // resume the previous reverse speed
+        assert_eq!(state.warp, STOP_WARP - 1);
+        assert!(state.time_key(KeyCode::Space)); // pause before stepping forward
         state.change_speed(true); // first positive speed from zero
         state.advance_by(10.0);
         assert!(state.sim_time.abs() < 1e-12);
@@ -2453,5 +2811,178 @@ mod app_tests {
         });
         assert!(visible_transit, "view must center the transited planet");
         assert!(vf.sun_altitude < -0.1, "it should be night");
+    }
+
+    #[test]
+    fn blueprint_navigation_search_settings_and_spoiler_free_levels() {
+        let mut app = app();
+        app.open_page(menu::Page::Title);
+        assert!(app.menu_key(KeyCode::Enter, None, None));
+        assert!(app.menu.open);
+        assert!(app.menu.page == menu::Page::Levels);
+        assert_eq!(app.menu.entries[0].puzzle_title(0), "First field study");
+        app.menu_key(KeyCode::KeyP, None, None);
+        assert!(app.menu.page == menu::Page::Explore);
+        app.menu_key(KeyCode::Slash, None, None);
+        app.menu_key(KeyCode::KeyV, Some("vesper"), None);
+        assert_eq!(app.menu.visible().len(), 1);
+        app.menu_key(KeyCode::Enter, None, None); // close the search first
+        app.menu_key(KeyCode::Enter, None, None);
+        assert!(!app.menu.open);
+        assert!(app.game.is_none());
+        assert_eq!(
+            app.active_path.as_ref().unwrap().file_stem().unwrap(),
+            "vesper"
+        );
+        app.toggle_menu();
+        app.menu_key(KeyCode::KeyG, None, None);
+        assert!(app.graphics.open);
+        let settings = app.graphics.settings;
+        app.graphics.key(KeyCode::Digit3);
+        assert_eq!(app.graphics.settings, settings);
+        app.graphics.key(KeyCode::Escape);
+        assert_eq!(app.graphics.settings, settings);
+        assert!(app.menu.open);
+    }
+
+    fn edited_level(app: &mut App, path: &std::path::Path) {
+        app.menu.page = menu::Page::Levels;
+        app.select_map(path);
+        app.toggle_notebook();
+        let g = app.game.as_mut().unwrap();
+        let l = g.layout(1280.0, 720.0, 1.0);
+        g.key(KeyCode::KeyS, &l, (350.0, 280.0), &app.state.scene);
+        g.key(KeyCode::KeyN, &l, (350.0, 280.0), &app.state.scene);
+        g.key(KeyCode::KeyV, &l, (350.0, 280.0), &app.state.scene);
+        g.key(KeyCode::Enter, &l, (350.0, 280.0), &app.state.scene);
+        g.dismiss_result();
+    }
+
+    #[test]
+    fn levels_restore_theory_scores_observation_and_keep_discard_choices() {
+        let mut app = app();
+        let dir =
+            std::env::temp_dir().join(format!("stargaze-blueprint-levels-{}", std::process::id()));
+        let save = dir.join("progress.yaml");
+        app.progress = progress::Book::load_from(Some(save.clone()));
+        let path =
+            std::path::Path::new(concat!(env!("CARGO_MANIFEST_DIR"), "/configs/puzzle.yaml"));
+        let other = std::path::Path::new(concat!(env!("CARGO_MANIFEST_DIR"), "/configs/halo.yaml"));
+        edited_level(&mut app, path);
+        let summary = app.game.as_ref().unwrap().progress();
+        assert_eq!(summary.0, 1);
+        assert_eq!(summary.1, 1);
+        assert!(summary.2.is_some());
+        app.state.sim_time = -4.0;
+        app.state.observer.az = 0.4;
+        app.state.observer.alt = 0.5;
+        app.state.observer.fov_y = 0.7;
+        app.state.view_lock = Some(ViewLock::Background(DVec3::X));
+        app.request_leave(Leave::Levels);
+        assert!(app.leave.is_some());
+        assert!(!app.menu.open);
+        app.finish_leave(Leave::Levels, true);
+        assert!(app.menu.open);
+        assert!(save.exists());
+        assert_eq!(
+            progress::Book::load_from(Some(save.clone())).levels["puzzle.yaml"].summary(),
+            summary
+        );
+        app.select_map(other);
+        assert_eq!(app.game.as_ref().unwrap().progress().0, 0);
+        app.open_page(menu::Page::Levels);
+        app.select_map(path);
+        assert_eq!(app.game.as_ref().unwrap().progress(), summary);
+        assert_eq!(app.state.sim_time, -4.0);
+        assert_eq!(app.state.observer.fov_y, 0.7);
+        assert_eq!(app.state.view_lock, Some(ViewLock::Background(DVec3::X)));
+        app.request_leave(Leave::Levels);
+        app.finish_leave(Leave::Levels, false);
+        assert!(!app.progress.levels.contains_key("puzzle.yaml"));
+        assert!(!app.game.as_ref().unwrap().has_progress());
+        app.save_progress(); // leaving a blank discarded theory does not resurrect it
+        assert!(
+            !progress::Book::load_from(Some(save))
+                .levels
+                .contains_key("puzzle.yaml")
+        );
+        std::fs::remove_dir_all(dir).unwrap();
+    }
+
+    #[test]
+    #[ignore = "requires a GPU; writes PNG previews when STARGAZE_UI_PREVIEWS is set"]
+    fn gpu_blueprint_screens() {
+        let out = std::env::var_os("STARGAZE_UI_PREVIEWS").map(std::path::PathBuf::from);
+        let mut gpu = crate::ui_previews::Preview::new();
+        for (w, h, scale) in [
+            (1280, 720, 1.0),
+            (1920, 1080, 1.0),
+            (800, 600, 1.0),
+            (640, 480, 2.0),
+        ] {
+            let mut app = app();
+            app.scale = scale;
+            for (name, page) in [
+                ("title", menu::Page::Title),
+                ("explore", menu::Page::Explore),
+                ("levels", menu::Page::Levels),
+                ("controls", menu::Page::Controls),
+            ] {
+                app.open_page(page);
+                let (world, vertices) = app.build_frame(w, h);
+                assert!(world.is_none());
+                let path = out
+                    .as_ref()
+                    .map(|dir| dir.join(format!("{name}-{w}x{h}.png")));
+                let pixels = gpu.render(&vertices, w, h, path.as_deref());
+                assert!(
+                    pixels
+                        .chunks(4)
+                        .filter(|p| p[0] > 180 && p[1] > 180)
+                        .count()
+                        > 100,
+                    "{name} should have readable text or yellow buttons"
+                );
+            }
+            app.graphics.begin();
+            let (_, vertices) = app.build_frame(w, h);
+            let path = out
+                .as_ref()
+                .map(|dir| dir.join(format!("settings-{w}x{h}.png")));
+            gpu.render(&vertices, w, h, path.as_deref());
+            app.graphics.cancel();
+            app.menu.open = false;
+            app.game = Some(game::Game::default());
+            app.toggle_notebook();
+            let scene = &app.state.scene;
+            let g = app.game.as_mut().unwrap();
+            let l = g.layout(w as f32, h as f32, scale);
+            g.key(KeyCode::KeyS, &l, (w as f64 * 0.4, h as f64 * 0.4), scene);
+            g.key(KeyCode::KeyN, &l, (w as f64 * 0.4, h as f64 * 0.4), scene);
+            g.key(KeyCode::KeyV, &l, (0.0, 0.0), scene);
+            for (name, key) in [
+                ("theory", None),
+                ("score", Some(KeyCode::Enter)),
+                ("clear", Some(KeyCode::KeyX)),
+            ] {
+                let g = app.game.as_mut().unwrap();
+                g.dismiss_result();
+                if let Some(key) = key {
+                    g.key(key, &l, (0.0, 0.0), &app.state.scene);
+                }
+                let (_, vertices) = app.build_frame(w, h);
+                let path = out
+                    .as_ref()
+                    .map(|dir| dir.join(format!("{name}-{w}x{h}.png")));
+                gpu.render(&vertices, w, h, path.as_deref());
+            }
+            app.game.as_mut().unwrap().confirm_clear = false;
+            app.leave = Some(Leave::Levels);
+            let (_, vertices) = app.build_frame(w, h);
+            let path = out
+                .as_ref()
+                .map(|dir| dir.join(format!("leave-{w}x{h}.png")));
+            gpu.render(&vertices, w, h, path.as_deref());
+        }
     }
 }

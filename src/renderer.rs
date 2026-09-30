@@ -4,7 +4,7 @@ use std::sync::Arc;
 use crate::graphics;
 use crate::pathtracer::{Options, PathTracer};
 use crate::stars::CatalogueStar;
-use crate::ui::{self, Label, UiVertex};
+use crate::ui::{Label, UiVertex};
 use anyhow::{Result, anyhow};
 use bytemuck::{Pod, Zeroable};
 use winit::window::Window;
@@ -64,10 +64,7 @@ pub struct Renderer {
     size: (u32, u32),
     tracer: PathTracer,
     graphics: graphics::Settings,
-    ui_pipeline: wgpu::RenderPipeline,
-    ui_bind_group: wgpu::BindGroup,
-    ui_vbo: wgpu::Buffer,
-    ui_capacity: u64,
+    gui: crate::gui::Gui,
 }
 
 impl Renderer {
@@ -123,128 +120,7 @@ impl Renderer {
             options,
         );
 
-        let atlas_extent = wgpu::Extent3d {
-            width: ui::ATLAS_W as u32,
-            height: ui::ATLAS_H as u32,
-            depth_or_array_layers: 1,
-        };
-        let atlas_tex = device.create_texture(&wgpu::TextureDescriptor {
-            label: Some("ui-atlas"),
-            size: atlas_extent,
-            mip_level_count: 1,
-            sample_count: 1,
-            dimension: wgpu::TextureDimension::D2,
-            format: wgpu::TextureFormat::R8Unorm,
-            usage: wgpu::TextureUsages::TEXTURE_BINDING | wgpu::TextureUsages::COPY_DST,
-            view_formats: &[],
-        });
-        queue.write_texture(
-            wgpu::TexelCopyTextureInfo {
-                texture: &atlas_tex,
-                mip_level: 0,
-                origin: wgpu::Origin3d::ZERO,
-                aspect: wgpu::TextureAspect::All,
-            },
-            &ui::build_atlas(),
-            wgpu::TexelCopyBufferLayout {
-                offset: 0,
-                bytes_per_row: Some(ui::ATLAS_W as u32),
-                rows_per_image: Some(ui::ATLAS_H as u32),
-            },
-            atlas_extent,
-        );
-        let atlas_view = atlas_tex.create_view(&wgpu::TextureViewDescriptor::default());
-        let sampler = device.create_sampler(&wgpu::SamplerDescriptor {
-            label: Some("ui-sampler"),
-            mag_filter: wgpu::FilterMode::Nearest,
-            min_filter: wgpu::FilterMode::Nearest,
-            ..Default::default()
-        });
-        let ui_bgl = device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
-            label: Some("ui-bgl"),
-            entries: &[
-                wgpu::BindGroupLayoutEntry {
-                    binding: 0,
-                    visibility: wgpu::ShaderStages::FRAGMENT,
-                    ty: wgpu::BindingType::Texture {
-                        sample_type: wgpu::TextureSampleType::Float { filterable: true },
-                        view_dimension: wgpu::TextureViewDimension::D2,
-                        multisampled: false,
-                    },
-                    count: None,
-                },
-                wgpu::BindGroupLayoutEntry {
-                    binding: 1,
-                    visibility: wgpu::ShaderStages::FRAGMENT,
-                    ty: wgpu::BindingType::Sampler(wgpu::SamplerBindingType::Filtering),
-                    count: None,
-                },
-            ],
-        });
-        let ui_bind_group = device.create_bind_group(&wgpu::BindGroupDescriptor {
-            label: Some("ui-bg"),
-            layout: &ui_bgl,
-            entries: &[
-                wgpu::BindGroupEntry {
-                    binding: 0,
-                    resource: wgpu::BindingResource::TextureView(&atlas_view),
-                },
-                wgpu::BindGroupEntry {
-                    binding: 1,
-                    resource: wgpu::BindingResource::Sampler(&sampler),
-                },
-            ],
-        });
-        let ui_layout = device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
-            label: Some("ui-pipeline-layout"),
-            bind_group_layouts: &[Some(&ui_bgl)],
-            immediate_size: 0,
-        });
-        let ui_shader = device.create_shader_module(wgpu::ShaderModuleDescriptor {
-            label: Some("ui"),
-            source: wgpu::ShaderSource::Wgsl(include_str!("shaders/ui.wgsl").into()),
-        });
-        let ui_attrs = wgpu::vertex_attr_array![0 => Float32x2, 1 => Float32x2, 2 => Float32x4];
-        let ui_vlayout = wgpu::VertexBufferLayout {
-            array_stride: std::mem::size_of::<UiVertex>() as u64,
-            step_mode: wgpu::VertexStepMode::Vertex,
-            attributes: &ui_attrs,
-        };
-        let ui_pipeline = device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
-            label: Some("ui-pipeline"),
-            layout: Some(&ui_layout),
-            vertex: wgpu::VertexState {
-                module: &ui_shader,
-                entry_point: Some("vs"),
-                compilation_options: Default::default(),
-                buffers: &[Some(ui_vlayout)],
-            },
-            primitive: wgpu::PrimitiveState {
-                cull_mode: None,
-                ..Default::default()
-            },
-            depth_stencil: None,
-            multisample: Default::default(),
-            fragment: Some(wgpu::FragmentState {
-                module: &ui_shader,
-                entry_point: Some("fs"),
-                compilation_options: Default::default(),
-                targets: &[Some(wgpu::ColorTargetState {
-                    format,
-                    blend: Some(wgpu::BlendState::ALPHA_BLENDING),
-                    write_mask: wgpu::ColorWrites::ALL,
-                })],
-            }),
-            multiview_mask: None,
-            cache: None,
-        });
-        let ui_capacity = 64 * 1024;
-        let ui_vbo = device.create_buffer(&wgpu::BufferDescriptor {
-            label: Some("ui-vertices"),
-            size: ui_capacity,
-            usage: wgpu::BufferUsages::VERTEX | wgpu::BufferUsages::COPY_DST,
-            mapped_at_creation: false,
-        });
+        let gui = crate::gui::Gui::new(&device, &queue, format);
         Ok(Self {
             surface,
             device,
@@ -253,10 +129,7 @@ impl Renderer {
             size: (width, height),
             tracer,
             graphics,
-            ui_pipeline,
-            ui_bind_group,
-            ui_vbo,
-            ui_capacity,
+            gui,
         })
     }
 
@@ -304,6 +177,24 @@ impl Renderer {
         self.tracer.manual_exposure()
     }
 
+    /// Trace a small initial backdrop once; menus reuse it while the GPU rests.
+    pub fn prepare_background(&mut self, frame: &Frame) {
+        self.tracer
+            .set_quality(8, self.graphics.max_bounces, self.graphics.sample_limit());
+        let mut encoder = self
+            .device
+            .create_command_encoder(&wgpu::CommandEncoderDescriptor {
+                label: Some("menu-backdrop"),
+            });
+        self.tracer.encode(&self.queue, &mut encoder, frame);
+        self.queue.submit(Some(encoder.finish()));
+        self.tracer.set_quality(
+            self.graphics.samples_per_frame,
+            self.graphics.max_bounces,
+            self.graphics.sample_limit(),
+        );
+    }
+
     /// An opaque menu or diagram needs only UI. Leave the world accumulation
     /// and exposure untouched until observation resumes.
     pub fn render(&mut self, frame: Option<&Frame>, ui: &[UiVertex]) -> RenderOutcome {
@@ -324,19 +215,7 @@ impl Renderer {
                 return RenderOutcome::Unavailable;
             }
         };
-        if !ui.is_empty() {
-            let bytes = bytemuck::cast_slice(ui);
-            if bytes.len() as u64 > self.ui_capacity {
-                self.ui_capacity = (bytes.len() as u64).next_power_of_two();
-                self.ui_vbo = self.device.create_buffer(&wgpu::BufferDescriptor {
-                    label: Some("ui-vertices"),
-                    size: self.ui_capacity,
-                    usage: wgpu::BufferUsages::VERTEX | wgpu::BufferUsages::COPY_DST,
-                    mapped_at_creation: false,
-                });
-            }
-            self.queue.write_buffer(&self.ui_vbo, 0, bytes);
-        }
+        self.gui.upload(&self.device, &self.queue, ui);
         let view = surface_tex.texture.create_view(&Default::default());
         let mut encoder = self
             .device
@@ -366,15 +245,10 @@ impl Renderer {
                 occlusion_query_set: None,
                 multiview_mask: None,
             });
-            if frame.is_some() {
+            if frame.is_some() || self.tracer.samples() > 0 {
                 self.tracer.display(&mut pass);
             }
-            if !ui.is_empty() {
-                pass.set_pipeline(&self.ui_pipeline);
-                pass.set_bind_group(0, &self.ui_bind_group, &[]);
-                pass.set_vertex_buffer(0, self.ui_vbo.slice(..));
-                pass.draw(0..ui.len() as u32, 0..1);
-            }
+            self.gui.draw(&mut pass);
         }
         self.queue.submit(Some(encoder.finish()));
         self.queue.present(surface_tex);

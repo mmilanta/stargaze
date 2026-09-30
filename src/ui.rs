@@ -4,20 +4,20 @@
 //! All geometry is generated in physical pixels (origin top-left) and converted
 //! to NDC when pushed, so the caller only deals with screen coordinates.
 
+use crate::typeface::{self, Face};
 use bytemuck::{Pod, Zeroable};
-use font8x8::{BASIC_FONTS, UnicodeFonts};
 
-pub const ATLAS_COLS: usize = 16;
-pub const ATLAS_ROWS: usize = 8;
-pub const GLYPH: usize = 8;
-pub const ATLAS_W: usize = ATLAS_COLS * GLYPH; // 128
-pub const ATLAS_H: usize = ATLAS_ROWS * GLYPH; // 64
-/// Rendering text taller than 8px makes it readable at ordinary DPI.
-const TEXT_SCALE: f32 = 2.0;
-const SOLID_CELL: usize = 127;
-// Two Unicode arrows occupy unused atlas cells after the printable ASCII set.
-const ARROW_LEFT_CELL: usize = 95;
-const ARROW_RIGHT_CELL: usize = 96;
+pub const ATLAS_W: usize = typeface::WIDTH;
+pub const ATLAS_H: usize = typeface::HEIGHT;
+const TEXT_SCALE: f32 = 1.15;
+pub const BG: [f32; 4] = [0.0075, 0.0395, 0.3712, 1.0];
+pub const DEEP: [f32; 4] = [0.004, 0.021, 0.26, 1.0];
+pub const INK: [f32; 4] = [0.871, 0.904, 1.0, 1.0];
+pub const MUTED: [f32; 4] = [0.527, 0.618, 0.913, 1.0];
+pub const ACCENT: [f32; 4] = [0.871, 0.799, 0.144, 1.0];
+pub const OK: [f32; 4] = [0.267, 0.831, 0.644, 1.0];
+pub const WARN: [f32; 4] = [1.0, 0.333, 0.195, 1.0];
+pub const LINE: [f32; 4] = [0.42, 0.54, 1.0, 0.34];
 
 #[repr(C)]
 #[derive(Clone, Copy, Debug, Pod, Zeroable)]
@@ -184,74 +184,12 @@ fn layout_mode(w: f32, h: f32, scale: f32, puzzle: bool) -> Layout {
     }
 }
 
-/// Build the atlas bitmap (coverage in R) and return it as a tight byte buffer.
 pub fn build_atlas() -> Vec<u8> {
-    let mut data = vec![0u8; ATLAS_W * ATLAS_H];
-    for code in 32u32..127 {
-        let Some(ch) = char::from_u32(code) else {
-            continue;
-        };
-        let Some(glyph) = BASIC_FONTS.get(ch) else {
-            continue;
-        };
-        let idx = (code - 32) as usize;
-        let (cx, cy) = (idx % ATLAS_COLS, idx / ATLAS_COLS);
-        for (row, bits) in glyph.iter().enumerate() {
-            for col in 0..GLYPH {
-                if bits & (1 << col) != 0 {
-                    data[(cy * GLYPH + row) * ATLAS_W + cx * GLYPH + col] = 255;
-                }
-            }
-        }
-    }
-    for (cell, glyph) in [
-        (ARROW_LEFT_CELL, [0, 0x08, 0x04, 0x7e, 0x04, 0x08, 0, 0]),
-        (ARROW_RIGHT_CELL, [0, 0x10, 0x20, 0x7e, 0x20, 0x10, 0, 0]),
-    ] {
-        let (cx, cy) = (cell % ATLAS_COLS, cell / ATLAS_COLS);
-        for (row, bits) in glyph.iter().enumerate() {
-            for col in 0..GLYPH {
-                if bits & (1 << col) != 0 {
-                    data[(cy * GLYPH + row) * ATLAS_W + cx * GLYPH + col] = 255;
-                }
-            }
-        }
-    }
-    // A fully opaque cell used to draw solid rectangles through the same shader.
-    let (cx, cy) = (SOLID_CELL % ATLAS_COLS, SOLID_CELL / ATLAS_COLS);
-    for y in 0..GLYPH {
-        for x in 0..GLYPH {
-            data[(cy * GLYPH + y) * ATLAS_W + cx * GLYPH + x] = 255;
-        }
-    }
-    data
+    typeface::atlas().bitmap.clone()
 }
 
 fn solid_uv() -> [f32; 2] {
-    let (cx, cy) = (SOLID_CELL % ATLAS_COLS, SOLID_CELL / ATLAS_COLS);
-    [
-        (cx as f32 + 0.5) * GLYPH as f32 / ATLAS_W as f32,
-        (cy as f32 + 0.5) * GLYPH as f32 / ATLAS_H as f32,
-    ]
-}
-
-fn glyph_uv(code: u32) -> [[f32; 2]; 4] {
-    let idx = if (32..127).contains(&code) {
-        (code - 32) as usize
-    } else {
-        match code {
-            0x2190 => ARROW_LEFT_CELL,
-            0x2192 => ARROW_RIGHT_CELL,
-            // Unknown glyphs fall back to the solid cell (a filled box).
-            _ => SOLID_CELL,
-        }
-    };
-    let (cx, cy) = (idx % ATLAS_COLS, idx / ATLAS_COLS);
-    let u0 = (cx * GLYPH) as f32 / ATLAS_W as f32;
-    let v0 = (cy * GLYPH) as f32 / ATLAS_H as f32;
-    let u1 = ((cx + 1) * GLYPH) as f32 / ATLAS_W as f32;
-    let v1 = ((cy + 1) * GLYPH) as f32 / ATLAS_H as f32;
-    [[u0, v0], [u1, v0], [u0, v1], [u1, v1]]
+    [1.5 / ATLAS_W as f32, 1.5 / ATLAS_H as f32]
 }
 
 fn to_ndc(x: f32, y: f32, w: f32, h: f32) -> [f32; 2] {
@@ -297,7 +235,7 @@ pub(crate) fn push_rect(
 }
 
 pub fn text_width(text: &str, scale: f32) -> f32 {
-    text.chars().count() as f32 * 8.0 * scale
+    typeface::width(Face::Mono, text, scale * 13.333333)
 }
 
 pub(crate) fn push_text(
@@ -309,19 +247,190 @@ pub(crate) fn push_text(
     color: [f32; 4],
     viewport: [f32; 2],
 ) {
-    let step = 8.0 * scale;
+    font_text(
+        verts,
+        [x, y],
+        scale * 13.333333,
+        Face::Mono,
+        text,
+        color,
+        viewport,
+    );
+}
+
+pub(crate) fn heading(
+    verts: &mut Vec<UiVertex>,
+    x: f32,
+    y: f32,
+    px: f32,
+    text: &str,
+    color: [f32; 4],
+    viewport: [f32; 2],
+) {
+    font_text(
+        verts,
+        [x, y],
+        px,
+        if px > 48.0 { Face::Display } else { Face::Sans },
+        text,
+        color,
+        viewport,
+    );
+}
+
+fn font_text(
+    verts: &mut Vec<UiVertex>,
+    [x, y]: [f32; 2],
+    px: f32,
+    face: Face,
+    text: &str,
+    color: [f32; 4],
+    viewport: [f32; 2],
+) {
     let mut cx = x;
     for ch in text.chars() {
-        if ch != ' ' {
+        let g = typeface::glyph(face, ch);
+        let s = px / g.em;
+        let m = g.metrics;
+        let x0 = cx + m.xmin as f32 * s;
+        let y0 = y + px * 0.8 - (m.ymin as f32 + m.height as f32) * s;
+        if m.width > 0 && m.height > 0 {
             push_quad(
                 verts,
-                [[cx, y], [cx + step, y + step]],
-                glyph_uv(ch as u32),
+                [
+                    [x0, y0],
+                    [x0 + m.width as f32 * s, y0 + m.height as f32 * s],
+                ],
+                g.uv,
                 color,
                 viewport,
             );
         }
-        cx += step;
+        cx += m.advance_width * s;
+    }
+}
+
+pub(crate) fn outline(
+    v: &mut Vec<UiVertex>,
+    r: Rect,
+    thickness: f32,
+    color: [f32; 4],
+    vp: [f32; 2],
+) {
+    for edge in [
+        Rect { h: thickness, ..r },
+        Rect {
+            y: r.y + r.h - thickness,
+            h: thickness,
+            ..r
+        },
+        Rect { w: thickness, ..r },
+        Rect {
+            x: r.x + r.w - thickness,
+            w: thickness,
+            ..r
+        },
+    ] {
+        push_rect(v, edge.x, edge.y, edge.w, edge.h, color, vp);
+    }
+}
+
+pub(crate) fn blueprint(v: &mut Vec<UiVertex>, vp: [f32; 2], s: f32) {
+    push_rect(v, 0.0, 0.0, vp[0], vp[1], BG, vp);
+    let step = (32.0 * s).max(8.0);
+    let mut x = 0.0;
+    while x < vp[0] {
+        push_rect(v, x, 0.0, 0.6, vp[1], [0.7, 0.8, 1.0, 0.045], vp);
+        x += step;
+    }
+    let mut y = 0.0;
+    while y < vp[1] {
+        push_rect(v, 0.0, y, vp[0], 0.6, [0.7, 0.8, 1.0, 0.045], vp);
+        y += step;
+    }
+}
+
+pub(crate) fn button(
+    v: &mut Vec<UiVertex>,
+    r: Rect,
+    label: &str,
+    s: f32,
+    primary: bool,
+    hovered: bool,
+    vp: [f32; 2],
+) {
+    let color = if primary {
+        ACCENT
+    } else if hovered {
+        [0.6, 0.7, 1.0, 0.13]
+    } else {
+        [0.0; 4]
+    };
+    push_rect(v, r.x, r.y, r.w, r.h, color, vp);
+    outline(v, r, s.max(0.5), if primary { ACCENT } else { LINE }, vp);
+    let size = (0.88 * s).min((r.w - 16.0 * s) / text_width(label, 1.0).max(1.0));
+    push_text(
+        v,
+        r.x + (r.w - text_width(label, size)) * 0.5,
+        r.center_y() - 6.0 * size,
+        size,
+        label,
+        if primary { BG } else { INK },
+        vp,
+    );
+}
+
+pub(crate) fn menu_background(v: &mut Vec<UiVertex>, vp: [f32; 2], s: f32) {
+    push_rect(
+        v,
+        0.0,
+        0.0,
+        vp[0],
+        vp[1],
+        [DEEP[0], DEEP[1], DEEP[2], 0.87],
+        vp,
+    );
+    let step = (32.0 * s).max(8.0);
+    let mut x = 0.0;
+    while x < vp[0] {
+        push_rect(v, x, 0.0, 0.5, vp[1], [0.7, 0.8, 1.0, 0.035], vp);
+        x += step;
+    }
+    let mut y = 0.0;
+    while y < vp[1] {
+        push_rect(v, 0.0, y, vp[0], 0.5, [0.7, 0.8, 1.0, 0.035], vp);
+        y += step;
+    }
+}
+
+pub(crate) fn brackets(v: &mut Vec<UiVertex>, r: Rect, color: [f32; 4], s: f32, vp: [f32; 2]) {
+    let gap = 5.0 * s;
+    let len = 12.0 * s;
+    let thick = 1.5 * s;
+    for (x, y, dx, dy) in [
+        (r.x - gap, r.y - gap, 1.0, 1.0),
+        (r.x + r.w + gap, r.y - gap, -1.0, 1.0),
+        (r.x - gap, r.y + r.h + gap, 1.0, -1.0),
+        (r.x + r.w + gap, r.y + r.h + gap, -1.0, -1.0),
+    ] {
+        push_rect(
+            v,
+            if dx > 0.0 { x } else { x - len },
+            if dy > 0.0 { y } else { y - thick },
+            len,
+            thick,
+            color,
+            vp,
+        );
+        push_rect(
+            v,
+            if dx > 0.0 { x } else { x - thick },
+            if dy > 0.0 { y } else { y - len },
+            thick,
+            len,
+            color,
+            vp,
+        );
     }
 }
 
@@ -442,24 +551,8 @@ pub fn build_lock(
 ) {
     let s = layout.scale;
     let r = layout.lock;
-    let color = if target.is_some() {
-        [0.45, 0.88, 0.77, 1.0]
-    } else {
-        [0.58, 0.65, 0.74, 1.0]
-    };
-    push_rect(
-        verts,
-        r.x,
-        r.y,
-        r.w,
-        r.h,
-        if target.is_some() {
-            [0.045, 0.17, 0.16, 0.98]
-        } else {
-            [0.05, 0.07, 0.10, 0.95]
-        },
-        viewport,
-    );
+    let color = if target.is_some() { OK } else { MUTED };
+    push_rect(verts, r.x, r.y, r.w, r.h, DEEP, viewport);
     // Padlock body and shackle; unlocked shackle has an open right side.
     let x = r.x + 9.0 * s;
     let y = r.y + 12.0 * s;
@@ -541,18 +634,10 @@ pub(crate) fn toolbar_panel(
         bar.y,
         bar.w,
         bar.h,
-        [0.015, 0.02, 0.03, 0.86],
+        [BG[0], BG[1], BG[2], 0.96],
         viewport,
     );
-    push_rect(
-        verts,
-        bar.x,
-        bar.y,
-        bar.w,
-        scale,
-        [1.0, 1.0, 1.0, 0.10],
-        viewport,
-    );
+    push_rect(verts, bar.x, bar.y, bar.w, scale, LINE, viewport);
     for next_group in groups {
         push_rect(
             verts,
@@ -560,7 +645,7 @@ pub(crate) fn toolbar_panel(
             bar.y + 13.0 * scale,
             scale,
             26.0 * scale,
-            [0.32, 0.38, 0.46, 0.8],
+            LINE,
             viewport,
         );
     }
@@ -575,29 +660,7 @@ pub(crate) fn toolbar_button(
     hovered: bool,
     viewport: [f32; 2],
 ) {
-    let color = if active {
-        [0.08, 0.25, 0.23, 0.98]
-    } else if hovered {
-        [0.12, 0.20, 0.28, 0.98]
-    } else {
-        [0.10, 0.13, 0.17, 0.95]
-    };
-    push_rect(verts, rect.x, rect.y, rect.w, rect.h, color, viewport);
-    let size = if matches!(label, "←" | "→") {
-        2.0
-    } else {
-        1.1
-    } * scale;
-    let size = size.min((rect.w - 8.0 * scale) / text_width(label, 1.0).max(1.0));
-    push_text(
-        verts,
-        rect.x + (rect.w - text_width(label, size)) * 0.5,
-        rect.center_y() - 4.0 * size,
-        size,
-        label,
-        [0.88, 0.92, 0.98, 1.0],
-        viewport,
-    );
+    button(verts, rect, label, scale, active, hovered, viewport);
 }
 
 fn build_bar(verts: &mut Vec<UiVertex>, layout: &Layout, w: f32, h: f32, state: HudState<'_>) {
@@ -626,13 +689,22 @@ fn build_bar(verts: &mut Vec<UiVertex>, layout: &Layout, w: f32, h: f32, state: 
     let button = |verts: &mut Vec<UiVertex>, rect: Rect, label: &str, active: bool| {
         toolbar_button(verts, rect, label, s, active, false, [w, h]);
     };
-    button(verts, layout.home, "[M]enu", false);
-    button(verts, layout.orientation, "[S]tars", state.steady_stars);
+    button(verts, layout.home, "Menu [M]", false);
+    button(
+        verts,
+        layout.orientation,
+        if state.steady_stars {
+            "Stars [R]"
+        } else {
+            "Horizon [R]"
+        },
+        state.steady_stars,
+    );
     button(
         verts,
         layout.toggle,
         if layout.puzzle {
-            "Draw [Tab]"
+            "Theory [Tab]"
         } else {
             "[L]abels"
         },
@@ -641,7 +713,11 @@ fn build_bar(verts: &mut Vec<UiVertex>, layout: &Layout, w: f32, h: f32, state: 
     button(
         verts,
         layout.stop,
-        "Stop [Spc]",
+        if state.minutes_per_second == 0.0 {
+            "Play [Spc]"
+        } else {
+            "Stop [Spc]"
+        },
         state.minutes_per_second == 0.0,
     );
     button(verts, layout.slower, "←", false);
@@ -906,44 +982,10 @@ mod tests {
     }
 
     #[test]
-    fn atlas_contains_the_solid_cell_and_glyphs() {
+    fn atlas_contains_coverage_and_a_white_geometry_texel() {
         let a = build_atlas();
         assert_eq!(a.len(), ATLAS_W * ATLAS_H);
-        let (cx, cy) = (SOLID_CELL % ATLAS_COLS, SOLID_CELL / ATLAS_COLS);
-        assert_eq!(a[(cy * GLYPH) * ATLAS_W + cx * GLYPH], 255);
-
-        let idx = ('A' as u32 - 32) as usize;
-        let (ax, ay) = (idx % ATLAS_COLS, idx / ATLAS_COLS);
-        let mut ink = 0u32;
-        for y in 0..GLYPH {
-            for x in 0..GLYPH {
-                ink += a[(ay * GLYPH + y) * ATLAS_W + ax * GLYPH + x] as u32;
-            }
-        }
-        assert!(ink > 0, "'A' glyph should have ink");
-        for (ch, cell) in [('←', ARROW_LEFT_CELL), ('→', ARROW_RIGHT_CELL)] {
-            let uv = glyph_uv(ch as u32);
-            assert_eq!(
-                uv[0],
-                [
-                    (cell % ATLAS_COLS) as f32 / ATLAS_COLS as f32,
-                    (cell / ATLAS_COLS) as f32 / ATLAS_ROWS as f32
-                ]
-            );
-            let mut lit = 0;
-            for y in 0..GLYPH {
-                for x in 0..GLYPH {
-                    if a[(cell / ATLAS_COLS * GLYPH + y) * ATLAS_W + cell % ATLAS_COLS * GLYPH + x]
-                        != 0
-                    {
-                        lit += 1;
-                    }
-                }
-            }
-            assert!(
-                lit > 0 && lit < GLYPH * GLYPH,
-                "arrows must not be missing-glyph blocks"
-            );
-        }
+        assert_eq!(a[ATLAS_W + 1], 255);
+        assert!(a.iter().any(|&p| p > 0 && p < 255));
     }
 }
