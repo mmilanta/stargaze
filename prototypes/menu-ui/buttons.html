@@ -1,0 +1,330 @@
+<!doctype html>
+<html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><meta name="theme-color" content="#1538a4"><title>Button motion · Celestial Blueprint · Stargaze</title><link rel="icon" href="assets/favicon.svg" type="image/svg+xml">
+<style>
+@font-face{font-family:'Plex Mono';src:url('assets/plex-mono.ttf') format('truetype');font-display:swap}
+@font-face{font-family:'DM Sans';src:url('assets/dm-sans.ttf') format('truetype');font-weight:100 1000;font-display:swap}
+@property --a{syntax:'<angle>';inherits:false;initial-value:0deg}
+*{box-sizing:border-box}
+:root{--bg:#1538a4;--deep:#10308f;--line:#aebfff60;--soft:#aebfff2e;--text:#f0f4ff;--muted:#c0cef5;--faint:#8fa3e0;--accent:#f0e76a;--ok:#8debd2;--warn:#ff9c7a;--slow:1;--d:calc(180ms * var(--slow));--d2:calc(380ms * var(--slow));--ease:cubic-bezier(.7,0,.2,1);--spring:cubic-bezier(.3,1.6,.5,1)}
+body{margin:0;background:var(--bg);color:var(--text);font:13px/1.5 'Plex Mono',monospace;background-image:linear-gradient(#d8e0ff08 1px,transparent 1px),linear-gradient(90deg,#d8e0ff08 1px,transparent 1px);background-size:32px 32px}
+.wrap{max-width:1450px;margin:0 auto;padding:0 50px 60px}
+.top{display:flex;align-items:center;gap:18px;min-height:74px;border-bottom:1px solid var(--line)}
+.brand{display:flex;align-items:center;gap:12px;font-size:21px;letter-spacing:-1px;color:inherit;text-decoration:none}
+.brand svg{width:23px;height:23px;color:var(--accent);fill:none;stroke:currentColor;stroke-width:1.5}
+.brand small{font-size:9px;letter-spacing:1px;color:var(--muted);margin-left:14px}
+.spacer{flex:1}
+.eyebrow{font-size:9px;letter-spacing:1.6px;color:var(--accent);text-transform:uppercase}
+.intro{display:flex;justify-content:space-between;align-items:flex-end;gap:30px;margin:26px 0 26px}
+.intro h1{font:500 42px/1.12 'DM Sans',sans-serif;letter-spacing:-1.5px;margin:8px 0 6px}
+.intro p{margin:0;font-size:11px;color:var(--muted);max-width:640px}
+.controls{display:flex;gap:18px;align-items:center;font-size:10px;color:var(--muted)}
+.seg-plain{display:inline-flex;border:1px solid var(--line)}
+.seg-plain button{font:inherit;color:inherit;background:none;border:0;padding:7px 11px;cursor:pointer}
+.seg-plain button.on{background:var(--text);color:var(--bg)}
+.grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(430px,1fr));border-top:1px solid var(--line);border-left:1px solid var(--line)}
+.card{border-right:1px solid var(--line);border-bottom:1px solid var(--line);padding:18px 20px 24px;display:flex;flex-direction:column;gap:10px;min-height:196px}
+.card header{display:flex;align-items:baseline;gap:12px}
+.card .n{font-size:9px;color:var(--accent)}
+.card h3{margin:0;font:500 19px 'DM Sans',sans-serif;letter-spacing:-.4px}
+.card .use{margin-left:auto;font-size:8.5px;letter-spacing:1px;color:var(--faint);text-transform:uppercase}
+.card p{margin:0;font-size:10px;color:var(--muted);line-height:1.7}
+.card p b{font-weight:400;color:var(--text)}
+.row{display:flex;gap:10px;align-items:center;flex-wrap:wrap;margin-top:auto;padding-top:12px}
+.foot{display:flex;justify-content:space-between;font-size:9.5px;color:var(--muted);margin-top:22px}
+kbd{display:inline-block;font:9px/1 'Plex Mono',monospace;padding:3px 4px;min-width:16px;text-align:center;border:1px solid color-mix(in srgb,currentColor 45%,transparent);color:inherit;transition:transform var(--d),box-shadow var(--d),border-color var(--d)}
+svg.ar{width:15px;height:15px;fill:none;stroke:currentColor;stroke-width:1.5;stroke-linecap:round;stroke-linejoin:round;flex-shrink:0}
+
+/* ---------- base button, three Blueprint flavours ---------- */
+.b{--fill:var(--text);--ink:var(--bg);position:relative;isolation:isolate;display:inline-flex;align-items:center;gap:12px;min-height:40px;padding:0 16px;font:11px 'Plex Mono',monospace;color:var(--text);background:transparent;border:1px solid var(--line);cursor:pointer;overflow:hidden;user-select:none;-webkit-tap-highlight-color:transparent;
+  transition:color var(--d),background-color var(--d),border-color var(--d),transform var(--d) var(--ease),box-shadow var(--d) var(--ease),letter-spacing var(--d2) var(--ease)}
+.b.primary{--fill:#f7f9ff;background:var(--accent);color:var(--bg);border-color:var(--accent);min-height:44px;gap:22px;padding:0 16px}
+.b.hud{min-height:34px;padding:0 10px;border-color:transparent;gap:8px;font-size:10.5px}
+.b:focus-visible{outline:2px solid var(--accent);outline-offset:4px}
+.b > *{position:relative;z-index:1}
+
+/* 01 chalk sweep */
+.v-sweep::before{content:'';position:absolute;inset:0;background:var(--fill);transform:scaleX(0);transform-origin:right;transition:transform var(--d2) var(--ease);z-index:0}
+.v-sweep:hover::before{transform:scaleX(1);transform-origin:left}
+.v-sweep:hover{color:var(--ink);border-color:var(--fill)}
+.v-sweep:active,.v-sweep.is-active{transform:scale(.96)}
+
+/* 02 corner brackets (the lock reticle) */
+.v-brackets{overflow:visible}
+.v-brackets::after{--c:var(--ok);content:'';position:absolute;inset:-9px;opacity:0;pointer-events:none;transition:inset var(--d2) var(--spring),opacity var(--d);
+  background:linear-gradient(var(--c),var(--c)) 0 0/10px 1.5px,linear-gradient(var(--c),var(--c)) 0 0/1.5px 10px,linear-gradient(var(--c),var(--c)) 100% 0/10px 1.5px,linear-gradient(var(--c),var(--c)) 100% 0/1.5px 10px,
+             linear-gradient(var(--c),var(--c)) 0 100%/10px 1.5px,linear-gradient(var(--c),var(--c)) 0 100%/1.5px 10px,linear-gradient(var(--c),var(--c)) 100% 100%/10px 1.5px,linear-gradient(var(--c),var(--c)) 100% 100%/1.5px 10px;background-repeat:no-repeat}
+.v-brackets:hover::after{inset:-5px;opacity:1}
+.v-brackets:active::after,.v-brackets.is-active::after{inset:1px;transition-duration:calc(90ms * var(--slow))}
+.v-brackets:active,.v-brackets.is-active{color:var(--ok);border-color:var(--ok)}
+.v-brackets.primary:active,.v-brackets.primary.is-active{color:var(--bg)}
+
+/* 03 drafted underline */
+.v-draft::after{content:'';position:absolute;left:16px;right:16px;bottom:8px;height:1px;background:currentColor;transform:scaleX(0);transform-origin:left;transition:transform var(--d2) var(--ease)}
+.v-draft.hud::after{left:10px;right:10px;bottom:6px}
+.v-draft:hover::after{transform:scaleX(1)}
+.v-draft:hover{letter-spacing:.6px}
+.v-draft:active,.v-draft.is-active{animation:flash calc(260ms * var(--slow))}
+@keyframes flash{0%{background-color:#ffffff40}100%{}}
+
+/* 04 signal pulse */
+.v-pulse{overflow:visible}
+.v-pulse:hover{border-color:var(--accent);box-shadow:0 0 0 3px #f0e76a26}
+.v-pulse.primary:hover{box-shadow:0 0 0 4px #f0e76a40}
+.v-pulse::after{content:'';position:absolute;inset:-1px;border:1.5px solid var(--accent);opacity:0;pointer-events:none}
+.v-pulse.fire::after{animation:pulse calc(560ms * var(--slow)) ease-out}
+@keyframes pulse{0%{opacity:1;inset:-1px}100%{opacity:0;inset:-16px}}
+
+/* 05 ripple from the cursor */
+.v-ripple:hover{background-color:#ffffff12}
+.v-ripple.primary:hover{background-color:#f6ee8c}
+.v-ripple .rp{position:absolute;z-index:0;width:10px;height:10px;margin:-5px;border-radius:50%;background:currentColor;opacity:.35;pointer-events:none;animation:ripple calc(620ms * var(--slow)) ease-out forwards}
+@keyframes ripple{to{transform:scale(40);opacity:0}}
+
+/* 06 drafting offset shadow */
+.v-offset{overflow:visible}
+.v-offset:hover{transform:translate(-3px,-3px);box-shadow:3px 3px 0 var(--accent)}
+.v-offset.primary:hover{box-shadow:3px 3px 0 var(--text)}
+.v-offset.hud:hover{border-color:var(--line)}
+.v-offset:active,.v-offset.is-active{transform:translate(0,0);box-shadow:0 0 0 var(--accent);transition-duration:calc(70ms * var(--slow))}
+
+/* 07 scanline */
+.v-scan::before{content:'';position:absolute;top:0;bottom:0;width:45%;left:-60%;background:linear-gradient(90deg,transparent,#ffffff55,transparent);transform:skewX(-20deg);z-index:0}
+.v-scan.primary::before{background:linear-gradient(90deg,transparent,#ffffffb0,transparent)}
+.v-scan:hover::before{left:130%;transition:left calc(650ms * var(--slow)) var(--ease)}
+.v-scan:hover{border-color:var(--text)}
+.v-scan:active,.v-scan.is-active{filter:brightness(1.25);transform:scale(.97)}
+
+/* 08 marching dashes */
+.v-dash{border-color:transparent;--dc:var(--line);background-image:linear-gradient(90deg,var(--dc) 50%,transparent 0),linear-gradient(90deg,var(--dc) 50%,transparent 0),linear-gradient(var(--dc) 50%,transparent 0),linear-gradient(var(--dc) 50%,transparent 0);
+  background-size:8px 1px,8px 1px,1px 8px,1px 8px;background-position:0 0,0 100%,0 0,100% 0;background-repeat:repeat-x,repeat-x,repeat-y,repeat-y}
+.v-dash.primary{--dc:#1538a480;background-color:var(--accent)}
+.v-dash:hover{--dc:var(--text);animation:march calc(600ms * var(--slow)) linear infinite}
+.v-dash.primary:hover{--dc:var(--bg)}
+.v-dash:active,.v-dash.is-active{background-size:1px 1px,1px 1px,1px 1px,1px 1px;background-color:#ffffff14}
+.v-dash.primary:active,.v-dash.primary.is-active{background-color:#f6ee8c}
+@keyframes march{to{background-position:8px 0,-8px 100%,0 -8px,100% 8px}}
+
+/* 09 arrow nudge */
+.v-arrow svg.ar{transition:transform var(--d2) var(--spring)}
+.v-arrow:hover svg.ar{transform:translateX(5px)}
+.v-arrow:hover{border-color:var(--text)}
+.v-arrow.shoot svg.ar{animation:shoot calc(420ms * var(--slow)) var(--ease)}
+@keyframes shoot{0%{transform:translateX(5px)}45%{transform:translateX(34px);opacity:0}46%{transform:translateX(-24px);opacity:0}100%{transform:translateX(0);opacity:1}}
+
+/* 10 physical key */
+.v-key kbd{box-shadow:0 2px 0 color-mix(in srgb,currentColor 45%,transparent)}
+.v-key:hover kbd{transform:translateY(-2px);box-shadow:0 4px 0 color-mix(in srgb,currentColor 45%,transparent);border-color:currentColor}
+.v-key:hover{border-color:var(--text)}
+.v-key:active kbd,.v-key.is-active kbd{transform:translateY(2px);box-shadow:0 0 0 transparent;transition-duration:calc(50ms * var(--slow))}
+.v-key:active,.v-key.is-active{transform:translateY(1px)}
+
+/* 11 split from centre */
+.v-split::before{content:'';position:absolute;inset:0;background:var(--fill);transform:scaleX(0);transition:transform var(--d2) var(--ease);z-index:0}
+.v-split:hover::before{transform:scaleX(1)}
+.v-split:hover{color:var(--ink);border-color:var(--fill)}
+.v-split:active::before,.v-split.is-active::before{transform:scaleX(1) scaleY(.82)}
+
+/* 12 orbiting light */
+.v-orbit::after{content:'';position:absolute;inset:-1px;padding:1.5px;background:conic-gradient(from var(--a),transparent 0 72%,#f0e76a00 72%,var(--accent) 96%,transparent 100%);
+  -webkit-mask:linear-gradient(#000 0 0) content-box,linear-gradient(#000 0 0);-webkit-mask-composite:xor;mask-composite:exclude;opacity:0;transition:opacity var(--d);pointer-events:none}
+.v-orbit.primary::after{background:conic-gradient(from var(--a),transparent 0 72%,var(--text) 96%,transparent 100%)}
+.v-orbit:hover::after{opacity:1;animation:orbit calc(1400ms * var(--slow)) linear infinite}
+.v-orbit:active::after,.v-orbit.is-active::after{background:var(--accent);opacity:1}
+.v-orbit.primary:active::after,.v-orbit.primary.is-active::after{background:var(--text)}
+@keyframes orbit{to{--a:360deg}}
+
+/* 13 crosshair lock */
+.v-cross{overflow:visible}
+.v-cross::before,.v-cross::after{content:'';position:absolute;pointer-events:none;opacity:0;transition:transform var(--d2) var(--ease),opacity var(--d)}
+.v-cross::before{top:50%;left:-16px;right:-16px;height:1px;background:linear-gradient(90deg,var(--ok) 0 10px,transparent 10px calc(100% - 10px),var(--ok) 0);transform:scaleX(.7)}
+.v-cross::after{left:50%;top:-12px;bottom:-12px;width:1px;background:linear-gradient(var(--ok) 0 7px,transparent 7px calc(100% - 7px),var(--ok) 0);transform:scaleY(.6)}
+.v-cross:hover::before{opacity:1;transform:scaleX(1)}
+.v-cross:hover::after{opacity:1;transform:scaleY(1)}
+.v-cross.locked{border-color:var(--ok);color:var(--ok)}
+.v-cross.primary.locked{color:var(--bg);box-shadow:0 0 0 2px var(--ok)}
+.v-cross.locked::before{animation:lockh calc(300ms * var(--slow)) var(--ease)}
+@keyframes lockh{0%{transform:scaleX(1.6)}100%{transform:scaleX(1)}}
+
+/* 14 scramble type */
+.v-type:hover{border-color:var(--accent)}
+.v-type.primary:hover{box-shadow:inset 0 0 0 1px var(--bg)}
+.v-type .lbl{display:inline-block;min-width:var(--w)}
+.v-type:active,.v-type.is-active{transform:scale(.97)}
+
+/* 15 magnetic */
+.v-magnet{transition:transform calc(420ms * var(--slow)) var(--spring),border-color var(--d),background-color var(--d)}
+.v-magnet .lbl,.v-magnet kbd,.v-magnet svg{transition:transform calc(420ms * var(--slow)) var(--spring)}
+.v-magnet:hover{border-color:var(--text)}
+.v-magnet:active,.v-magnet.is-active{scale:.95}
+
+/* 16 ink bleed from cursor */
+.v-ink::before{content:'';position:absolute;inset:0;background:var(--fill);clip-path:circle(0 at var(--x,50%) var(--y,50%));transition:clip-path var(--d2) var(--ease);z-index:0}
+.v-ink:hover::before{clip-path:circle(150% at var(--x,50%) var(--y,50%))}
+.v-ink:hover{color:var(--ink);border-color:var(--fill);transition-delay:calc(60ms * var(--slow))}
+.v-ink:active,.v-ink.is-active{transform:scale(.96)}
+
+/* 17 lift and drop */
+.v-lift{overflow:visible}
+.v-lift:hover{transform:translateY(-3px);box-shadow:0 10px 24px -8px #020a2acc,0 0 0 1px #f0f4ff30}
+.v-lift.primary:hover{box-shadow:0 12px 30px -8px #f0e76a80}
+.v-lift.drop{animation:drop calc(380ms * var(--slow)) var(--spring)}
+@keyframes drop{0%{transform:translateY(-3px)}40%{transform:translateY(2px) scale(.97)}100%{transform:translateY(-3px)}}
+
+/* 18 toggle */
+.tg{display:inline-flex;align-items:center;gap:10px;font:10.5px 'Plex Mono',monospace;color:var(--text);background:none;border:1px solid transparent;padding:6px 8px;cursor:pointer;transition:border-color var(--d)}
+.tg:hover{border-color:var(--soft)}
+.tg i{position:relative;width:30px;height:14px;border:1px solid var(--line);transition:background-color var(--d2),border-color var(--d2)}
+.tg i:after{content:'';position:absolute;top:2px;left:2px;width:8px;height:8px;background:var(--muted);transition:left calc(420ms * var(--slow)) var(--spring),width calc(160ms * var(--slow)),background-color var(--d2)}
+.tg:hover i:after{width:11px}
+.tg:active i:after{width:14px}
+.tg.on i{background:var(--accent);border-color:var(--accent)}
+.tg.on i:after{left:18px;background:var(--bg)}
+.tg.on:hover i:after{left:15px}
+.tg.on:active i:after{left:12px}
+
+/* 19 segmented with gliding indicator */
+.sg{position:relative;display:inline-flex;border:1px solid var(--line)}
+.sg .ind{position:absolute;top:0;bottom:0;background:var(--text);transition:left calc(460ms * var(--slow)) var(--spring),width calc(460ms * var(--slow)) var(--spring);z-index:0}
+.sg button{position:relative;z-index:1;font:11px 'Plex Mono',monospace;color:var(--text);background:none;border:0;padding:10px 15px;cursor:pointer;display:flex;gap:9px;align-items:center;transition:color var(--d2)}
+.sg button.on{color:var(--bg)}
+.sg button:not(.on):hover{background:#ffffff10}
+.sg button:active{transform:scale(.96)}
+
+/* 20 hold to confirm */
+.v-hold{--p:0;border-color:#ff9c7a90;color:#ffd4c4}
+.v-hold::before{content:'';position:absolute;inset:0;background:#ff9c7a;transform:scaleX(var(--p));transform-origin:left;z-index:0}
+.v-hold:hover{border-color:var(--warn);color:#fff}
+.v-hold.holding::before{transition:transform calc(900ms * var(--slow)) linear;transform:scaleX(1)}
+.v-hold:not(.holding)::before{transition:transform calc(300ms * var(--slow)) var(--ease)}
+.v-hold.holding{color:var(--bg)}
+.v-hold.done{animation:done calc(500ms * var(--slow)) var(--ease)}
+.v-hold.done::before{transform:scaleX(1);background:var(--ok)}
+@keyframes done{0%{transform:scale(1)}30%{transform:scale(1.05)}100%{transform:scale(1)}}
+
+.reduced *{animation:none!important;transition:none!important}
+@media(prefers-reduced-motion:reduce){*{animation:none!important;transition-duration:1ms!important}}
+</style></head>
+<body><div class="wrap">
+  <div class="top"><a class="brand" href="suite.html"><svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="4"/><ellipse cx="12" cy="12" rx="10" ry="4" transform="rotate(-35 12 12)"/></svg>stargaze.<small>/ BUTTON MOTION</small></a><span class="spacer"></span><a href="suite.html" class="b v-arrow" style="text-decoration:none">Back to every screen <svg class="ar" viewBox="0 0 24 24"><path d="M4 12h15M13 6l6 6-6 6"/></svg></a></div>
+  <div class="intro"><div><div class="eyebrow">Celestial Blueprint / motion study</div><h1>Twenty ways to press a button.</h1><p>Each card shows one hover and one press animation, on the three button types in the game: the yellow primary action, the outline button, and the bottom-bar button. Keys shown on the buttons play their press animation too.</p></div>
+    <div class="controls"><span>Speed</span><div class="seg-plain" id="speed"><button data-s="1" class="on">1×</button><button data-s="3">⅓×</button><button data-s="10">⅒×</button></div><button class="tg" id="rm"><i></i>Reduced motion</button></div></div>
+  <div class="grid" id="grid"></div>
+  <div class="foot"><span>■ Pure CSS, except ripple, magnetic, scramble, crosshair and hold, which need a few lines of JS</span><span>Keys on buttons trigger their press animation</span></div>
+</div>
+<script>
+const AR = '<svg class="ar" viewBox="0 0 24 24"><path d="M4 12h15M13 6l6 6-6 6"/></svg>';
+const V = [
+  ['sweep', 'Chalk sweep', 'Menus', 'Chalk fills in from the left and leaves to the right', 'the button presses into the paper'],
+  ['brackets', 'Lock brackets', 'Selection', 'Lock-reticle corners close in from outside', 'the brackets snap tight and turn green'],
+  ['draft', 'Drafted underline', 'Links, quiet', 'A pen line is drawn under the label; letters widen', 'a quick chalk flash'],
+  ['pulse', 'Signal pulse', 'Primary', 'A yellow border and a soft halo', 'a ring radiates outward, like a radar ping'],
+  ['ripple', 'Ripple', 'Any', 'The background brightens', 'a ripple spreads from the exact click point'],
+  ['offset', 'Drafting shadow', 'Primary', 'The button lifts off the paper with a hard offset shadow', 'it drops flat onto the page'],
+  ['scan', 'Scanline', 'Observation', 'A light band sweeps across, like a telescope scan', 'a brief brightening'],
+  ['dash', 'Marching dashes', 'Theory editor', 'The dashed orbit border starts to march', 'the dashes close into a solid line'],
+  ['arrow', 'Arrow nudge', 'Enter / Start', 'The arrow slides forward on a spring', 'the arrow shoots off and returns from the left'],
+  ['key', 'Physical key', 'HUD', 'The key label rises like a real keycap', 'the keycap presses down'],
+  ['split', 'Centre split', 'Dialogs', 'The fill opens from the centre outward', 'the fill squeezes vertically'],
+  ['orbit', 'Orbiting light', 'Primary', 'A light orbits around the border', 'the whole border lights up'],
+  ['cross', 'Crosshair', 'Targets', 'Reticle lines reach out on both axes', 'the button locks: it turns green and stays locked'],
+  ['type', 'Scramble', 'Title screen', 'The label re-types itself through random glyphs', 'a small press'],
+  ['magnet', 'Magnetic', 'Title screen', 'The button leans toward the cursor; the label leans further', 'a spring press'],
+  ['ink', 'Ink bleed', 'Menus', 'Ink spreads from wherever the cursor enters', 'a small press'],
+  ['lift', 'Lift and drop', 'Cards', 'The button floats up with a soft shadow', 'it bounces down and back up'],
+];
+const flavours = v => [
+  `<button class="b primary v-${v}">${v === 'type' ? '<span class="lbl">Continue</span>' : '<span class="lbl">Observe</span>'} ${v === 'arrow' || v === 'magnet' || v === 'sweep' || v === 'ink' || v === 'offset' ? AR : '<kbd>Enter</kbd>'}</button>`,
+  `<button class="b v-${v}"><span class="lbl">${v === 'cross' ? 'Aureole' : 'Resume'}</span> ${v === 'arrow' ? AR : `<kbd>${v === 'cross' ? 'F1' : 'Esc'}</kbd>`}</button>`,
+  `<button class="b hud v-${v}"><span class="lbl">${v === 'cross' ? 'Lock' : 'Labels'}</span> <kbd>${v === 'cross' ? 'U' : 'L'}</kbd></button>`,
+].join('');
+const card = (i, name, use, hover, click, body) => `<article class="card"><header><span class="n">${String(i).padStart(2, '0')}</span><h3>${name}</h3><span class="use">${use}</span></header><p><b>Hover:</b> ${hover}<br><b>Press:</b> ${click}</p><div class="row">${body}</div></article>`;
+let html = V.map(([v, name, use, h, c], i) => card(i + 1, name, use, h, c, flavours(v))).join('');
+html += card(18, 'Spring toggle', 'HUD', 'The thumb leans toward the other side', 'it slides across with a spring overshoot',
+  `<button class="tg on"><i></i>Auto <kbd>A</kbd></button><button class="tg"><i></i>Labels <kbd>L</kbd></button><button class="tg"><i></i>Stars held <kbd>S</kbd></button>`);
+html += card(19, 'Gliding segment', 'Mode switch', 'Options that are not selected get a faint wash', 'the indicator glides across with a spring',
+  `<div class="sg"><span class="ind"></span><button class="on">Explore</button><button>Field studies <kbd>P</kbd></button></div><div class="sg"><span class="ind"></span><button class="on">Horizon</button><button>Stars</button></div>`);
+html += card(20, 'Hold to confirm', 'Destructive', 'The warning colour sharpens', 'hold for 0.9 s to fill it; releasing early drains it back',
+  `<button class="b v-hold"><span class="lbl">Clear all</span> <kbd>X</kbd></button><button class="b v-hold"><span class="lbl">Discard theory</span> <kbd>D</kbd></button>`);
+document.getElementById('grid').innerHTML = html;
+
+/* one-shot animations: restart the class every time */
+const replay = (el, cls) => { el.classList.remove(cls); void el.offsetWidth; el.classList.add(cls); };
+function press(b, e) {
+  if (b.classList.contains('v-pulse')) replay(b, 'fire');
+  if (b.classList.contains('v-arrow')) replay(b, 'shoot');
+  if (b.classList.contains('v-lift')) replay(b, 'drop');
+  if (b.classList.contains('v-cross')) { b.closest('.row').querySelectorAll('.v-cross').forEach(x => x !== b && x.classList.remove('locked')); b.classList.toggle('locked'); }
+  if (b.classList.contains('v-ripple')) {
+    const r = b.getBoundingClientRect(), s = document.createElement('span');
+    s.className = 'rp'; s.style.left = (e?.clientX ?? r.left + r.width / 2) - r.left + 'px'; s.style.top = (e?.clientY ?? r.top + r.height / 2) - r.top + 'px';
+    b.appendChild(s); s.addEventListener('animationend', () => s.remove());
+  }
+  if (b.classList.contains('tg')) b.classList.toggle('on');
+}
+document.addEventListener('click', e => { const b = e.target.closest('.b,.tg'); if (b && !b.classList.contains('v-hold')) press(b, e); });
+
+/* keyboard: every key on a button plays its press */
+const keyName = k => ({ ' ': 'Spc', Escape: 'Esc', Enter: 'Enter' }[k] || k.toUpperCase());
+document.addEventListener('keydown', e => {
+  if (e.repeat) return;
+  const name = keyName(e.key);
+  const hits = [...document.querySelectorAll('.b,.tg,.sg button')].filter(b => [...b.querySelectorAll('kbd')].some(k => k.textContent === name));
+  if (!hits.length) return;
+  e.preventDefault();
+  hits.forEach(b => {
+    if (b.classList.contains('v-hold')) { holdStart(b); return; }
+    if (b.closest('.sg')) { b.click(); return; }
+    b.classList.add('is-active'); press(b);
+    setTimeout(() => b.classList.remove('is-active'), 140 * slow());
+  });
+});
+document.addEventListener('keyup', e => { const name = keyName(e.key); document.querySelectorAll('.v-hold').forEach(b => { if (b.querySelector('kbd').textContent === name) holdEnd(b); }); });
+
+/* scramble */
+const GLYPHS = '01<>/\\[]{}+=*#%∆◇◆';
+document.querySelectorAll('.v-type').forEach(b => {
+  const lbl = b.querySelector('.lbl'), text = lbl.textContent; lbl.style.setProperty('--w', text.length + 'ch'); let timer;
+  b.addEventListener('mouseenter', () => {
+    let f = 0; clearInterval(timer);
+    timer = setInterval(() => {
+      lbl.textContent = [...text].map((c, i) => c === ' ' || i < f / 2 ? c : GLYPHS[Math.random() * GLYPHS.length | 0]).join('');
+      if (++f > text.length * 2) { clearInterval(timer); lbl.textContent = text; }
+    }, 28 * slow());
+  });
+});
+
+/* magnetic */
+document.querySelectorAll('.v-magnet').forEach(b => {
+  b.addEventListener('mousemove', e => {
+    const r = b.getBoundingClientRect(), dx = (e.clientX - r.left - r.width / 2) / r.width, dy = (e.clientY - r.top - r.height / 2) / r.height;
+    b.style.transform = `translate(${dx * 10}px,${dy * 8}px)`;
+    b.querySelectorAll('.lbl,kbd,svg').forEach(x => x.style.transform = `translate(${dx * 6}px,${dy * 4}px)`);
+  });
+  b.addEventListener('mouseleave', () => { b.style.transform = ''; b.querySelectorAll('.lbl,kbd,svg').forEach(x => x.style.transform = ''); });
+});
+
+/* ink origin */
+document.querySelectorAll('.v-ink').forEach(b => b.addEventListener('mouseenter', e => { const r = b.getBoundingClientRect(); b.style.setProperty('--x', e.clientX - r.left + 'px'); b.style.setProperty('--y', e.clientY - r.top + 'px'); }));
+document.querySelectorAll('.v-ink').forEach(b => b.addEventListener('mouseleave', e => { const r = b.getBoundingClientRect(); b.style.setProperty('--x', e.clientX - r.left + 'px'); b.style.setProperty('--y', e.clientY - r.top + 'px'); }));
+
+/* gliding segment */
+function placeInd(sg) { const on = sg.querySelector('button.on'), ind = sg.querySelector('.ind'); ind.style.left = on.offsetLeft + 'px'; ind.style.width = on.offsetWidth + 'px'; }
+document.querySelectorAll('.sg').forEach(sg => {
+  sg.querySelectorAll('button').forEach(btn => btn.addEventListener('click', () => { sg.querySelectorAll('button').forEach(x => x.classList.toggle('on', x === btn)); placeInd(sg); }));
+  placeInd(sg);
+});
+document.fonts.ready.then(() => document.querySelectorAll('.sg').forEach(placeInd));
+
+/* hold to confirm */
+function holdStart(b) {
+  b.classList.remove('done'); b.classList.add('holding');
+  b._t = setTimeout(() => { b.classList.remove('holding'); replay(b, 'done'); const l = b.querySelector('.lbl'), t = l.textContent; l.textContent = 'Cleared'; setTimeout(() => { b.classList.remove('done'); l.textContent = t; }, 1100 * slow()); }, 900 * slow());
+}
+function holdEnd(b) { clearTimeout(b._t); b.classList.remove('holding'); }
+document.querySelectorAll('.v-hold').forEach(b => { b.addEventListener('pointerdown', () => holdStart(b)); ['pointerup', 'pointerleave'].forEach(ev => b.addEventListener(ev, () => holdEnd(b))); });
+
+/* speed + reduced motion */
+const slow = () => +getComputedStyle(document.documentElement).getPropertyValue('--slow');
+document.getElementById('speed').addEventListener('click', e => { const b = e.target.closest('button'); if (!b) return; document.documentElement.style.setProperty('--slow', b.dataset.s); document.querySelectorAll('#speed button').forEach(x => x.classList.toggle('on', x === b)); });
+document.getElementById('rm').addEventListener('click', () => document.body.classList.toggle('reduced'));
+</script></body></html>
