@@ -1,0 +1,195 @@
+{
+  "adapter": {
+    "backend": "Vulkan",
+    "device": 29824,
+    "device_type": "DiscreteGpu",
+    "driver": "radv",
+    "driver_info": "Mesa 26.2.2-arch1.1",
+    "name": "AMD Radeon RX 7600 XT (RADV NAVI33)",
+    "vendor": 4098
+  },
+  "cases": [
+    {
+      "frame_fingerprints": [
+        "18a030beee455a93",
+        "7955b73dae1aef5c",
+        "5110bb0754fc0a26",
+        "45e20e539877cf57"
+      ],
+      "images": [
+        {
+          "exposure": 1.0,
+          "name": "earth-daylight-spp1",
+          "spp": 1
+        },
+        {
+          "exposure": 1.0,
+          "name": "earth-daylight-spp2",
+          "spp": 2
+        },
+        {
+          "exposure": 1.0,
+          "name": "earth-daylight-moving-2",
+          "spp": 1
+        },
+        {
+          "exposure": 1.0,
+          "name": "earth-daylight-moving-3",
+          "spp": 1
+        }
+      ],
+      "initial_time_days": 0.599,
+      "modes": [
+        {
+          "mode": "paused",
+          "repeats": [
+            [
+              {
+                "gpu_ms": 131.17124,
+                "spp": 1,
+                "wall_ms": 133.299991
+              },
+              {
+                "gpu_ms": 128.88996,
+                "spp": 2,
+                "wall_ms": 131.45858099999998
+              },
+              {
+                "gpu_ms": 127.53048,
+                "spp": 3,
+                "wall_ms": 129.212941
+              },
+              {
+                "gpu_ms": 127.23228,
+                "spp": 4,
+                "wall_ms": 129.113442
+              }
+            ]
+          ]
+        },
+        {
+          "mode": "advancing",
+          "repeats": [
+            [
+              {
+                "gpu_ms": 124.28388,
+                "spp": 1,
+                "wall_ms": 126.003539
+              },
+              {
+                "gpu_ms": 123.51952,
+                "spp": 1,
+                "wall_ms": 125.99888100000001
+              },
+              {
+                "gpu_ms": 123.14288,
+                "spp": 1,
+                "wall_ms": 124.800807
+              },
+              {
+                "gpu_ms": 122.74308,
+                "spp": 1,
+                "wall_ms": 124.654843
+              }
+            ]
+          ]
+        }
+      ],
+      "name": "earth-daylight"
+    },
+    {
+      "frame_fingerprints": [
+        "bdaa9a945c07ceef",
+        "8cfb5b005bd2da6b",
+        "0735f6a3e67e142e",
+        "95fe9a3de626ae77"
+      ],
+      "images": [
+        {
+          "exposure": 8.0,
+          "name": "vantus-eclipse-spp1",
+          "spp": 1
+        },
+        {
+          "exposure": 8.0,
+          "name": "vantus-eclipse-spp2",
+          "spp": 2
+        },
+        {
+          "exposure": 8.0,
+          "name": "vantus-eclipse-moving-2",
+          "spp": 1
+        },
+        {
+          "exposure": 8.0,
+          "name": "vantus-eclipse-moving-3",
+          "spp": 1
+        }
+      ],
+      "initial_time_days": 444.478,
+      "modes": [
+        {
+          "mode": "paused",
+          "repeats": [
+            [
+              {
+                "gpu_ms": 38.56832,
+                "spp": 1,
+                "wall_ms": 39.520401
+              },
+              {
+                "gpu_ms": 38.66204,
+                "spp": 2,
+                "wall_ms": 38.926369
+              },
+              {
+                "gpu_ms": 37.50856,
+                "spp": 3,
+                "wall_ms": 38.797506000000006
+              },
+              {
+                "gpu_ms": 37.22032,
+                "spp": 4,
+                "wall_ms": 37.541735
+              }
+            ]
+          ]
+        },
+        {
+          "mode": "advancing",
+          "repeats": [
+            [
+              {
+                "gpu_ms": 36.40512,
+                "spp": 1,
+                "wall_ms": 36.623259
+              },
+              {
+                "gpu_ms": 36.2808,
+                "spp": 1,
+                "wall_ms": 36.56516
+              },
+              {
+                "gpu_ms": 36.03424,
+                "spp": 1,
+                "wall_ms": 36.186144000000006
+              },
+              {
+                "gpu_ms": 35.87624,
+                "spp": 1,
+                "wall_ms": 36.020721
+              }
+            ]
+          ]
+        }
+      ],
+      "name": "vantus-eclipse"
+    }
+  ],
+  "suite_version": 1,
+  "timestamp_period_ns": 10.0,
+  "trace_size": [
+    960,
+    540
+  ]
+}

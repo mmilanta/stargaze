@@ -1,0 +1,170 @@
+[
+  {
+    "baseline": "occlusion-probe",
+    "candidate": "compact-stack-probe",
+    "image": "earth-daylight-spp1",
+    "hdr_rgba_identical": true,
+    "display_rgba_identical": true
+  },
+  {
+    "baseline": "occlusion-probe",
+    "candidate": "compact-stack-probe",
+    "image": "earth-daylight-spp2",
+    "hdr_rgba_identical": true,
+    "display_rgba_identical": true
+  },
+  {
+    "baseline": "occlusion-probe",
+    "candidate": "compact-stack-probe",
+    "image": "earth-daylight-moving-2",
+    "hdr_rgba_identical": true,
+    "display_rgba_identical": true
+  },
+  {
+    "baseline": "occlusion-probe",
+    "candidate": "compact-stack-probe",
+    "image": "earth-daylight-moving-3",
+    "hdr_rgba_identical": true,
+    "display_rgba_identical": true
+  },
+  {
+    "baseline": "occlusion-probe",
+    "candidate": "compact-stack-probe",
+    "image": "vantus-eclipse-spp1",
+    "hdr_rgba_identical": true,
+    "display_rgba_identical": true
+  },
+  {
+    "baseline": "occlusion-probe",
+    "candidate": "compact-stack-probe",
+    "image": "vantus-eclipse-spp2",
+    "hdr_rgba_identical": true,
+    "display_rgba_identical": true
+  },
+  {
+    "baseline": "occlusion-probe",
+    "candidate": "compact-stack-probe",
+    "image": "vantus-eclipse-moving-2",
+    "hdr_rgba_identical": true,
+    "display_rgba_identical": true
+  },
+  {
+    "baseline": "occlusion-probe",
+    "candidate": "compact-stack-probe",
+    "image": "vantus-eclipse-moving-3",
+    "hdr_rgba_identical": true,
+    "display_rgba_identical": true
+  },
+  {
+    "baseline": "compact-stack-probe",
+    "candidate": "geometry-cache-probe",
+    "image": "earth-daylight-spp1",
+    "hdr_rgba_identical": true,
+    "display_rgba_identical": true
+  },
+  {
+    "baseline": "compact-stack-probe",
+    "candidate": "geometry-cache-probe",
+    "image": "earth-daylight-spp2",
+    "hdr_rgba_identical": true,
+    "display_rgba_identical": true
+  },
+  {
+    "baseline": "compact-stack-probe",
+    "candidate": "geometry-cache-probe",
+    "image": "earth-daylight-moving-2",
+    "hdr_rgba_identical": true,
+    "display_rgba_identical": true
+  },
+  {
+    "baseline": "compact-stack-probe",
+    "candidate": "geometry-cache-probe",
+    "image": "earth-daylight-moving-3",
+    "hdr_rgba_identical": true,
+    "display_rgba_identical": true
+  },
+  {
+    "baseline": "compact-stack-probe",
+    "candidate": "geometry-cache-probe",
+    "image": "vantus-eclipse-spp1",
+    "hdr_rgba_identical": true,
+    "display_rgba_identical": true
+  },
+  {
+    "baseline": "compact-stack-probe",
+    "candidate": "geometry-cache-probe",
+    "image": "vantus-eclipse-spp2",
+    "hdr_rgba_identical": true,
+    "display_rgba_identical": true
+  },
+  {
+    "baseline": "compact-stack-probe",
+    "candidate": "geometry-cache-probe",
+    "image": "vantus-eclipse-moving-2",
+    "hdr_rgba_identical": true,
+    "display_rgba_identical": true
+  },
+  {
+    "baseline": "compact-stack-probe",
+    "candidate": "geometry-cache-probe",
+    "image": "vantus-eclipse-moving-3",
+    "hdr_rgba_identical": true,
+    "display_rgba_identical": true
+  },
+  {
+    "baseline": "geometry-cache-probe",
+    "candidate": "compact-lights-probe",
+    "image": "earth-daylight-spp1",
+    "hdr_rgba_identical": true,
+    "display_rgba_identical": true
+  },
+  {
+    "baseline": "geometry-cache-probe",
+    "candidate": "compact-lights-probe",
+    "image": "earth-daylight-spp2",
+    "hdr_rgba_identical": true,
+    "display_rgba_identical": true
+  },
+  {
+    "baseline": "geometry-cache-probe",
+    "candidate": "compact-lights-probe",
+    "image": "earth-daylight-moving-2",
+    "hdr_rgba_identical": true,
+    "display_rgba_identical": true
+  },
+  {
+    "baseline": "geometry-cache-probe",
+    "candidate": "compact-lights-probe",
+    "image": "earth-daylight-moving-3",
+    "hdr_rgba_identical": true,
+    "display_rgba_identical": true
+  },
+  {
+    "baseline": "geometry-cache-probe",
+    "candidate": "compact-lights-probe",
+    "image": "vantus-eclipse-spp1",
+    "hdr_rgba_identical": true,
+    "display_rgba_identical": true
+  },
+  {
+    "baseline": "geometry-cache-probe",
+    "candidate": "compact-lights-probe",
+    "image": "vantus-eclipse-spp2",
+    "hdr_rgba_identical": true,
+    "display_rgba_identical": true
+  },
+  {
+    "baseline": "geometry-cache-probe",
+    "candidate": "compact-lights-probe",
+    "image": "vantus-eclipse-moving-2",
+    "hdr_rgba_identical": true,
+    "display_rgba_identical": true
+  },
+  {
+    "baseline": "geometry-cache-probe",
+    "candidate": "compact-lights-probe",
+    "image": "vantus-eclipse-moving-3",
+    "hdr_rgba_identical": true,
+    "display_rgba_identical": true
+  }
+]

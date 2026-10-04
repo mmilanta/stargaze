@@ -1,0 +1,73 @@
+   Compiling stargaze v0.1.0 (/home/marco/Documents/stargaze)
+    Finished `release` profile [optimized] target(s) in 6.17s
+     Running unittests src/main.rs (target/release/deps/stargaze-732dd0581c760ed0)
+
+running 35 tests
+test pathtracer::tests::gpu_atmosphere ... ok
+test pathtracer::tests::gpu_dense_level_daylight ... ok
+test pathtracer::tests::gpu_display_extreme_exposure ... ok
+test pathtracer::tests::gpu_display_upscales_hdr_with_correct_orientation_and_edges ... ok
+test pathtracer::tests::gpu_distant_surface ... ok
+test pathtracer::tests::gpu_night_ground_has_no_catalogue_fireflies ... FAILED
+test pathtracer::tests::gpu_quality_limits_rest_resume_and_preserve_valid_samples ... ok
+test pathtracer::tests::gpu_reflected_atmosphere ... ok
+test pathtracer::tests::gpu_scene_smoke ... ok
+test pathtracer::tests::gpu_solar_planets ... FAILED
+test pathtracer::tests::gpu_star_dots ... ok
+test pathtracer::tests::gpu_surface_observer ... ok
+test pathtracer::tests::gpu_transport ... ok
+test pathtracer::tests::ground::gpu_distant_hills_and_rocks_occlude_the_sky ... ok
+test pathtracer::tests::ground::gpu_forest_skylight_is_occluded_and_has_no_unlit_glow ... ok
+test pathtracer::tests::ground::gpu_ground_preview ... ok
+test pathtracer::tests::ground::gpu_ground_refines_again_after_scene_and_quality_changes ... ok
+test pathtracer::tests::ground::gpu_ground_sky_visibility ... ok
+test pathtracer::tests::ground::gpu_heightfield_matches_exhaustive_triangles ... FAILED
+test pathtracer::tests::ground::gpu_local_ground_shadows ... ok
+test pathtracer::tests::ground::gpu_rocky_lookout_preview ... ok
+test pathtracer::tests::ground::gpu_shadow_queries_match_closest_hits ... ok
+test pathtracer::tests::ground::gpu_terrain_bounds_preserve_images_and_night_stays_dark ... ok
+test pathtracer::tests::rings::gpu_auto_exposure_after_convergence ... ok
+test pathtracer::tests::rings::gpu_auto_exposure_meters_saturn ... ok
+test pathtracer::tests::rings::gpu_auto_exposure_small_viewport ... ok
+test pathtracer::tests::rings::gpu_halo_observatory_shows_calyx_rings ... ok
+test pathtracer::tests::rings::gpu_rings_conserve_energy ... ok
+test pathtracer::tests::rings::gpu_rings_geometry ... ok
+test pathtracer::tests::rings::gpu_rings_null_crossings_preserve_mis ... ok
+test pathtracer::tests::rings::gpu_rings_transport ... ok
+test pathtracer::tests::rings::gpu_saturn_scene ... ok
+test pathtracer::tests::sky::gpu_milky_way_exposure_cap_and_preview ... ok
+test pathtracer::tests::sky::gpu_milky_way_fades_before_stars_in_bright_air ... ok
+test pathtracer::tests::sky::gpu_milky_way_is_camera_only_and_does_not_drive_exposure ... ok
+
+failures:
+
+---- pathtracer::tests::gpu_night_ground_has_no_catalogue_fireflies stdout ----
+testing on AdapterInfo { name: "AMD Radeon RX 7600 XT (RADV NAVI33)", vendor: 4098, device: 29824, device_type: DiscreteGpu, device_pci_bus_id: "0000:03:00.0", driver: "radv", driver_info: "Mesa 26.2.2-arch1.1", backend: Vulkan, subgroup_min_size: 32, subgroup_max_size: 64, transient_saves_memory: Some(false), limit_bucket: None }
+night ground with 6000 background stars: max 0.00000000012892441, mean 0.000000000009184586, bright pixels 0
+
+thread 'pathtracer::tests::gpu_night_ground_has_no_catalogue_fireflies' (423376) panicked at src/pathtracer_tests.rs:1304:9:
+background light must not leak into ground paths
+note: run with `RUST_BACKTRACE=1` environment variable to display a backtrace
+
+---- pathtracer::tests::gpu_solar_planets stdout ----
+testing on AdapterInfo { name: "AMD Radeon RX 7600 XT (RADV NAVI33)", vendor: 4098, device: 29824, device_type: DiscreteGpu, device_pci_bus_id: "0000:03:00.0", driver: "radv", driver_info: "Mesa 26.2.2-arch1.1", backend: Vulkan, subgroup_min_size: 32, subgroup_max_size: 64, transient_saves_memory: Some(false), limit_bucket: None }
+Mars: 1992 lit pixels
+
+thread 'pathtracer::tests::gpu_solar_planets' (423432) panicked at src/pathtracer_tests.rs:707:9:
+Mercury has an incorrect lit silhouette
+
+---- pathtracer::tests::ground::gpu_heightfield_matches_exhaustive_triangles stdout ----
+testing on AdapterInfo { name: "AMD Radeon RX 7600 XT (RADV NAVI33)", vendor: 4098, device: 29824, device_type: DiscreteGpu, device_pci_bus_id: "0000:03:00.0", driver: "radv", driver_info: "Mesa 26.2.2-arch1.1", backend: Vulkan, subgroup_min_size: 32, subgroup_max_size: 64, transient_saves_memory: Some(false), limit_bucket: None }
+
+thread 'pathtracer::tests::ground::gpu_heightfield_matches_exhaustive_triangles' (423550) panicked at src/ground_tests.rs:677:17:
+radius=5000, ray=7: GPU 1000000015047466200000000000000, exhaustive 18.525682249155086
+
+
+failures:
+    pathtracer::tests::gpu_night_ground_has_no_catalogue_fireflies
+    pathtracer::tests::gpu_solar_planets
+    pathtracer::tests::ground::gpu_heightfield_matches_exhaustive_triangles
+
+test result: FAILED. 32 passed; 3 failed; 0 ignored; 0 measured; 114 filtered out; finished in 23.29s
+
+error: test failed, to rerun pass `--bin stargaze`

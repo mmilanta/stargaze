@@ -1,0 +1,17 @@
+{
+  "width": 1280,
+  "height": 720,
+  "scale": 75,
+  "bounces": 4,
+  "vegetation": 70,
+  "warmup": 4,
+  "frames": 4,
+  "repeats": 1,
+  "image_samples": 2,
+  "output": "/home/marco/Documents/stargaze/target/benchmarks/compact-stack-probe",
+  "adapter": "",
+  "cases": [
+    "earth-daylight",
+    "vantus-eclipse"
+  ]
+}

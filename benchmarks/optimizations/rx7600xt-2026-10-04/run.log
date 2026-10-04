@@ -1,0 +1,24 @@
+    Finished `release` profile [optimized] target(s) in 0.05s
+     Running unittests src/main.rs (target/release/deps/stargaze-732dd0581c760ed0)
+
+running 1 test
+test pathtracer::benchmark::render_benchmark ... Available adapters: [AdapterInfo { name: "AMD Radeon RX 7600 XT (RADV NAVI33)", vendor: 4098, device: 29824, device_type: DiscreteGpu, device_pci_bus_id: "0000:03:00.0", driver: "radv", driver_info: "Mesa 26.2.2-arch1.1", backend: Vulkan, subgroup_min_size: 32, subgroup_max_size: 64, transient_saves_memory: Some(false), limit_bucket: None }, AdapterInfo { name: "AMD Ryzen 7 9800X3D 8-Core Processor (RADV RAPHAEL_MENDOCINO)", vendor: 4098, device: 5056, device_type: IntegratedGpu, device_pci_bus_id: "0000:12:00.0", driver: "radv", driver_info: "Mesa 26.2.2-arch1.1", backend: Vulkan, subgroup_min_size: 32, subgroup_max_size: 64, transient_saves_memory: Some(false), limit_bucket: None }]
+Benchmark GPU: AdapterInfo { name: "AMD Radeon RX 7600 XT (RADV NAVI33)", vendor: 4098, device: 29824, device_type: DiscreteGpu, device_pci_bus_id: "0000:03:00.0", driver: "radv", driver_info: "Mesa 26.2.2-arch1.1", backend: Vulkan, subgroup_min_size: 32, subgroup_max_size: 64, transient_saves_memory: Some(false), limit_bucket: None }
+halo-rings           paused   : 34.773 ms GPU median
+halo-rings           advancing: 34.221 ms GPU median
+earth-daylight       paused   : 120.506 ms GPU median
+earth-daylight       advancing: 120.816 ms GPU median
+earth-twilight       paused   : 41.258 ms GPU median
+earth-twilight       advancing: 40.560 ms GPU median
+median-dense         paused   : 74.694 ms GPU median
+median-dense         advancing: 74.475 ms GPU median
+vantus-eclipse       paused   : 32.434 ms GPU median
+vantus-eclipse       advancing: 31.491 ms GPU median
+vantus-airless       paused   : 2.684 ms GPU median
+vantus-airless       advancing: 2.550 ms GPU median
+dual-eclipse         paused   : 1.669 ms GPU median
+dual-eclipse         advancing: 0.961 ms GPU median
+ok
+
+test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 148 filtered out; finished in 55.76s
+

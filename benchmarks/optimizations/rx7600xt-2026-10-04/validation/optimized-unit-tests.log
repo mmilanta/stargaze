@@ -1,0 +1,156 @@
+    Finished `release` profile [optimized] target(s) in 0.05s
+     Running unittests src/main.rs (target/release/deps/stargaze-732dd0581c760ed0)
+
+running 149 tests
+test app_tests::clicking_a_body_picks_it_and_tracking_keeps_it_centered ... ok
+test app_tests::background_lock_keeps_clicked_world_direction_across_time_and_rotation ... ok
+test app_tests::an_observed_level_is_saved_before_the_first_theory_edit_and_discard_stays_discarded ... ok
+test app_tests::failed_keep_on_quit_preserves_the_editor_and_allows_retry ... ok
+test app_tests::gpu_blueprint_4k_text ... ignored, requires a GPU; writes native 4K text previews
+test app_tests::gpu_blueprint_screens ... ignored, requires a GPU; writes PNG previews when STARGAZE_UI_PREVIEWS is set
+test app_tests::far_right_hide_remains_clickable_after_resizing_and_restores_the_hud ... ok
+test app_tests::halo_faces_calyx_without_tracking_and_clears_its_rings ... ok
+test app_tests::blueprint_navigation_search_settings_and_spoiler_free_levels ... ok
+test app_tests::lock_descriptions_hide_names_when_labels_are_off ... ok
+test app_tests::failed_day_step_preserves_time_and_reports_no_cycle ... ok
+test app_tests::levels_restore_theory_scores_observation_and_keep_discard_choices ... ok
+test app_tests::only_a_visible_observation_redraws_continuously ... ok
+test app_tests::opaque_screens_build_without_a_world_and_menu_covers_diagram ... ok
+test app_tests::picking_tiny_bodies_is_stable_and_respects_occlusion ... ok
+test app_tests::playback_after_a_sleeping_still_view_does_not_jump_in_time ... ok
+test app_tests::profile_frame_preparation ... ignored, CPU benchmark: run with --release --ignored --nocapture
+test app_tests::reset_uses_the_scenes_default_target_and_releases_tracking ... ok
+test app_tests::reverse_playback_retraces_orbits_keeps_target_centered_and_stops_at_zero ... ok
+test app_tests::saturn_observatory_stays_at_twenty_degrees_north ... ok
+test app_tests::sky_click_unlocks_immediately_but_jitter_does_not_pan ... ok
+test app_tests::speed_controls_cross_into_reverse_and_respect_bounds ... ok
+test app_tests::binary_observatory_starts_on_calyx_looking_at_halo ... ok
+test app_tests::labels_stay_aligned_with_traced_geometry_at_deep_zoom ... ok
+test app_tests::atmosphere_host_uses_gpu_index_after_invisible_anchors_are_removed ... ok
+test app_tests::steady_stars_hold_background_roll_and_leave_the_lock_unchanged ... ok
+test app_tests::steady_stars_follow_planet_without_roll_or_changing_position_or_zoom ... ok
+test app_tests::observatory_settings_preserve_view_time_and_apply_or_discard_the_draft ... ok
+test app_tests::vesper_starts_and_resets_to_open_sky ... ok
+test app_tests::tracking_at_zenith_has_a_finite_camera_basis ... ok
+test app_tests::observation_resumes_after_idle_menus_with_the_same_camera_and_time ... ok
+test app_tests::transit_search_finds_a_visible_moon_in_front_of_its_planet ... ok
+test config::tests::bundled_scenes_and_unordered_bodies_load ... ok
+test config::tests::tidal_rotation_aligns_with_arbitrary_orbit_and_epoch ... ok
+test config::tests::bundled_levels_have_atmospheres_and_airless_configs_still_load ... ok
+test game::tests::clear_confirmation_blocks_edits_and_supports_cancel_undo_and_redo ... ok
+test game::tests::controls_fit_small_and_hidpi_windows ... ok
+test game::tests::deleting_branch_remaps_viewer_and_compacts_orbit_ranks ... ok
+test game::tests::dragging_changes_orbit_order_viewer_score_and_undoes_as_one_edit ... ok
+test game::tests::inspector_is_interactive_and_never_creates_hidden_objects ... ok
+test config::tests::rejects_bad_structure_and_references ... ok
+test game::tests::notebook_interaction_creates_marks_scores_and_undoes_without_sky_clicks ... ok
+test game::tests::orbit_labels_are_local_to_parent_and_update_after_drag ... ok
+test game::tests::outermost_of_three_moons_is_distinct_from_inner_and_middle ... ok
+test game::tests::placement_and_buttons_agree_with_visible_distance_at_any_window_shape ... ok
+test game::tests::right_click_add_uses_selected_parent_and_delete_redo_restores_branch_edit ... ok
+test game::tests::root_need_not_be_first_and_anchor_is_part_of_topology ... ok
+test game::tests::scene_order_comes_from_orbital_size_not_file_order ... ok
+test game::tests::scoring_penalizes_missing_extra_and_wrong_parent_links ... ok
+test game::tests::star_and_ring_traits_are_scored_at_the_ordered_location ... ok
+test game::tests::swapping_planets_with_different_satellite_families_loses_credit ... ok
+test game::tests::toolbar_navigation_matches_observation_and_clicks_use_the_new_slots ... ok
+test config::tests::validates_optional_camera_direction ... ok
+test graphics::tests::frame_cap_includes_input_but_ui_and_finished_views_can_rest ... ok
+test graphics::tests::motion_convergence_and_quality_controls_have_independent_drafts ... ok
+test config::tests::rejects_unsafe_numeric_values ... ok
+test graphics::tests::settings_draft_keyboard_and_scroll_keep_committed_values ... ok
+test graphics::tests::vegetation_slider_keyboard_and_cancel_preserve_the_applied_scene ... ok
+test graphics::tests::settings_round_trip_clamp_and_handle_partial_files ... ok
+test ground::tests::bounds_enclose_descendants_and_landscape_stays_within_buffer_capacity ... ok
+test app_tests::time_controls_and_menus_preserve_lock_but_lock_button_releases_it ... ok
+test menu::tests::discovers_yaml_names_and_keeps_invalid_files_selectable ... ok
+test ground::tests::density_keeps_tree_positions_and_the_observing_gap ... ok
+test menu::tests::menu_controls_fit_small_and_hidpi_windows ... ok
+test menu::tests::puzzle_menu_titles_hide_config_names_and_filenames ... ok
+test motion::tests::pressed_key_release_and_screen_change_do_not_carry ... ok
+test pathtracer::benchmark::render_benchmark ... ignored, hardware benchmark; use python3 scripts/benchmark.py run OUTPUT
+test pathtracer::tests::gpu_atmosphere ... ignored, requires a GPU; run cargo test gpu_atmosphere -- --ignored --nocapture
+test pathtracer::tests::gpu_dense_level_daylight ... ignored, requires a GPU
+test pathtracer::tests::gpu_display_extreme_exposure ... ignored, requires a GPU
+test pathtracer::tests::gpu_display_upscales_hdr_with_correct_orientation_and_edges ... ignored, requires a GPU
+test pathtracer::tests::gpu_distant_surface ... ignored, requires a GPU; run cargo test gpu_distant_surface -- --ignored --nocapture
+test pathtracer::tests::gpu_night_ground_has_no_catalogue_fireflies ... ignored, requires a GPU
+test pathtracer::tests::gpu_quality_limits_rest_resume_and_preserve_valid_samples ... ignored, requires a GPU
+test pathtracer::tests::gpu_reflected_atmosphere ... ignored, requires a GPU
+test pathtracer::tests::gpu_scene_smoke ... ignored, requires a GPU; run cargo test gpu_scene_smoke -- --ignored --nocapture
+test pathtracer::tests::gpu_solar_planets ... ignored, requires a GPU; run cargo test gpu_solar_planets -- --ignored --nocapture
+test pathtracer::tests::gpu_star_dots ... ignored, requires a GPU; run cargo test gpu_star_dots -- --ignored --nocapture
+test pathtracer::tests::gpu_surface_observer ... ignored, requires a GPU; run cargo test gpu_surface_observer -- --ignored --nocapture
+test pathtracer::tests::gpu_transport ... ignored, requires a GPU; run cargo test gpu_transport -- --ignored --nocapture
+test pathtracer::tests::ground::gpu_distant_hills_and_rocks_occlude_the_sky ... ignored, requires a GPU; distant terrain and convex rock intersections
+test pathtracer::tests::ground::gpu_forest_skylight_is_occluded_and_has_no_unlit_glow ... ignored, requires a GPU; atmospheric surface lighting, occlusion and cache invalidation
+test pathtracer::tests::ground::gpu_ground_preview ... ignored, requires a GPU
+test pathtracer::tests::ground::gpu_ground_refines_again_after_scene_and_quality_changes ... ignored, requires a GPU
+test pathtracer::tests::ground::gpu_ground_sky_visibility ... ignored, requires a GPU
+test pathtracer::tests::ground::gpu_heightfield_matches_exhaustive_triangles ... ignored, requires a GPU; exact heightfield traversal versus brute-force triangles
+test pathtracer::tests::ground::gpu_local_ground_shadows ... ignored, requires a GPU
+test pathtracer::tests::ground::gpu_rocky_lookout_preview ... ignored, requires a GPU; landscape preview and timing
+test pathtracer::tests::ground::gpu_shadow_queries_match_closest_hits ... ignored, requires a GPU; any-hit shadows and compact light list versus full scans
+test pathtracer::tests::ground::gpu_terrain_bounds_preserve_images_and_night_stays_dark ... ignored, requires a GPU; compares acceleration against all visible geometry
+test pathtracer::tests::ground::ground_view_and_geometry_follow_the_surface_frame ... ok
+test pathtracer::tests::ground::local_geometry_changes_reset_accumulation ... ok
+test pathtracer::tests::history_resets_for_scene_changes_but_not_overlay_changes ... ok
+test pathtracer::tests::rings::gpu_auto_exposure_after_convergence ... ignored, requires a GPU
+test pathtracer::tests::rings::gpu_auto_exposure_meters_saturn ... ignored, requires a GPU
+test pathtracer::tests::rings::gpu_auto_exposure_small_viewport ... ignored, requires a GPU
+test pathtracer::tests::rings::gpu_halo_observatory_shows_calyx_rings ... ignored, requires a GPU
+test pathtracer::tests::rings::gpu_rings_conserve_energy ... ignored, requires a GPU
+test pathtracer::tests::rings::gpu_rings_geometry ... ignored, requires a GPU
+test pathtracer::tests::rings::gpu_rings_null_crossings_preserve_mis ... ignored, requires a GPU
+test pathtracer::tests::rings::gpu_rings_transport ... ignored, requires a GPU
+test pathtracer::tests::rings::gpu_saturn_scene ... ignored, requires a GPU
+test pathtracer::tests::rings::saturn_rings_follow_equator_and_invalidate_history ... ok
+test pathtracer::tests::sky::backdrop_changes_invalidate_history ... ok
+test pathtracer::tests::sky::gpu_milky_way_exposure_cap_and_preview ... ignored, requires a GPU
+test pathtracer::tests::sky::gpu_milky_way_fades_before_stars_in_bright_air ... ignored, requires a GPU
+test pathtracer::tests::sky::gpu_milky_way_is_camera_only_and_does_not_drive_exposure ... ignored, requires a GPU
+test menu::tests::mouse_hover_and_keyboard_use_the_same_filtered_selection ... ok
+test game::tests::map_menu_preserves_current_puzzle_until_another_map_loads ... ok
+test performance_tests::gpu_cropped_meter_matches_full_frame_histogram ... ignored, requires a GPU; compares the optimized histogram with the original shader
+test performance_tests::profile_exposure_meter ... ignored, benchmark: use --release --ignored --nocapture --test-threads=1
+test progress::tests::invalid_orientation_is_quarantined_without_erasing_other_levels ... ok
+test performance_tests::central_meter_dimensions_match_every_pixel_of_the_original_region ... ok
+test render_work::tests::batches_obey_the_cap_and_shrink_immediately_after_a_slow_frame ... ok
+test render_work::tests::gpu_level_entry_starts_small_and_refines_without_losing_samples ... ignored, requires a GPU; exercises the reported 35-sample level-entry setting
+test render_work::tests::gpu_submission_gate_completes_without_blocking_polls ... ignored, requires a GPU; checks actual queue completion callbacks
+test render_work::tests::large_requested_batches_start_small_and_slow_work_stays_small ... ok
+test render_work::tests::unfinished_work_defers_submission_without_waiting_and_ui_does_not_grow_batches ... ok
+test sim::tests::binary_scene_is_well_formed ... ok
+test progress::tests::round_trip_levels_favorites_and_invalid_save_preservation ... ok
+test sim::tests::earthlike_atmosphere_uses_consistent_units ... ok
+test app_tests::startup_options_enter_the_observatory_and_game_restores_the_saved_level ... ok
+test pathtracer::benchmark::benchmark_fixtures_are_deterministic_and_cover_requested_workloads ... ok
+test sim::tests::earth_and_mars_have_distinct_periods ... ok
+test game::tests::wide_diagram_fits_after_resize_without_changing_orbit_order ... ok
+test sim::tests::local_day_includes_orbital_motion_and_retrograde_rotation ... ok
+test sim::tests::mars_closes_its_orbit_only_after_its_own_period ... ok
+test sim::tests::moons_remain_outside_their_parents ... ok
+test sim::tests::solar_system_has_real_scales_and_all_observable_planets ... ok
+test sim::tests::local_day_returns_root_longitude_on_tilted_eccentric_worlds_and_moons ... ok
+test sim::tests::spin_keeps_latitude_fixed_and_respects_axial_tilt ... ok
+test pathtracer::tests::validate_shaders_and_buffer_layouts ... ok
+test stars::ray_tests::grid_contains_disc_samples_including_seam_and_poles ... ok
+test terrain::tests::erosion_moves_material_downhill_and_conserves_volume ... ok
+test typeface::tests::cached_glyphs_skip_uploads_and_resizing_invalidates_old_sizes ... ok
+test typeface::tests::gpu_physical_font_coverage_matches_raster ... ignored, requires a GPU; checks native glyph coverage and atlas reuploads
+test typeface::tests::physical_sizes_have_native_coverage_and_preserve_metrics ... ok
+test ui::tests::atlas_contains_coverage_and_a_white_geometry_texel ... ok
+test ui::tests::controls_are_disjoint_and_hit_testable ... ok
+test ui::tests::exposure_slider_maps_clamps_and_fits_after_time_buttons ... ok
+test ui::tests::right_edge_hide_and_binding_geometry_stay_inside_their_buttons ... ok
+test terrain::tests::generated_surface_is_finite_continuous_and_bounds_enclose_every_vertex ... ok
+test ui::tests::single_row_controls_and_minute_clock_fit_at_small_and_hidpi_sizes ... ok
+test sim::tests::local_day_handles_long_cycles_and_rejects_synchronous_libration ... ok
+test app_tests::blueprint_text_fits_4k_at_fractional_dpi_and_maximum_hud_scale ... ok
+test sim::tests::find_phobos_events ... ok
+test app_tests::eclipse_search_finds_something ... ok
+test sky::tests::galactic_haze_wraps_and_has_dust_contrast_without_pole_glow ... ok
+test sim::tests::find_eclipse_times ... ok
+
+test result: ok. 105 passed; 0 failed; 44 ignored; 0 measured; 0 filtered out; finished in 0.60s
+

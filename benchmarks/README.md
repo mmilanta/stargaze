@@ -10,6 +10,10 @@ GPU timestamp measurements, raw timings, provenance, and reference PNGs. Open it
 [index.html](baselines/rx7600xt-2026-10-04/index.html) locally to browse the images.
 GitHub displays individual PNGs but does not execute the HTML gallery.
 
+The [first optimization report](optimizations/rx7600xt-2026-10-04/README.md)
+compares the faster renderer against that baseline, with repeated timings,
+image differences, incremental experiments, memory costs and GPU test results.
+
 ## Run
 
 Requires Rust/Cargo, Python 3 (standard library only), and a Vulkan hardware GPU

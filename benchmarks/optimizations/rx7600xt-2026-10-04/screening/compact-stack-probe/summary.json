@@ -1,0 +1,46 @@
+[
+  {
+    "case": "earth-daylight",
+    "mode": "paused",
+    "gpu_median_ms": 134.48692,
+    "gpu_p95_ms": 136.929904,
+    "wall_median_ms": 136.577695,
+    "repeat_medians_ms": [
+      134.48692
+    ],
+    "count": 4
+  },
+  {
+    "case": "earth-daylight",
+    "mode": "advancing",
+    "gpu_median_ms": 126.61404,
+    "gpu_p95_ms": 127.123116,
+    "wall_median_ms": 128.331245,
+    "repeat_medians_ms": [
+      126.61404
+    ],
+    "count": 4
+  },
+  {
+    "case": "vantus-eclipse",
+    "mode": "paused",
+    "gpu_median_ms": 39.17782,
+    "gpu_p95_ms": 39.395804,
+    "wall_median_ms": 39.664846,
+    "repeat_medians_ms": [
+      39.17782
+    ],
+    "count": 4
+  },
+  {
+    "case": "vantus-eclipse",
+    "mode": "advancing",
+    "gpu_median_ms": 36.42998,
+    "gpu_p95_ms": 36.758664,
+    "wall_median_ms": 36.650127499999996,
+    "repeat_medians_ms": [
+      36.42998
+    ],
+    "count": 4
+  }
+]
