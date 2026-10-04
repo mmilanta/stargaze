@@ -1,9 +1,12 @@
-//! Opt-in, offscreen benchmark of the unmodified production tracing/display path.
+//! Opt-in, offscreen benchmark of production rendering and explicit quality experiments.
 //! Run through scripts/benchmark.py to capture provenance and compare artifacts.
 use super::*;
 use anyhow::{Context, Result, ensure};
 use serde::{Deserialize, Serialize};
 use std::{path::Path, time::Instant};
+
+#[path = "render_experiments.rs"]
+mod experiments;
 
 const CASES: &[&str] = &[
     "halo-rings",
@@ -13,6 +16,7 @@ const CASES: &[&str] = &[
     "vantus-eclipse",
     "vantus-airless",
     "dual-eclipse",
+    "moonlit-air",
 ];
 const FORMAT: wgpu::TextureFormat = wgpu::TextureFormat::Rgba8UnormSrgb;
 
@@ -31,9 +35,19 @@ struct Config {
     image_samples: u32,
     adapter: String,
     cases: Vec<String>,
+    #[serde(default = "reference_variant")]
+    variant: String,
 }
+fn reference_variant() -> String {
+    "reference".into()
+}
+
 impl Config {
     fn validate(&self) -> Result<()> {
+        ensure!(
+            experiments::VARIANTS.contains(&self.variant.as_str()),
+            "unknown shader variant"
+        );
         ensure!(
             (16..=3840).contains(&self.width) && (16..=2160).contains(&self.height),
             "invalid dimensions"
@@ -123,6 +137,47 @@ fn fixture(name: &str, step: u32, cfg: &Config) -> Frame {
                 sphere([3.0, 2.0, -1.0], 0.45, [12.0, 18.0, 25.0], 1.0),
                 sphere([-1.5 + step as f32 * 0.003, 1.0, -1.5], 0.3, [0.3; 3], 0.0),
                 sphere([1.5 - step as f32 * 0.003, 1.0, -1.5], 0.25, [0.3; 3], 0.0),
+            ],
+            ground: vec![],
+            scene_time: dt,
+            labels: vec![],
+        };
+    }
+    if name == "moonlit-air" {
+        // Synthetic moonlit-air stress view based on gpu_reflected_atmosphere:
+        // the sun is below the host horizon but illuminates the large moon.
+        let mut g = Globals::zeroed();
+        g.cam_right = [1.0, 0.0, 0.0, 0.0];
+        g.cam_up = [0.0, 1.0, 0.0, 0.0];
+        g.cam_forward = [0.0, 0.0, -1.0, (27.5_f32.to_radians()).tan()];
+        g.viewport = [cfg.width as f32, cfg.height as f32, 1.0, 0.0];
+        let air = crate::sim::Atmosphere::earthlike();
+        let radius = (6371.0 / crate::sim::AU_KM) as f32;
+        let center = [0.0, 0.0, radius + (0.002 / crate::sim::AU_KM) as f32];
+        g.atmo_center = [center[0], center[1], center[2], radius];
+        g.atmo_rayleigh = [
+            air.rayleigh[0] as f32,
+            air.rayleigh[1] as f32,
+            air.rayleigh[2] as f32,
+            air.mie as f32,
+        ];
+        g.atmo_params = [
+            air.mie_g as f32,
+            air.scale_height as f32,
+            air.thickness as f32,
+            1.0,
+        ];
+        return Frame {
+            globals: g,
+            bodies: vec![
+                sphere(center, radius, [0.0; 3], 0.0),
+                sphere(
+                    [0.0004 + step as f32 * 1e-7, 0.0, -0.002],
+                    0.00015,
+                    [0.8; 3],
+                    0.0,
+                ),
+                sphere([0.3, 0.0, 1.0], 0.005, [100_000.0; 3], 1.0),
             ],
             ground: vec![],
             scene_time: dt,
@@ -432,6 +487,7 @@ fn render_benchmark() -> Result<()> {
         ..Options::default()
     };
     let mut tracer = PathTracer::new(&device, FORMAT, cfg.trace_size(), &stars, options);
+    experiments::install(&device, &mut tracer, &cfg.variant);
     let mut cases = vec![];
     for name in &cfg.cases {
         let frames: Vec<_> = (0..cfg.frames.max(cfg.warmup))
@@ -483,6 +539,7 @@ fn render_benchmark() -> Result<()> {
         // Fixed manual exposure makes image differences independent of adaptation history.
         let exposure = match name.as_str() {
             "vantus-eclipse" | "vantus-airless" => 8.0,
+            "moonlit-air" => 64.0,
             _ => 1.0,
         };
         let image_options = Options {
@@ -530,7 +587,7 @@ fn render_benchmark() -> Result<()> {
             "frame_fingerprints": frames[..cfg.frames as usize].iter().map(fingerprint).collect::<Vec<_>>(),
             "modes": modes, "images": images }));
     }
-    let result = serde_json::json!({"suite_version": 1, "adapter": {
+    let result = serde_json::json!({"suite_version": 1, "variant": cfg.variant, "adapter": {
         "name": info.name, "vendor": info.vendor, "device": info.device,
         "device_type": format!("{:?}", info.device_type), "backend": format!("{:?}", info.backend),
         "driver": info.driver, "driver_info": info.driver_info,
@@ -556,6 +613,7 @@ fn benchmark_fixtures_are_deterministic_and_cover_requested_workloads() {
         repeats: 3,
         image_samples: 32,
         adapter: String::new(),
+        variant: reference_variant(),
         cases: CASES.iter().map(|v| v.to_string()).collect(),
     };
     cfg.validate().unwrap();

@@ -21,6 +21,8 @@ import zlib
 ROOT = Path(__file__).resolve().parents[1]
 CASES = ["halo-rings", "earth-daylight", "earth-twilight", "median-dense",
          "vantus-eclipse", "vantus-airless", "dual-eclipse"]
+EXTRA_CASES = ["moonlit-air"]
+VARIANTS = ["reference", "sun6", "view12", "balanced", "fast", "planetshine-quarter", "no-planetshine"]
 COMPATIBLE = ["width", "height", "scale", "bounces", "vegetation", "warmup", "frames", "repeats", "image_samples"]
 
 
@@ -69,7 +71,7 @@ img{width:100%;background:black}figure{margin:0}figcaption{padding:8px 0}code{ov
 def report_run(output):
     data = json.loads((output / "results.json").read_text())
     request = json.loads((output / "request.json").read_text())
-    lines = ["# Renderer benchmark", "", f"GPU: **{data['adapter']['name']}** ({data['adapter']['driver_info']}).",
+    lines = ["# Renderer benchmark", "", f"Variant: **{request.get('variant', 'reference')}** (benchmark-only when not reference).", "", f"GPU: **{data['adapter']['name']}** ({data['adapter']['driver_info']}).",
              f"Display: {request['width']}×{request['height']}; trace: {data['trace_size'][0]}×{data['trace_size'][1]}; "
              f"{request['bounces']} bounces; {request['vegetation']}% vegetation; 1 spp per submission.", "",
              "GPU time includes sky-cache work when invalidated, tracing, automatic exposure, and offscreen display. "
@@ -92,6 +94,7 @@ def report_run(output):
     write_json(output / "summary.json", rows)
     (output / "summary.md").write_text("\n".join(lines) + "\n")
     body = f"<p>{html.escape(data['adapter']['name'])} · {data['trace_size']} trace pixels</p>"
+    body += f"<p>Variant: <strong>{html.escape(request.get('variant', 'reference'))}</strong></p>"
     body += '<p><a href="summary.md">Timing report</a> · <a href="results.json">Raw results</a> · <a href="manifest.json">Provenance</a></p>'
     body += "<p>Fixed-exposure images: one sample, refined, and two advancing-time checkpoints. Click to inspect full resolution.</p>"
     body += '<div class="gallery">' + "".join(gallery) + "</div>"
@@ -102,7 +105,7 @@ def report_run(output):
 def run(args):
     output = fresh_directory(args.output)
     config = {k: getattr(args, k) for k in COMPATIBLE}
-    config.update(output=str(output), adapter=args.adapter, cases=args.cases or CASES)
+    config.update(output=str(output), adapter=args.adapter, cases=args.cases or CASES, variant=args.variant)
     write_json(output / "request.json", config)
     files = sorted([*ROOT.glob("src/**/*.rs"), *ROOT.glob("src/**/*.wgsl"), *ROOT.glob("configs/*.yaml"), *ROOT.glob("scripts/*benchmark*.py"), ROOT / "Cargo.toml", ROOT / "Cargo.lock"])
     manifest = {"created_utc": datetime.datetime.now(datetime.timezone.utc).isoformat(),
@@ -137,6 +140,10 @@ def run(args):
 
 def check_compatible(base, candidate, br, cr):
     differences = [k for k in COMPATIBLE if br[k] != cr[k]]
+    # Different explicit variants are intentional, but never mislabel a run.
+    for label, data, request in [("baseline", base, br), ("candidate", candidate, cr)]:
+        if data.get("variant", "reference") != request.get("variant", "reference"):
+            differences.append(f"{label} variant metadata")
     if base["suite_version"] != candidate["suite_version"]:
         differences.append("suite_version")
     if base["adapter"] != candidate["adapter"]:
@@ -280,7 +287,7 @@ def compare(args):
     br, cr = [json.loads((d / "request.json").read_text()) for d in (base_dir, candidate_dir)]
     check_compatible(base, candidate, br, cr)
     output = fresh_directory(args.output)
-    lines = ["# Benchmark comparison", "", "Speedup is baseline / candidate GPU median; above 1 is faster. "
+    lines = ["# Benchmark comparison", "", f"Variants: **{br.get('variant', 'reference')} → {cr.get('variant', 'reference')}**.", "", "Speedup is baseline / candidate GPU median; above 1 is faster. "
              "P95 and repetition ranges help identify timing noise. Image differences are not automatically quality regressions.", "",
              "| View | Mode | Baseline ms | Candidate ms | Speedup | Candidate p95 ms |",
              "|---|---|---:|---:|---:|---:|"]
@@ -313,7 +320,7 @@ def compare(args):
     lines += ["", "| Image | Display MAE /255 | Changed pixels >1/255 | Linear RGB RMSE | log(1+RGB) RMSE |",
               "|---|---:|---:|---:|---:|"]
     lines += [f"| {im['name']} | {im['display_mae_255']:.5f} | {im['pixels_changed_over_1_255_percent']:.3f}% | {number(im['linear_rgb_rmse'])} | {number(im['log1p_rgb_rmse'])} |" for im in images]
-    write_json(output / "comparison.json", {"baseline": str(base_dir), "candidate": str(candidate_dir), "timings": timings, "images": images})
+    write_json(output / "comparison.json", {"baseline": str(base_dir), "candidate": str(candidate_dir), "baseline_variant": br.get("variant", "reference"), "candidate_variant": cr.get("variant", "reference"), "timings": timings, "images": images})
     (output / "comparison.md").write_text("\n".join(lines) + "\n")
     (output / "index.html").write_text(page('<p><a href="comparison.md">Timing and image metrics</a></p>' + "".join(gallery)))
     print("\n".join(lines))
@@ -329,7 +336,8 @@ def main():
                          ("warmup", 8), ("frames", 16), ("repeats", 3), ("image-samples", 32)]:
         p.add_argument("--"+key, type=int, default=default)
     p.add_argument("--adapter", default="", help="case-insensitive name substring; default: first discrete GPU")
-    p.add_argument("--cases", nargs="+", choices=CASES)
+    p.add_argument("--cases", nargs="+", choices=CASES + EXTRA_CASES)
+    p.add_argument("--variant", choices=VARIANTS, default="reference", help="benchmark-only approximation; production stays unchanged")
     p.set_defaults(function=run)
     p = sub.add_parser("compare", help="compare matching runs, including HDR and displayed image differences")
     p.add_argument("baseline", type=Path)
