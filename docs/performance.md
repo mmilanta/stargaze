@@ -1,5 +1,11 @@
 # Performance and image quality
 
+The [renderer benchmark suite](../benchmarks/README.md) provides reproducible
+hardware GPU timings, fixed reference images, and before/after comparison tools.
+Its October 4 Radeon measurements supersede the software-renderer measurements
+below for assessing performance on this machine. The older numbers remain here
+as historical records of their explicitly stated workloads.
+
 Open the observatory gear button or press F11. Settings apply to every map, save
 between launches, and use a draft until Apply. Lower render resolution affects
 the traced scene; menus, picking and font rasterization remain at native resolution.

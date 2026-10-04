@@ -380,6 +380,10 @@ paused view in fewer frames, increase samples per frame; each frame takes longer
 For maximum detail, choose High and raise the still-image limit. See the
 [performance measurements and tuning guide](docs/performance.md) for the tradeoffs.
 
+For repeatable GPU timings and before/after image comparisons, see the
+[renderer benchmark suite](benchmarks/README.md). It includes a Radeon RX 7600 XT
+baseline, fixed eclipse/atmosphere/terrain views, and a local comparison gallery.
+
 Choose **Apply [Enter]** to apply settings to all maps and save them to
 `$XDG_CONFIG_HOME/stargaze/graphics.yaml` (normally
 `~/.config/stargaze/graphics.yaml`). `STARGAZE_SETTINGS` overrides that file path.

@@ -3,6 +3,10 @@
 #[path = "pathtracer_tests.rs"]
 mod tests;
 
+#[cfg(test)]
+#[path = "render_benchmark.rs"]
+mod benchmark;
+
 use bytemuck::{Pod, Zeroable};
 use wgpu::util::DeviceExt;
 
