@@ -39,6 +39,7 @@ struct Settings {
     globals: Globals,
     counts: [u32; 4],
     background: [f32; 4], // brightness, map width, map height, unused
+    lights: [u32; 4],     // up to three star indices and total count (larger scenes fall back)
 }
 
 /// Display-only exposure state, shared with the shaders. `value` is eased on
@@ -172,6 +173,8 @@ impl History {
 pub struct PathTracer {
     compute: wgpu::ComputePipeline,
     sky_light: wgpu::ComputePipeline,
+    terrain_geometry: wgpu::ComputePipeline,
+    terrain_radius: Option<u32>,
     display: wgpu::RenderPipeline,
     trace_layout: wgpu::BindGroupLayout,
     display_layout: wgpu::BindGroupLayout,
@@ -373,6 +376,14 @@ impl PathTracer {
             compilation_options: Default::default(),
             cache: None,
         });
+        let terrain_geometry = device.create_compute_pipeline(&wgpu::ComputePipelineDescriptor {
+            label: Some("terrain-geometry-cache"),
+            layout: Some(&compute_layout),
+            module: &shader,
+            entry_point: Some("cache_terrain_geometry"),
+            compilation_options: Default::default(),
+            cache: None,
+        });
         let sky_light = device.create_compute_pipeline(&wgpu::ComputePipelineDescriptor {
             label: Some("surface-skylight-cache"),
             layout: Some(&compute_layout),
@@ -456,6 +467,12 @@ impl PathTracer {
         let mut landscape_data =
             vec![0.0_f32; crate::ground::CAPACITY * 12 + crate::ground::SKY_TEXELS * 4];
         landscape_data.extend_from_slice(&crate::terrain::cached().data);
+        landscape_data.resize(
+            crate::ground::CAPACITY * 12
+                + crate::ground::SKY_TEXELS * 4
+                + crate::terrain::GPU_FLOATS,
+            0.0,
+        );
         let ground = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
             label: Some("landscape-and-heightfield"),
             contents: bytemuck::cast_slice(&landscape_data),
@@ -522,6 +539,8 @@ impl PathTracer {
         Self {
             compute,
             sky_light,
+            terrain_geometry,
+            terrain_radius: None,
             display,
             trace_layout,
             display_layout,
@@ -665,8 +684,18 @@ impl PathTracer {
         globals.viewport[0] = self.dimensions.0 as f32;
         globals.viewport[1] = self.dimensions.1 as f32;
         globals.viewport[2] = self.options.exposure;
+        let mut lights = [0_u32; 4];
+        for (index, body) in frame.bodies.iter().enumerate() {
+            if body.emissive >= 0.5 {
+                if lights[3] < 3 {
+                    lights[lights[3] as usize] = index as u32;
+                }
+                lights[3] += 1;
+            }
+        }
         let settings = Settings {
             globals,
+            lights,
             counts: [
                 frame.bodies.len() as u32,
                 self.history.samples,
@@ -711,6 +740,17 @@ impl PathTracer {
             }
             if !frame.ground.is_empty() {
                 queue.write_buffer(&self.ground, 0, bytemuck::cast_slice(&frame.ground));
+            }
+            let radius = frame.globals.ground_up[3].to_bits();
+            if frame.globals.ground_counts[1] != 0 && self.terrain_radius != Some(radius) {
+                let mut pass = encoder.begin_compute_pass(&wgpu::ComputePassDescriptor {
+                    label: Some("terrain-geometry-cache"),
+                    timestamp_writes: None,
+                });
+                pass.set_pipeline(&self.terrain_geometry);
+                pass.set_bind_group(0, &self.trace_group, &[]);
+                pass.dispatch_workgroups((crate::terrain::WIDTH as u32).pow(2).div_ceil(64), 1, 1);
+                self.terrain_radius = Some(radius);
             }
             if self.history.samples == 0 {
                 let mut pass = encoder.begin_compute_pass(&wgpu::ComputePassDescriptor {

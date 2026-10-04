@@ -29,6 +29,7 @@ struct Uniforms {
     g: crate::renderer::Globals,
     counts: [u32; 4],
     background: [f32; 4],
+    lights: [u32; 4],
 }
 
 struct Meter {

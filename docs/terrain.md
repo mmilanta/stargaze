@@ -24,10 +24,14 @@ is included in every vertex and conservative intersection bound. The patch
 scales down on worlds smaller than a 200 km radius.
 
 Generation runs once per process. Heights, derivatives and a min/max quadtree
-occupy about 3.68 MiB in the existing landscape GPU buffer. The shader traverses
-bounds near to far and intersects exact triangles only in surviving leaves;
+occupy about 3.68 MiB in the landscape GPU buffer. A compute pass caches
+host-curved bounds, vertices and normals in a further 8.02 MiB; it reruns only
+when the host radius changes. Camera turns, animation and accumulation resets
+reuse that geometry. The shader traverses bounds near to far with a 256-byte
+per-ray stack and intersects exact triangles only in surviving leaves;
 it does not evaluate fractal noise or erosion for each ray. Surface normals
-interpolate cached gradients. Slopes blend soil into exposed rock; fine material
+interpolate cached vertex normals. Shadow queries stop at the first opaque
+blocker before the light and skip normal interpolation. Slopes blend soil into exposed rock; fine material
 grain fades with distance. Props sample the same triangulation for placement.
 
 The local terrain rotates with the host and stays fixed when the camera turns.

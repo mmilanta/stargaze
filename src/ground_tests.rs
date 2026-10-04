@@ -511,9 +511,21 @@ fn gpu_heightfield_matches_exhaustive_triangles() {
         compilation_options: Default::default(),
         cache: None,
     });
+    let cache_pipeline = device.create_compute_pipeline(&wgpu::ComputePipelineDescriptor {
+        label: Some("terrain oracle geometry cache"),
+        layout: None,
+        module: &shader,
+        entry_point: Some("cache_terrain_geometry"),
+        compilation_options: Default::default(),
+        cache: None,
+    });
     let terrain = crate::terrain::cached();
     let mut landscape = vec![0.0_f32; crate::ground::CAPACITY * 12 + crate::ground::SKY_TEXELS * 4];
     landscape.extend_from_slice(&terrain.data);
+    landscape.resize(
+        crate::ground::CAPACITY * 12 + crate::ground::SKY_TEXELS * 4 + crate::terrain::GPU_FLOATS,
+        0.0,
+    );
     let ground = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
         label: None,
         contents: bytemuck::cast_slice(&landscape),
@@ -582,10 +594,6 @@ fn gpu_heightfield_matches_exhaustive_triangles() {
             layout: &pipeline.get_bind_group_layout(0),
             entries: &[
                 wgpu::BindGroupEntry {
-                    binding: 0,
-                    resource: uniform.as_entire_binding(),
-                },
-                wgpu::BindGroupEntry {
                     binding: 5,
                     resource: ground.as_entire_binding(),
                 },
@@ -595,7 +603,28 @@ fn gpu_heightfield_matches_exhaustive_triangles() {
                 },
             ],
         });
+        let cache_group = device.create_bind_group(&wgpu::BindGroupDescriptor {
+            label: None,
+            layout: &cache_pipeline.get_bind_group_layout(0),
+            entries: &[
+                wgpu::BindGroupEntry {
+                    binding: 0,
+                    resource: uniform.as_entire_binding(),
+                },
+                wgpu::BindGroupEntry {
+                    binding: 5,
+                    resource: ground.as_entire_binding(),
+                },
+            ],
+        });
         let mut encoder = device.create_command_encoder(&Default::default());
+        {
+            let mut pass = encoder.begin_compute_pass(&Default::default());
+            pass.set_pipeline(&cache_pipeline);
+            pass.set_bind_group(0, &cache_group, &[]);
+            pass.dispatch_workgroups((crate::terrain::WIDTH as u32).pow(2).div_ceil(64), 1, 1);
+        }
+
         {
             let mut pass = encoder.begin_compute_pass(&Default::default());
             pass.set_pipeline(&pipeline);
@@ -799,5 +828,109 @@ fn gpu_forest_skylight_is_occluded_and_has_no_unlit_glow() {
                 .flatten()
                 .all(|v| v.is_finite() && v.abs() < 1e-12)
         );
+    }
+}
+
+#[test]
+#[ignore = "requires a GPU; any-hit shadows and compact light list versus full scans"]
+fn gpu_shadow_queries_match_closest_hits() {
+    let (device, queue) = gpu();
+    let mut tracer = PathTracer::new(
+        &device,
+        wgpu::TextureFormat::Rgba8UnormSrgb,
+        (64, 16),
+        &[],
+        test_options(),
+    );
+    let source = format!(
+        "{TRACE_SHADER}\n{}",
+        r#"
+fn reference_visibility(ray: Ray, light: u32) -> f32 {
+    let surface = closest_hit(ray);
+    if (surface.index != light) { return 0.0; }
+    var transmission = 1.0;
+    for (var i = 0u; i < settings.counts.x; i += 1u) {
+        let hit = ring_hit(ray, i);
+        if (hit.index != MISS && hit.distance < surface.distance) {
+            transmission *= ring_transmission(ray, hit);
+        }
+    }
+    return transmission;
+}
+@compute @workgroup_size(8, 8)
+fn shadow_probe(@builtin(global_invocation_id) id: vec3<u32>) {
+    let pixel = id.y * 64u + id.x;
+    var rng = pixel * 747796405u + 2891336453u;
+    let light_target = id.x % settings.counts.x;
+    var origin = vec3<f32>(0.0);
+    if (settings.g.ground_north.w != 0.0) {
+        // Include camera, local air, underground and distant paths.
+        let height = array<f32, 4>(0.0, 2000.0, -1000.0, 3.0 * settings.g.ground_up.w);
+        origin = from_ground(vec3<f32>(0.0, height[id.y % 4u], 0.0)) / METRES_PER_AU;
+    }
+    var ray = Ray(origin, vec3<f32>(0.0), MISS);
+    ray.direction = sample_light(ray, light_target, &rng).direction;
+    if ((id.y & 4u) != 0u) {
+        ray.direction = normalize(vec3<f32>(random(&rng), random(&rng), random(&rng)) - 0.5);
+    }
+    var compact = 0u;
+    for (var s = 0u; s < light_count(); s += 1u) {
+        let i = light_index(s);
+        if (bodies[i].material.w >= 0.5) { compact = compact * 31u + i + 1u; }
+    }
+    var reference = 0u;
+    for (var i = 0u; i < settings.counts.x; i += 1u) {
+        if (bodies[i].material.w >= 0.5) { reference = reference * 31u + i + 1u; }
+    }
+    accumulation[pixel] = vec4<f32>(light_visibility(ray, light_target),
+        reference_visibility(ray, light_target), f32(compact), f32(reference));
+}
+"#
+    );
+    let shader = device.create_shader_module(wgpu::ShaderModuleDescriptor {
+        label: Some("shadow equivalence"),
+        source: wgpu::ShaderSource::Wgsl(source.into()),
+    });
+    let layout = device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
+        label: None,
+        bind_group_layouts: &[Some(&tracer.trace_layout)],
+        immediate_size: 0,
+    });
+    tracer.compute = device.create_compute_pipeline(&wgpu::ComputePipelineDescriptor {
+        label: None,
+        layout: Some(&layout),
+        module: &shader,
+        entry_point: Some("shadow_probe"),
+        compilation_options: Default::default(),
+        cache: None,
+    });
+    let mut state = crate::State::with_scene(crate::sim::default_scene());
+    state.sim_time = 0.599;
+    state.ground_view();
+    let surface = state.build_frame(64, 16);
+    let mut ring_scene = frame();
+    ring_scene.bodies = vec![
+        {
+            let mut ring = body([1.8, 0.0, -5.0], 1.0, [0.0; 3], false);
+            ring.ring_plane = [0.0, 0.8, 0.6, 1.25];
+            ring.ring_params = [2.4, 0.7, 0.0, 0.0];
+            ring
+        },
+        body([0.0, 0.0, -10.0], 0.5, [1.0; 3], true),
+        body([0.0, 0.0, -10.0], 0.5, [1.0; 3], true), // equal-distance tie
+        body([0.0, 0.0, -20.0], 1.0, [0.5; 3], false),
+    ];
+    for mut scene in [surface, ring_scene] {
+        for stars in 0..=5 {
+            // Exercise zero/one/three cached sources and the >3-source fallback.
+            for (i, b) in scene.bodies.iter_mut().enumerate() {
+                b.emissive = if i < stars { 1.0 } else { 0.0 };
+            }
+            let results = sample(&device, &queue, &mut tracer, &scene, 1);
+            for (i, p) in results.iter().enumerate() {
+                assert_eq!(p[0], p[1], "shadow pixel {i}, stars {stars}: {p:?}");
+                assert_eq!(p[2], p[3], "light order pixel {i}, stars {stars}: {p:?}");
+            }
+        }
     }
 }

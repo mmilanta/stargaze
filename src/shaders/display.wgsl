@@ -16,6 +16,7 @@ struct Settings {
     g: Globals,
     counts: vec4<u32>,
     background: vec4<f32>,
+    lights: vec4<u32>, // first three emissive indices, total count; fallback for >3
 };
 // Display-only exposure state. `value` is the eased automatic exposure;
 // `viewport.z` remains the manual exposure. `bias` is user compensation in stops.

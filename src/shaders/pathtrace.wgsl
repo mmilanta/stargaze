@@ -20,6 +20,7 @@ struct Settings {
     g: Globals,
     counts: vec4<u32>, // bodies, accumulated samples, samples this dispatch, max surface vertices
     background: vec4<f32>, // Milky Way brightness, map width, map height, unused
+    lights: vec4<u32>, // first three emissive indices, total count; fallback for >3
 };
 struct Body {
     center: vec4<f32>, // xyz = high part of telescope-space centre, w = radius
@@ -184,6 +185,15 @@ fn cone_width(ray: Ray, index: u32) -> f32 {
     let r = bodies[index].center.w;
     let sin2 = clamp(r * r / dot(oc, oc), 1.0e-20, 1.0);
     return sin2 / (1.0 + sqrt(1.0 - sin2));
+}
+// Most systems have one or two suns. Avoid scanning every non-emissive body
+// inside each atmospheric integration step; larger custom systems remain supported.
+fn light_count() -> u32 {
+    return select(settings.counts.x, settings.lights.w, settings.lights.w <= 3u);
+}
+fn light_index(slot: u32) -> u32 {
+    if (settings.lights.w <= 3u) { return settings.lights[slot]; }
+    return slot;
 }
 fn sample_light(ray: Ray, index: u32, rng: ptr<function, u32>) -> LightSample {
     let axis = normalize(relative_center(ray, index));
@@ -403,7 +413,8 @@ fn reflected_radiance(ray: Ray, index: u32, rng: ptr<function, u32>) -> vec3<f32
     let albedo = surface_albedo(body, hit.normal);
     var outgoing = Ray(hit.normal * (body.center.w * (1.0 + 2.0e-6)), hit.normal, index);
     var radiance = vec3<f32>(0.0);
-    for (var s = 0u; s < settings.counts.x; s += 1u) {
+    for (var light_slot = 0u; light_slot < light_count(); light_slot += 1u) {
+        let s = light_index(light_slot);
         if (bodies[s].material.w < 0.5) {
             continue;
         }
@@ -458,7 +469,8 @@ fn atmosphere(origin: vec3<f32>, dir: vec3<f32>, limit: f32, rng: ptr<function, 
         let segment = select((vec3<f32>(1.0) - step_t) / max(beta_ext, vec3<f32>(1.0e-20)),
             vec3<f32>(column) * (vec3<f32>(1.0) - 0.5 * tau), tau < vec3<f32>(1.0e-3));
         // Every luminous body contributes; typically one or two stars.
-        for (var b = 0u; b < settings.counts.x; b += 1u) {
+        for (var light_slot = 0u; light_slot < light_count(); light_slot += 1u) {
+            let b = light_index(light_slot);
             if (bodies[b].material.w < 0.5) {
                 continue;
             }
@@ -552,7 +564,8 @@ fn trace(initial: Ray, rng: ptr<function, u32>, backdrop: ptr<function, vec3<f32
             // Uniform-sphere continuation matches the isotropic particle phase.
             let bsdf_pdf = scatter_probability / (4.0 * PI);
             let last_vertex = depth + 1u == settings.counts.w;
-            for (var i = 0u; i < settings.counts.x; i += 1u) {
+            for (var light_slot = 0u; light_slot < light_count(); light_slot += 1u) {
+                let i = light_index(light_slot);
                 if (bodies[i].material.w < 0.5 || optics.w == 0.0) {
                     continue;
                 }
@@ -639,7 +652,8 @@ fn trace(initial: Ray, rng: ptr<function, u32>, backdrop: ptr<function, vec3<f32
             outgoing = Ray(origin, normal, hit.index);
         }
         let last_vertex = depth + 1u == settings.counts.w;
-        for (var i = 0u; i < settings.counts.x; i += 1u) {
+        for (var light_slot = 0u; light_slot < light_count(); light_slot += 1u) {
+            let i = light_index(light_slot);
             if (bodies[i].material.w < 0.5) {
                 continue;
             }

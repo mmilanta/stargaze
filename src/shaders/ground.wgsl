@@ -96,8 +96,8 @@ fn rock_hit(p: vec3<f32>, d: vec3<f32>, e: vec3<f32>) -> vec4<f32> {
         vec4<f32>(normalize(near_normal), near), near > 0.001);
 }
 
-fn landscape_hit(ray: Ray) -> Hit {
-    var closest = Hit(1.0e30, MISS, vec3<f32>(0.0));
+fn landscape_query(ray: Ray, limit: f32, occlusion: bool) -> Hit {
+    var closest = Hit(limit, MISS, vec3<f32>(0.0));
     if (settings.g.ground_north.w == 0.0) { return closest; }
     let o = ground_origin(ray);
     let d = to_ground(ray.direction);
@@ -120,7 +120,8 @@ fn landscape_hit(ray: Ray) -> Hit {
             let t0 = min(c / q, q / a);
             let t1 = max(c / q, q / a);
             let distance = select(t1, t0, t0 > 0.001);
-            if (distance > 0.001) {
+            if (distance > 0.001 && distance / METRES_PER_AU < closest.distance) {
+                if (occlusion) { return Hit(distance / METRES_PER_AU, LOCAL_BASE, vec3<f32>(0.0)); }
                 let p = o + d * distance;
                 let n = normalize(vec3<f32>(p.x / radius, 1.0 + p.y / radius, p.z / radius));
                 closest = Hit(distance / METRES_PER_AU, LOCAL_BASE, from_ground(n));
@@ -129,9 +130,10 @@ fn landscape_hit(ray: Ray) -> Hit {
     }
     if (settings.g.ground_counts.y != 0u) {
         let limit = min(closest.distance, 1.0e18) * METRES_PER_AU;
-        let terrain = terrain_hit(o, d, limit);
+        let terrain = terrain_query(o, d, limit, occlusion);
         if (terrain.w < limit && terrain.w < 1.0e29) {
             closest = Hit(terrain.w / METRES_PER_AU, TERRAIN_ID, from_ground(terrain.xyz));
+            if (occlusion) { return closest; }
         }
     }
     for (var i = 0u; i < settings.g.ground_counts.x; i += 1u) {
@@ -193,6 +195,7 @@ fn landscape_hit(ray: Ray) -> Hit {
             }
         }
         if (distance > 0.001 && distance < 1.0e29 && distance / METRES_PER_AU < closest.distance) {
+            if (occlusion) { return Hit(distance / METRES_PER_AU, LOCAL_BASE + 1u + i, vec3<f32>(0.0)); }
             closest = Hit(distance / METRES_PER_AU, LOCAL_BASE + 1u + i,
                 from_ground(rotate_north(n, object.extent.w)));
         }
@@ -278,4 +281,8 @@ fn landscape_outgoing(ray: Ray, hit: Hit) -> Ray {
     p += to_ground(hit.normal) * 0.005;
     p.y -= settings.g.ground_east.w;
     return Ray(from_ground(p) / METRES_PER_AU, hit.normal, MISS);
+}
+
+fn landscape_hit(ray: Ray) -> Hit {
+    return landscape_query(ray, 1.0e30, false);
 }

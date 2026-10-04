@@ -88,10 +88,22 @@ fn ring_transmission(ray: Ray, hit: RingHit) -> f32 {
 // Shadow rays pass through every intervening ring, but never through spheres.
 // This visibility is shared by surfaces, rings and the host atmosphere.
 fn light_visibility(ray: Ray, light: u32) -> f32 {
-    let surface = closest_hit(ray);
-    if (surface.index != light) {
-        return 0.0;
+    // Establish the finite segment first, then stop at the first opaque blocker.
+    // Ring attenuation is still evaluated independently over the whole segment.
+    let surface = sphere_hit(ray, light);
+    if (surface.index == MISS) { return 0.0; }
+    // The surface host can be represented by local geometry instead of its
+    // celestial sphere. Preserve closest-hit semantics for this unusual target.
+    if (settings.g.ground_north.w == f32(light + 1u)
+        && closest_hit(ray).index != light) { return 0.0; }
+    for (var i = 0u; i < settings.counts.x; i += 1u) {
+        if (i == light || settings.g.ground_north.w == f32(i + 1u)) { continue; }
+        let hit = sphere_hit(ray, i);
+        if (hit.index != MISS && (hit.distance < surface.distance
+            || (hit.distance == surface.distance && i < light))) { return 0.0; }
     }
+    let local = landscape_query(ray, surface.distance, true);
+    if (local.index != MISS && local.distance < surface.distance) { return 0.0; }
     var transmission = 1.0;
     for (var i = 0u; i < settings.counts.x; i += 1u) {
         let hit = ring_hit(ray, i);

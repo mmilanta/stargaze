@@ -9,6 +9,8 @@ const LEAF: usize = 2;
 const LEAF_AXIS: usize = CELLS / LEAF;
 pub const NODE_COUNT: usize = (4 * LEAF_AXIS * LEAF_AXIS - 1) / 3;
 pub const BOUNDS_OFFSET: usize = WIDTH * WIDTH * 3;
+/// Source heights/derivatives/bounds, plus cached host-local bounds and vertices/normals.
+pub const GPU_FLOATS: usize = BOUNDS_OFFSET + NODE_COUNT * 2 + NODE_COUNT * 6 + WIDTH * WIDTH * 6;
 const SEED: u32 = 0x7433_37a9;
 
 pub struct Terrain {

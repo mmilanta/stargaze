@@ -22,6 +22,7 @@ struct Settings {
     g: Globals,
     counts: vec4<u32>,
     background: vec4<f32>,
+    lights: vec4<u32>, // first three emissive indices, total count; fallback for >3
 };
 struct Exposure {
     value: f32, // smoothed automatic exposure (updated on the GPU)
