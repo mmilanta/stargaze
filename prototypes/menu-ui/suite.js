@@ -376,7 +376,7 @@ function renderHud() {
   }
   const steps = SPEEDS.map((v, i) => `<i class="${i === o.speed ? 'on' : ''}" style="height:${4 + Math.abs(i - STOP) * 2.5}px"></i>`).join('');
   el.innerHTML = `<div class="hud" data-stop>
-    ${o.puzzle ? navGroup('observe') : `<div class="grp"><button class="hb" data-act="menu">${ICON.menu}Menu ${kb('M')}</button><button class="hb ${o.labels ? 'on' : ''}" data-act="labels">Labels ${kb('L')}</button></div>`}
+    ${o.puzzle ? navGroup('observe') : `<div class="grp nav"><button class="hb" data-act="menu">${ICON.menu}Menu ${kb('M')}</button><button class="hb tab ${o.labels ? 'on' : ''}" data-act="labels">Labels ${kb('L')}</button></div>`}
     <div class="grp"><span class="label">TIME</span><button class="hb icon" data-act="slower" title="Slower [←]">${ICON.left}</button>
       <div class="speed"><span id="speedtxt">${sp === 0 ? '0' : (sp > 0 ? '+' : '−') + Math.abs(sp).toLocaleString()} min/s</span><small><span class="steps-ind">${steps}</span></small></div>
       <button class="hb icon" data-act="faster" title="Faster [→]">${ICON.right}</button>
@@ -709,7 +709,7 @@ function renderTheory() {
   const root = n && n.parent == null;
   $('#thud').innerHTML = `<div class="hud">
     ${navGroup('theory')}
-    <div class="grp"><span class="label">SELECTED ${n ? (root ? 'C' : '#' + (rank(n) + 1)) : '—'}</span>${traitBtn('star', n)}${traitBtn('rings', n)}<button class="hb ${t.viewer === t.sel ? 'on' : ''}" data-act="t-viewer">Viewer here ${kb('V')}</button></div>
+    <div class="grp">${traitBtn('star', n)}${traitBtn('rings', n)}<button class="hb ${t.viewer === t.sel ? 'on' : ''}" data-act="t-viewer">Viewer here ${kb('V')}</button></div>
     <div class="grp"><button class="hb" data-act="t-undo" ${t.undo.length ? '' : 'disabled style="opacity:.35"'}>Undo ${kb('Z')}</button><button class="hb" data-act="t-redo" ${t.redo.length ? '' : 'disabled style="opacity:.35"'}>Redo ${kb('Y')}</button><button class="hb" data-act="t-del" ${root ? 'style="opacity:.35"' : ''}>Delete ${kb('Del')}</button></div>
     <div class="grp grow"><button class="hb" data-act="t-clear">Clear all ${kb('X')}</button><button class="btn primary" data-act="t-check" style="min-height:36px;gap:24px">Check theory ${kb('Enter')}</button></div></div>`;
 }

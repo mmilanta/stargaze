@@ -12,7 +12,8 @@ The Amber horizon camera sits beneath an Earth-like atmosphere on Halo.
 Halo's circular orbit and matching rotation keep Calyx fixed in the sky,
 without camera tracking. The observatory is two metres above the surface at
 35° N on the planet-facing hemisphere, with an initial 80° field of view.
-Press `1` to aim at Calyx. Run `cargo run --release` to start here.
+Press `F1` to aim at Calyx. Run `cargo run --release` for the main menu,
+or `STARGAZE_SYSTEM=halo cargo run --release` to open this observatory directly.
 
 `STARGAZE_SYSTEM=halo` or `binary` explicitly selects this view.
 `STARGAZE_SYSTEM=solar` selects Saturn at 20° N;
@@ -44,10 +45,12 @@ All scene visibility and illumination are traced in a WGSL compute shader:
   the star's decreasing solid angle, not an additional falloff multiplier.
 - **Real ground:** the observer's planet is included in intersections. The
   camera stands at the configured height above its surface (two metres by default); the horizon is not a sky mask.
-  A first landscape adds a grassy plain, a sparse tree line 100–175 metres
-  away, and a small cottage to the northeast. Boxes, rotated roof slabs and
-  ellipsoidal foliage share the same finite-star lighting, shadow rays and
-  diffuse bounces as the planets. The local frame rotates with the host;
+  The landscape has continuous eroded ridges and a meandering valley,
+  weathered rock clusters, a winding gravel approach, conifer groves, and a
+  cottage to the northeast. Terrain triangles, faceted rocks, rotated roof slabs and
+  foliage share the same finite-star lighting, shadows and diffuse bounces
+  as the planets. A bounding hierarchy skips whole scenery clusters when a
+  ray misses them. The local frame rotates with the host;
   turning the telescope leaves the scenery fixed. Metre-based intersections
   preserve observer height and a 5 mm bounce offset on the curved host sphere.
   This is an illustrative landscape on every host, including airless worlds
@@ -75,6 +78,18 @@ All scene visibility and illumination are traced in a WGSL compute shader:
   projection. The procedural catalogue is a visual backdrop and does not
   illuminate surfaces, avoiding bright random speckles on dark ground. Finite
   scene stars, planets, moons and rings retain their light transport.
+- **Milky Way backdrop:** faint procedural haze with irregular star clouds,
+  branching dust lanes, and a broad, warm central bulge that narrows into
+  cooler blue and violet outer clouds. It is aligned with the galactic star
+  band and fixed in world directions. It becomes visible only against very
+  dark skies; twilight, daylight, and reflected moonlight wash it out before
+  bright star points disappear. Atmosphere and unscattered ring transmission
+  attenuate it, and bodies and landscape occlude
+  it. It contributes no surface lighting, diffuse bounces, ring scattering,
+  or atmospheric illumination. Automatic metering excludes it, and its
+  displayed brightness stays subdued at large telescope exposures. Set
+  `STARGAZE_MILKY_WAY=0` to disable it. The seamless sky map is generated once
+  at startup and cached, with no external image assets or runtime downloads.
 - **Host atmosphere:** an exponential Rayleigh + Mie shell attenuates camera
   rays and adds single-scattered light from finite stellar discs and sunlight
   reflected by other planets and moons. Reflected haze follows each body's
@@ -113,23 +128,32 @@ At low sample counts, noise is expected, particularly in indirect lighting.
 Still views stop refining at the graphics setting's sample limit (256 spp by
 default), then sleep once automatic exposure has settled. Moving the camera,
 zooming, or advancing time starts refinement again. Continuous refinement is
-available in Graphics; its hard limit is 16,777,216 spp to avoid precision loss.
+available by choosing **Continuous** for the Still image limit; its hard limit
+is 16,777,216 spp to avoid precision loss.
 
 Only tone-mapped presentation and the HUD use ordinary rasterization. No
 hardware ray-tracing extension or RT-capable GPU is needed: a native wgpu
 compute-capable Metal, Vulkan or DX12 device is sufficient.
 
-### Ground prototype
+### Rocky lookout
 
-Left-drag to look toward the ground; `R` returns to the configured observing
+Left-drag to look toward the ground; `Home` returns to the configured observing
 view. The scenery uses real stellar lighting, so choose daylight to see it
-clearly and pause for convergence. Trees and windows are opaque diffuse
-primitives for now; there are no leaf meshes, glass transmission, terrain
-elevation, or walking controls.
-Atmospheric scattering remains camera-only, so diffuse surfaces receive
-sunlight and surface bounces rather than sky illumination.
+clearly and pause for convergence. A continuous heightfield forms connected
+ridges and valleys, using warped multifractal noise and thermal erosion. It
+follows planetary curvature and has atmospheric perspective on worlds with air.
+See [terrain generation and references](docs/terrain.md).
+Nearby rocks have clipped faces, weathering and subtle
+lichen; muted soil and a gravel path give the foreground some structure.
+Conifers have layered, irregular branches; grass tufts and fallen logs frame the
+clearing. Procedural moss, soil, needles and gravel provide surface detail that
+fades with distance. Windows remain opaque diffuse surfaces; walking is not implemented.
+A small atmospheric radiance cache supplies occluded sky lighting to the local
+landscape. It adds no ambient glow on airless worlds or without light sources.
+Settings → Vegetation density controls trees and undergrowth independently;
+Eco/Balanced/High select 35%/70%/100% density.
 
-![Ray-traced meadow, distant trees and a cottage](docs/pathtraced-ground.png)
+![Native lookout with continuous terrain and weathered outcrops](docs/rocky-lookout.png)
 
 For daylight scenery, run this command and left-drag to look toward the ground:
 
@@ -137,16 +161,20 @@ For daylight scenery, run this command and left-drag to look toward the ground:
 STARGAZE_SYSTEM=earth STARGAZE_TIME=0.599 cargo run --release
 ```
 
-The image above is an actual 64 spp compute render. Reproduce it headlessly:
+The image above is an actual 640×360, 32-sample render. Reproduce it headlessly:
 
 ```sh
-STARGAZE_TEST_IMAGE_DIR=/tmp/stargaze-ground cargo test gpu_ground_preview -- --ignored --nocapture
+STARGAZE_TEST_IMAGE_DIR=/tmp/stargaze-ground \
+STARGAZE_TERRAIN_WIDTH=640 STARGAZE_TERRAIN_SAMPLES=32 \
+  cargo test --release gpu_rocky_lookout_preview -- --ignored --nocapture
 ```
 
-The test writes `ground.ppm`, verifies finite pixels and unlit night surfaces,
-and checks the landscape binding after resize. `gpu_local_ground_shadows`
-checks box, rotated-box and foliage shadows on Earth-sized and moon-sized
-hosts, including a blocker only two centimetres above the surface.
+The preview writes `lookout.png`. Set `STARGAZE_TERRAIN_LOW_SUN=1` for a second
+view with longer shadows, or `STARGAZE_TERRAIN_TIME` to choose the time. GPU
+regressions compare heightfield intersections with an exhaustive triangle scan,
+verify prop bounds,
+check distant terrain and rock occlusion, and verify darkness without light
+sources. Existing checks cover shadows, tiny surface offsets and resize.
 
 ### Sample renders
 
@@ -198,20 +226,21 @@ The camera starts with a wide, 60° view of open sky, pointing north at 25°
 altitude, so the planets must be found by observing. Reset returns to this view.
 Select it in the menu or run `cargo run --release -- --config configs/vesper.yaml`.
 In game mode, select **Bright wanderers**, or launch it directly with
-`cargo run --release -- --game --config configs/vesper.yaml` and choose Resume.
+`cargo run --release -- --game --config configs/vesper.yaml`.
 Outside game mode, F1 and F2 target Aureole and Cinder; F3 and F4 target Vesper's moons.
 
-Click **[M]enu** in the bottom bar (or press M / Esc) to open the
-solar-system menu. It lists every `.yaml` and `.yml` file in `configs`, using
-the system name and filename, and refreshes each time you open it. Click a
-system (or its shown number key) to load its scene and camera. Use Page Up/Page Down or the mouse wheel to
-browse longer lists. Time is suspended while the menu is open; press Escape
-or click Resume to return to your current view. The menu button remains
-available when the HUD is hidden. Invalid configs show an error in the menu.
-Menus and the drawing screen render only their UI: world path tracing and
-exposure metering pause until you return to observation. These screens redraw
-on input or window changes and sleep while idle. Resizing them defers the HDR
-accumulation buffer allocation until observation resumes.
+Click **Menu [M]** in Explore or **Maps [M]** in a field study to open the
+system or level list. Entries are selected with Up/Down, their number key, or
+mouse hover; Enter or the yellow action button opens them. Page Up/Page Down
+and the mouse wheel browse longer lists. Time pauses while menus or the theory
+editor are open. Esc or M resumes the current view when one is available;
+Left returns to the main menu. Invalid configurations show inline errors and
+have disabled action buttons.
+
+Menus retain the last traced sky behind a Blueprint veil. World tracing and
+exposure metering pause while menus and the theory editor are open. Short UI
+transitions repaint at 60 Hz, then sleep when settled. Resizing a menu defers
+HDR buffer allocation until observation resumes.
 `STARGAZE_CONFIG=/path/to/system.yaml` also selects a file; an explicit
 `--config` takes precedence. `--check-config` validates without a display or GPU.
 
@@ -259,15 +288,15 @@ key `F7` aims at Saturn (body index `8`).
 
 | Key | Target | `STARGAZE_AIM` body index |
 | --- | --- | --- |
-| `F1` | Moon | `F2` |
-| `2` | Sun | `0` |
-| `F3` | Mercury | `F5` |
-| `F4` | Venus | `F6` |
-| `5` | Mars | `3` |
-| `6` | Jupiter | `F7` |
-| `7` | S/2009 S 1 (inner rings) | `19` |
-| `F8` | Uranus | `F9` |
-| `9` | Neptune | `10` |
+| `F1` | Moon | `2` |
+| `F2` | Sun | `0` |
+| `F3` | Mercury | `5` |
+| `F4` | Venus | `6` |
+| `F5` | Mars | `3` |
+| `F6` | Jupiter | `7` |
+| `F7` | S/2009 S 1 (inner rings) | `19` |
+| `F8` | Uranus | `9` |
+| `F9` | Neptune | `10` |
 
 For example, `STARGAZE_SYSTEM=solar STARGAZE_AIM=7 cargo run --release`
 starts aimed at Jupiter and the Galilean moons.
@@ -282,37 +311,84 @@ and photographic/cloud-band textures are not yet modeled. Rings are an
 infinitesimally thin sheet, so an exactly edge-on view loses them. `Rings`
 is attached to Saturn and to Calyx in the Halo preset; any body may carry one. The background star catalogue is procedural.
 
+### Blueprint menus and saved levels
+
+The native menus follow `prototypes/menu-ui/suite.html`: **Play** opens anonymous
+field studies, **Explore** opens named systems, and **Settings** edits a draft.
+Use Up/Down to select, Enter to open, and Esc to go back. In Explore, `/` searches,
+`F` favorites the selected system, and `B` filters favorites. `P` switches between
+Explore and Levels, `C` opens the controls reference, and `T` returns to the main menu.
+Explicit `--config`, `STARGAZE_CONFIG`, and `STARGAZE_SYSTEM` selections still open
+an observatory directly. `--game` opens the first field study directly and
+restores its saved progress; Play on the main menu opens Levels.
+
+In a field study, **Theory [Tab]** opens the full-page diagram. Right-click adds
+an orbiting body under the selected parent; drag changes orbit order. The bar
+includes star/ring traits, viewer placement, undo/redo, delete, clear and check.
+Leaving offers **Keep & leave**, **Discard & leave**, or **Cancel**. Each level
+keeps its own theory, score history, best score, camera, exposure and observation
+time. Named targets and physical details remain hidden in puzzle mode.
+
+Progress saves to `$XDG_DATA_HOME/stargaze/progress.yaml` (normally
+`~/.local/share/stargaze/progress.yaml`). `STARGAZE_PROGRESS` overrides the path.
+Saves are versioned and replaced atomically; unreadable saves are preserved.
+The Levels screen shows progress and has a separate confirmed discard action.
+
+To render the native UI screens offscreen on a GPU:
+
+```sh
+STARGAZE_UI_PREVIEWS=/tmp/stargaze-ui \
+  cargo test --release gpu_blueprint_ -- --ignored --nocapture --test-threads=1
+```
+
 ### Quality settings
 
-Open **Menu → Graphics** (M, then G) in either game or observatory mode.
-Choose **Eco**, **Balanced**, or **High**, or use the arrows to customize:
+Open **Settings** with the observatory gear button or **F11**, from the main menu,
+or through **Menu → Settings** (M, then G). The gear is available in field studies too.
+Choose **Eco**, **Balanced**, or **High**, then use sliders or Left/Right to
+customize the Rendering and Interface sections:
 
 | Setting | Eco | Balanced (default) | High |
 | --- | --- | --- | --- |
-| Frame rate limit | 15 FPS | 30 FPS | 60 FPS |
 | Render resolution | 50% | 75% | 100% |
-| Light detail | 2 bounces | 4 bounces | 8 bounces |
+| Maximum bounces | 2 | 4 | 8 |
 | Samples per frame | 1 | 1 | 1 |
-| Still image limit | 128 spp | 256 spp | 1024 spp |
+| HUD scale | unchanged | unchanged | unchanged |
 
-The frame cap also applies while dragging the camera, and the event loop sleeps
-between frames. Lower resolution reduces ray tracing and HDR memory use: 50%
-in each dimension traces one quarter of the pixels. The world is smoothly
-upscaled; text, labels, controls, and picking remain at the window's resolution.
-Light detail controls indirect lighting; atmosphere quality remains unchanged.
-Still image limits let a stationary, stopped scene finish refining and rest.
-Lower limits converge sooner but can leave more noise. Select Continuous for
-long exposures. A frame cap cannot guarantee spare GPU capacity when a single
-frame is expensive; reduce resolution or choose Eco if usage remains high.
+A preset changes the three rendering fields; editing them shows Custom.
+The sliders cover 25–100% resolution, 1–64 samples and bounces, and 75–200%
+HUD scale. Frame rate offers 15–240 fps or Uncapped; the still-image limit
+offers 64–4,096 samples or Continuous. Settings scroll on smaller windows, and
+keyboard selection keeps the current control visible. Exposure, orientation and playback stay in the
+observation HUD.
 
-Settings apply to all maps and save automatically to
+Lower resolution reduces traced pixels and HDR memory use. Menus, text and
+picking stay at native resolution; fonts rasterize at their physical display size,
+including fractional DPI and 4K displays. Frame rate defaults to 30 fps and the
+still-image limit to 256 samples. Both are adjustable on this page and persist as
+`max_fps` and `still_samples` in the settings file (0 means Uncapped or Continuous).
+
+Samples per frame is an upper limit. New or moving views begin with one sample;
+still views increase their batch when completed GPU work fits the frame budget.
+Only one frame is submitted at a time, and completion polling keeps the event
+loop available for input. This avoids sending a large initial batch when a
+complex level opens. Resolution, bounces and the still-image sample limit retain
+their selected values.
+
+For smooth motion, use Eco with 1 sample per frame and a 60 fps cap. To refine a
+paused view in fewer frames, increase samples per frame; each frame takes longer.
+For maximum detail, choose High and raise the still-image limit. See the
+[performance measurements and tuning guide](docs/performance.md) for the tradeoffs.
+
+Choose **Apply [Enter]** to apply settings to all maps and save them to
 `$XDG_CONFIG_HOME/stargaze/graphics.yaml` (normally
 `~/.config/stargaze/graphics.yaml`). `STARGAZE_SETTINGS` overrides that file path.
 The settings screen supports Up/Down to select a row, Left/Right to adjust,
-1/2/3 for presets, and Esc to return to the map menu. Changing resolution or
+1/2/3 for presets, Enter to apply, and Esc to discard the draft and return.
+HUD scale ranges from 75% to 200% on top of your display scale. Changing resolution or
 light detail restarts accumulation; frame rate, batch size, and sample limits
 preserve valid samples. Existing `STARGAZE_SPP` and `STARGAZE_BOUNCES` overrides
-take precedence at startup; the Graphics controls remain adjustable afterward.
+take precedence at startup; the Settings controls remain adjustable afterward.
 
 ```sh
 # Eight new samples per pixel per frame; up to 12 surface vertices per path.
@@ -325,6 +401,7 @@ STARGAZE_SYSTEM=solar STARGAZE_AIM=0 STARGAZE_AUTO_EXPOSURE=0 STARGAZE_EXPOSURE=
 | Variable | Default | Meaning |
 | --- | --- | --- |
 | `STARGAZE_GROUND` | on | Set `0`, `false` or `off` to disable the meadow, trees and cottage |
+| `STARGAZE_MILKY_WAY` | `0.01` | Camera-only Milky Way brightness, clamped to 0–1; `0` disables it |
 | `STARGAZE_SPP` | `1` | Samples per pixel per frame, clamped to 1–64 |
 | `STARGAZE_BOUNCES` | Graphics setting (`4` in Balanced) | Maximum surface vertices per path, clamped to 1–64; `1` gives direct-only lighting |
 | `STARGAZE_AUTO_EXPOSURE` | on | Meter exposure automatically; `0`, `false` or `off` selects the manual value |
@@ -348,23 +425,25 @@ sequence is deterministic for a given pixel and sample index.
 | right-click (sky) | track the clicked body, or hold a fixed direction against the background stars |
 | left-click (sky) | release the view lock |
 | Lock indicator / `U` | show the target and release the lock |
-| Stars / `S` | toggle compensation for star-field rotation; keep the locked target centered |
+| Horizon / Stars / `R` | keep the horizon level or the stars fixed while following a target |
 | scroll / `=` / `-` | zoom, down to 0.001° |
 | Labels toggle (bar) | show / hide names |
 | Exposure slider (right of playback controls) | brightness compensation, −8 to +8 EV in quarter stops, in either mode |
-| Auto checkbox (bar) | enable / disable automatic exposure metering |
-| Stop / Space | set playback speed to 0; pressing again leaves it at 0 |
+| Auto switch / `A` | toggle automatic exposure; enabling it resets compensation to 0 EV |
+| Stop / Play / Space | pause or resume the previous signed playback speed |
 | −1 day / Page Down; +1 day / Page Up | jump backward / forward by one local solar day, preserving speed and tracking |
-| Left / Right arrow (bar) | decrease / increase signed speed through negative values, 0, and positive values |
+| Left / Right arrow (bar) | choose −1000, −100, −10, −1, 0, +1, +10, +100 or +1000 minutes per second |
 | `F1`–`F9` | aim at scene targets (`F9` is solar-only) |
 | `E` | search up to ten model years for a visible eclipse |
 | `T` | search for a moon transit (e.g. Phobos/Mars or Io/Jupiter) |
-| `R` | reset view |
+| `Home` | reset view |
+| `G` | show / hide the target panel in Explore |
+| `F10` | main menu; puzzles offer keep / discard first |
 | `,` `.` | exposure compensation down / up by 0.25 EV |
 | `A` | toggle automatic exposure metering (on by default) |
 | `H` | show / hide HUD |
 | `L` | toggle labels |
-| Menu: `1`–`9`, `PgUp` / `PgDn` | load a displayed map / change pages |
+| Menu: `1`–`9`, `PgUp` / `PgDn` | select a displayed map / change pages |
 
 **−1 day / +1 day** follows a full revolution of the system center in the
 observer's rotating sky (local solar hour angle). The center is the root
@@ -485,7 +564,7 @@ all seven planets observable from Earth, resize, presentation, and all
 observatory presets (including Halo facing ringed Calyx, Saturn at 20° N,
 and the Vantus eclipse).
 
-## Reconstruction game (v0)
+## Reconstruction game
 
 ```sh
 cargo run --release -- --game
@@ -498,44 +577,31 @@ Observe the sky, infer the orbital hierarchy, and identify which object you
 are standing on. Body labels, named tracking titles, function-key targets, and
 automatic eclipse/transit searches are unavailable in this mode. Ordinary observatory mode retains those shortcuts.
 
-Game mode starts in the map menu. The drawing toolbar shares the observing
-toolbar's panel, centered buttons, and vertical group separators, with Menu and
-Observe on the left.
+Game mode opens Levels. Explicit `--game --config` launches a field study
+directly. Named bodies and physical details stay hidden.
 
-- **[M]enu** opens the map selector from the sky or diagram. **Resume [Esc]** or **M**
-  returns without changing the theory or telescope lock. Selecting a different
-  map starts a fresh puzzle; progress is kept in memory, not saved across restarts.
-  Failed loads preserve the current puzzle. Map names remain anonymous.
-- Vertical separators divide the bottom bar into **[M]enu / Draw [Tab]**, **Time**,
-  camera (lock and **[S]tars**), and exposure groups. Exposure is last; its readout
-  and slider turn gray while Auto is selected. Compensation remains adjustable.
-  The **← / →** time buttons match the Left / Right arrow keys; **Stop [Spc]** stays alongside them.
-  **Left / Right arrow** decreases/increases signed playback speed. Negative values
-  run backward, positive values run forward, and **0** stops time. **Stop [Space]**
-  sets speed to 0; it does not toggle or restore a previous speed. From zero, press
-  Right to move forward or Left to move backward. The speed (min/s) and minute counter
-  are shown alongside the controls.
-  Drag the sky to look, scroll to zoom, and right-click a body to track it anonymously.
-  Right-click empty sky to hold its direction; left-click the sky or press **U** to unlock.
-  **[S]tars** compensates for rotation while preserving the locked target.
-- **Draw [Tab]** in the bottom bar opens the full-page diagram and suspends time.
-  **Observe [Tab]** returns to the sky; **Esc** opens the menu.
+- **Maps [M]** opens Levels, offering Keep, Discard or Cancel after theory edits.
+  Each level saves its own theory, attempts, best score, observation time,
+  telescope orientation, lock and exposure. A failed load preserves the current
+  study. Saved theories resume when selecting the same level later.
+- **Theory [Tab]** opens the full-page diagram and pauses observation.
+  **Observe [Tab]** returns to the same sky.
 - Select a parent, then **right-click empty canvas** to add an orbiting object.
-  **N** adds at the cursor as a keyboard alternative. The new object becomes selected,
-  so select its parent again to add another sibling.
-- Drag objects to set orbit order. The number inside each object is its rank among
-  siblings: **1** is innermost. A planet and its first moon can both display **1**.
-  The center is marked **C**. Distances retain their proportions on resize.
-- **Star [S]** and **Has rings [R]** toggle the selected object's traits. Stars have
-  gold rays; rings are drawn as an oval. These are guesses, not revealed information.
-- Dashed circles show orbits, and connecting lines show parent-child relationships.
-  The center may represent a body or an invisible shared barycenter.
-- **Viewer here [V]** places the observer on the selected planet or moon.
-- **Delete [Del]** removes the selected branch. **Undo [Z]** and **Redo [Y]** restore
-  edits, including whole drags, traits, viewer placement, and branch deletion.
-- **Clear all [X]** opens a confirmation. **Enter** clears the theory; **Esc** cancels.
-  Clearing is also undoable. The center remains as the starting point for a new theory.
-- **Check [Enter]** scores the theory without revealing the solution.
+  The new object becomes selected; select its parent again to add a sibling.
+  A ghost connection previews placement. The inspector reports the selected
+  object's role, parent, orbit order and satellites.
+- Drag objects to set orbit order. **1** means innermost under that parent;
+  the centre is **C**. Distances retain their proportions on resize.
+- **Is star [S]** and **Has rings [R]** switch the selected object's traits.
+  The bar and inspector share the switches. Hover previews the diagram change;
+  stars have gold rays and rings have an oval. These are guesses.
+- **Viewer here [V]** places the observer. **Delete [Del]** removes a branch;
+  **Undo [Z]** and **Redo [Y]** restore edits, including whole drags.
+- **Clear all [X]** asks for confirmation and reports how many orbiting objects
+  will be removed. Enter clears, Esc cancels; clearing is undoable.
+- **Check theory [Enter]** opens a score dial, weighted breakdown, hint and
+  attempt history. Scroll or PgUp/PgDn reads older attempts. Esc keeps editing,
+  Tab observes again, and M or Enter chooses another map.
 
 Ordered structure contributes 60 points, star/ring traits contribute 20, and
 viewer placement contributes 20. Starting at the root, each child is matched to
@@ -551,8 +617,8 @@ distances determine the relative ordering; absolute map scale does not matter. O
 equal-sized orbits retain their configuration order. Invisible barycentres
 count as nodes and should have Star and Has rings turned off.
 
-V0 supports 64 diagram nodes and keeps the current theory in memory only; closing
-the application discards it. The observer remains on the configured surface.
+The editor supports 64 diagram nodes. The observer remains on the configured
+surface; saved progress restores the theory and telescope on the next launch.
 This is an inference prototype: an arbitrary loaded system may contain objects
 that are difficult to discover, and a finite observation cannot always distinguish
 all physically possible systems. Scores compare against the configured hierarchy.

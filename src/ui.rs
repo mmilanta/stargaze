@@ -1,23 +1,22 @@
-//! Minimal immediate-mode UI: an 8x8 bitmap font atlas, a bottom bar with a
-//! labels toggle and signed playback controls, and screen-space body labels.
+//! Native Blueprint typography, geometry, observation HUD and body labels.
 //!
 //! All geometry is generated in physical pixels (origin top-left) and converted
 //! to NDC when pushed, so the caller only deals with screen coordinates.
 
+use crate::typeface::{self, Face};
 use bytemuck::{Pod, Zeroable};
-use font8x8::{BASIC_FONTS, UnicodeFonts};
 
-pub const ATLAS_COLS: usize = 16;
-pub const ATLAS_ROWS: usize = 8;
-pub const GLYPH: usize = 8;
-pub const ATLAS_W: usize = ATLAS_COLS * GLYPH; // 128
-pub const ATLAS_H: usize = ATLAS_ROWS * GLYPH; // 64
-/// Rendering text taller than 8px makes it readable at ordinary DPI.
-const TEXT_SCALE: f32 = 2.0;
-const SOLID_CELL: usize = 127;
-// Two Unicode arrows occupy unused atlas cells after the printable ASCII set.
-const ARROW_LEFT_CELL: usize = 95;
-const ARROW_RIGHT_CELL: usize = 96;
+pub const ATLAS_W: usize = typeface::WIDTH;
+pub const ATLAS_H: usize = typeface::HEIGHT;
+const TEXT_SCALE: f32 = 1.15;
+pub const BG: [f32; 4] = [0.0075, 0.0395, 0.3712, 1.0];
+pub const DEEP: [f32; 4] = [0.004, 0.021, 0.26, 1.0];
+pub const INK: [f32; 4] = [0.871, 0.904, 1.0, 1.0];
+pub const MUTED: [f32; 4] = [0.527, 0.618, 0.913, 1.0];
+pub const ACCENT: [f32; 4] = [0.871, 0.799, 0.144, 1.0];
+pub const OK: [f32; 4] = [0.267, 0.831, 0.644, 1.0];
+pub const WARN: [f32; 4] = [1.0, 0.333, 0.195, 1.0];
+pub const LINE: [f32; 4] = [0.42, 0.54, 1.0, 0.34];
 
 #[repr(C)]
 #[derive(Clone, Copy, Debug, Pod, Zeroable)]
@@ -25,6 +24,7 @@ pub struct UiVertex {
     pub pos: [f32; 2],
     pub uv: [f32; 2],
     pub color: [f32; 4],
+    pub edge: [f32; 4],
 }
 
 #[derive(Clone, Debug)]
@@ -54,10 +54,10 @@ impl Rect {
             && py >= self.y as f64
             && py <= (self.y + self.h) as f64
     }
-    fn center_y(&self) -> f32 {
+    pub(crate) fn center_y(&self) -> f32 {
         self.y + self.h * 0.5
     }
-    fn right(&self) -> f32 {
+    pub(crate) fn right(&self) -> f32 {
         self.x + self.w
     }
 }
@@ -82,6 +82,7 @@ pub struct HudState<'a> {
     pub ev_bias: f32,
     pub steady_stars: bool,
     pub minutes_per_second: f64,
+    pub targets_open: bool,
 }
 
 pub struct Layout {
@@ -92,7 +93,11 @@ pub struct Layout {
     pub exposure: Rect,
     pub auto: Rect,
     pub lock: Rect,
-    pub orientation: Rect,
+    pub horizon: Rect,
+    pub stars: Rect,
+    pub targets: Rect,
+    pub settings: Rect,
+    pub hide: Rect,
     pub draw: Rect,
     pub stop: Rect,
     pub previous_day: Rect,
@@ -104,6 +109,8 @@ pub struct Layout {
     pub clock: Rect,
     requested_scale: f32,
     puzzle: bool,
+    style: ToolbarStyle,
+    dividers: [f32; 5],
 }
 
 impl Layout {
@@ -116,6 +123,32 @@ impl Layout {
         )
     }
 
+    pub fn with_hidden(mut self, hidden: bool) -> Self {
+        if hidden {
+            let s = self.scale;
+            let y = self.bar.y + 8.0 * s;
+            self.home = Rect {
+                x: 10.0 * s,
+                y,
+                w: 84.0 * s,
+                h: 38.0 * s,
+            };
+            self.lock = Rect {
+                x: 102.0 * s,
+                y,
+                w: 174.0 * s,
+                h: 38.0 * s,
+            };
+            self.hide = Rect {
+                x: self.bar.w - 184.0 * s,
+                y,
+                w: 174.0 * s,
+                h: 38.0 * s,
+            };
+        }
+        self
+    }
+
     pub fn exposure_bias_at(&self, x: f64) -> f32 {
         let fraction = ((x as f32 - self.exposure.x) / self.exposure.w).clamp(0.0, 1.0);
         ((MIN_EV + fraction * (MAX_EV - MIN_EV)) * 4.0).round() / 4.0
@@ -126,132 +159,211 @@ pub fn layout(w: f32, h: f32, scale: f32) -> Layout {
     layout_mode(w, h, scale, false)
 }
 
-fn layout_mode(w: f32, h: f32, scale: f32, puzzle: bool) -> Layout {
-    let s = scale.min(w / 1552.0).min(h / 100.0);
-    let bar = Rect {
-        x: 0.0,
-        y: h - 52.0 * s,
-        w,
-        h: 52.0 * s,
-    };
-    let mut x = 10.0 * s;
-    let mut control = |width: f32, gap: f32| {
-        x += gap * s;
-        let r = Rect {
+/// Both observatory and theory use the same responsive bar and fixed navigation.
+/// Decide key visibility from the requested logical width, before fitting the bar.
+#[derive(Clone, Copy, Debug)]
+pub(crate) struct ToolbarStyle {
+    pub scale: f32,
+    pub keys: bool,
+}
+
+impl ToolbarStyle {
+    pub fn new(w: f32, h: f32, requested: f32) -> Self {
+        let keys = w / requested > 1300.0;
+        let minimum = 217.0
+            + time_group_width(keys)
+            + lock_group_width(keys)
+            + exposure_group_width(keys)
+            + toolbar_width("Settings [F11]", keys)
+            + 13.0
+            + toolbar_width("Hide [H]", keys)
+            + 12.0;
+        Self {
+            scale: requested.min(w / minimum).min(h / 100.0),
+            keys,
+        }
+    }
+
+    pub fn bar(self, w: f32, h: f32) -> Rect {
+        Rect {
+            x: 0.0,
+            y: h - 58.0 * self.scale,
+            w,
+            h: 58.0 * self.scale,
+        }
+    }
+
+    pub fn control(self, bar: Rect, x: f32, width: f32) -> Rect {
+        Rect {
             x,
-            y: bar.y + 9.0 * s,
-            w: width * s,
-            h: 34.0 * s,
-        };
-        x += (width + 6.0) * s;
+            y: bar.y + 12.0 * self.scale,
+            w: width * self.scale,
+            h: 34.0 * self.scale,
+        }
+    }
+
+    pub fn nav(self, bar: Rect) -> [Rect; 2] {
+        [
+            self.control(bar, 8.0 * self.scale, 84.0),
+            self.control(bar, 96.0 * self.scale, 112.0),
+        ]
+    }
+}
+
+fn binding(label: &str) -> (&str, Option<&str>) {
+    label
+        .rsplit_once(" [")
+        .map_or((label, None), |(name, key)| {
+            (name, Some(key.trim_end_matches(']')))
+        })
+}
+
+fn key_width(key: &str) -> f32 {
+    (typeface::width(Face::Mono, key, 8.5) + 8.0).max(14.0)
+}
+
+pub(crate) fn toolbar_width(label: &str, keys: bool) -> f32 {
+    let (name, key) = binding(label);
+    let content = if matches!(name, "Targets" | "Hide" | "Settings") {
+        15.0
+    } else {
+        typeface::width(Face::Mono, name, 10.5)
+    };
+    (18.0
+        + content
+        + key
+            .filter(|_| keys || name == "Check theory")
+            .map_or(0.0, |key| 8.0 + key_width(key)))
+    .max(34.0)
+}
+
+fn play_width(keys: bool) -> f32 {
+    if keys {
+        18.0 + 15.0 + 6.0 + key_width("Spc")
+    } else {
+        34.0
+    }
+}
+
+fn time_group_width(keys: bool) -> f32 {
+    17.0 + 32.0
+        + 30.0
+        + 84.0
+        + 30.0
+        + play_width(keys)
+        + toolbar_width("−1d [PgDn]", keys)
+        + 100.0
+        + toolbar_width("+1d [PgUp]", keys)
+        + 7.0 * 4.0
+}
+
+fn lock_group_width(keys: bool) -> f32 {
+    17.0 + 148.0 + 4.0 + if keys { 95.0 + 78.0 } else { 44.0 + 44.0 } + 6.0 + key_width("R")
+}
+
+fn auto_width() -> f32 {
+    16.0 + 22.0 + 8.0 + typeface::width(Face::Mono, "Auto", 10.5) + 8.0 + key_width("A")
+}
+
+fn exposure_group_width(keys: bool) -> f32 {
+    17.0 + 112.0 + 4.0 + auto_width() + 4.0 + toolbar_width("Targets [G]", keys)
+}
+
+fn layout_mode(w: f32, h: f32, scale: f32, puzzle: bool) -> Layout {
+    let style = ToolbarStyle::new(w, h, scale);
+    let s = style.scale;
+    let bar = style.bar(w, h);
+    let [home, toggle] = style.nav(bar);
+    let nav_end = 217.0 * s;
+    let mut x = nav_end + 8.0 * s;
+    let mut control = |width: f32| {
+        let r = style.control(bar, x, width);
+        x += (width + 4.0) * s;
         r
     };
-    let home = control(84.0, 0.0);
-    let toggle = control(120.0, 0.0);
-    let draw = toggle;
-    let time_label = control(44.0, 18.0);
-    let slower = control(34.0, 0.0);
-    let speed = control(112.0, 0.0);
-    let faster = control(34.0, 0.0);
-    let stop = control(98.0, 0.0);
-    let previous_day = control(112.0, 0.0);
-    let next_day = control(112.0, 0.0);
-    let clock = control(164.0, 0.0);
-    let lock = control(122.0, 18.0);
-    let orientation = control(84.0, 0.0);
-    let exposure = control(168.0, 18.0);
-    let auto = control(110.0, 0.0);
+    let time_label = control(32.0);
+    let slower = control(30.0);
+    let speed = control(84.0);
+    let faster = control(30.0);
+    let stop = control(play_width(style.keys));
+    let previous_day = control(toolbar_width("−1d [PgDn]", style.keys));
+    let clock = control(100.0);
+    let next_day = control(toolbar_width("+1d [PgUp]", style.keys));
+    let time_end = nav_end + time_group_width(style.keys) * s;
+    let lock = style.control(bar, time_end + 8.0 * s, 148.0);
+    let mut horizon = style.control(
+        bar,
+        lock.right() + 4.0 * s,
+        if style.keys { 95.0 } else { 44.0 },
+    );
+    let mut stars = style.control(bar, horizon.right(), if style.keys { 78.0 } else { 44.0 });
+    for r in [&mut horizon, &mut stars] {
+        r.y = bar.y + 13.0 * s;
+        r.h = 32.0 * s;
+    }
+    let lock_end = time_end + lock_group_width(style.keys) * s;
+    let hide = style.control(
+        bar,
+        w - (6.0 + toolbar_width("Hide [H]", style.keys)) * s,
+        toolbar_width("Hide [H]", style.keys),
+    );
+    let hide_start = hide.x - 6.0 * s;
+    let settings = style.control(
+        bar,
+        hide_start - (7.0 + toolbar_width("Settings [F11]", style.keys)) * s,
+        toolbar_width("Settings [F11]", style.keys),
+    );
+    let settings_start = settings.x - 6.0 * s;
+    let targets = style.control(
+        bar,
+        settings_start - (8.0 + toolbar_width("Targets [G]", style.keys)) * s,
+        toolbar_width("Targets [G]", style.keys),
+    );
+    let auto_right = if puzzle {
+        settings_start - 8.0 * s
+    } else {
+        targets.x - 4.0 * s
+    };
+    let auto = style.control(bar, auto_right - auto_width() * s, auto_width());
+    let exposure_right = auto.x - 4.0 * s;
+    let exposure_width = ((exposure_right - lock_end) / s - 8.0).clamp(112.0, 170.0);
+    let exposure = style.control(bar, exposure_right - exposure_width * s, exposure_width);
     Layout {
         bar,
         home,
-        lock,
-        orientation,
         toggle,
-        draw,
-        stop,
-        previous_day,
-        next_day,
+        draw: toggle,
+        time_label,
         slower,
         speed,
-        time_label,
         faster,
+        stop,
+        previous_day,
         clock,
+        next_day,
+        lock,
+        horizon,
+        stars,
         exposure,
         auto,
+        targets,
+        settings,
+        hide,
         scale: s,
+        style,
+        dividers: [nav_end, time_end, lock_end, settings_start, hide_start],
         puzzle,
         requested_scale: scale,
     }
 }
 
-/// Build the atlas bitmap (coverage in R) and return it as a tight byte buffer.
+#[cfg(test)]
 pub fn build_atlas() -> Vec<u8> {
-    let mut data = vec![0u8; ATLAS_W * ATLAS_H];
-    for code in 32u32..127 {
-        let Some(ch) = char::from_u32(code) else {
-            continue;
-        };
-        let Some(glyph) = BASIC_FONTS.get(ch) else {
-            continue;
-        };
-        let idx = (code - 32) as usize;
-        let (cx, cy) = (idx % ATLAS_COLS, idx / ATLAS_COLS);
-        for (row, bits) in glyph.iter().enumerate() {
-            for col in 0..GLYPH {
-                if bits & (1 << col) != 0 {
-                    data[(cy * GLYPH + row) * ATLAS_W + cx * GLYPH + col] = 255;
-                }
-            }
-        }
-    }
-    for (cell, glyph) in [
-        (ARROW_LEFT_CELL, [0, 0x08, 0x04, 0x7e, 0x04, 0x08, 0, 0]),
-        (ARROW_RIGHT_CELL, [0, 0x10, 0x20, 0x7e, 0x20, 0x10, 0, 0]),
-    ] {
-        let (cx, cy) = (cell % ATLAS_COLS, cell / ATLAS_COLS);
-        for (row, bits) in glyph.iter().enumerate() {
-            for col in 0..GLYPH {
-                if bits & (1 << col) != 0 {
-                    data[(cy * GLYPH + row) * ATLAS_W + cx * GLYPH + col] = 255;
-                }
-            }
-        }
-    }
-    // A fully opaque cell used to draw solid rectangles through the same shader.
-    let (cx, cy) = (SOLID_CELL % ATLAS_COLS, SOLID_CELL / ATLAS_COLS);
-    for y in 0..GLYPH {
-        for x in 0..GLYPH {
-            data[(cy * GLYPH + y) * ATLAS_W + cx * GLYPH + x] = 255;
-        }
-    }
-    data
+    typeface::snapshot(0).unwrap().bitmap
 }
 
 fn solid_uv() -> [f32; 2] {
-    let (cx, cy) = (SOLID_CELL % ATLAS_COLS, SOLID_CELL / ATLAS_COLS);
-    [
-        (cx as f32 + 0.5) * GLYPH as f32 / ATLAS_W as f32,
-        (cy as f32 + 0.5) * GLYPH as f32 / ATLAS_H as f32,
-    ]
-}
-
-fn glyph_uv(code: u32) -> [[f32; 2]; 4] {
-    let idx = if (32..127).contains(&code) {
-        (code - 32) as usize
-    } else {
-        match code {
-            0x2190 => ARROW_LEFT_CELL,
-            0x2192 => ARROW_RIGHT_CELL,
-            // Unknown glyphs fall back to the solid cell (a filled box).
-            _ => SOLID_CELL,
-        }
-    };
-    let (cx, cy) = (idx % ATLAS_COLS, idx / ATLAS_COLS);
-    let u0 = (cx * GLYPH) as f32 / ATLAS_W as f32;
-    let v0 = (cy * GLYPH) as f32 / ATLAS_H as f32;
-    let u1 = ((cx + 1) * GLYPH) as f32 / ATLAS_W as f32;
-    let v1 = ((cy + 1) * GLYPH) as f32 / ATLAS_H as f32;
-    [[u0, v0], [u1, v0], [u0, v1], [u1, v1]]
+    [1.5 / ATLAS_W as f32, 1.5 / ATLAS_H as f32]
 }
 
 fn to_ndc(x: f32, y: f32, w: f32, h: f32) -> [f32; 2] {
@@ -267,20 +379,38 @@ fn push_quad(
 ) {
     let [[x0, y0], [x1, y1]] = bounds;
     let [w, h] = viewport;
-    let p00 = to_ndc(x0, y0, w, h);
-    let p10 = to_ndc(x1, y0, w, h);
-    let p01 = to_ndc(x0, y1, w, h);
-    let p11 = to_ndc(x1, y1, w, h);
-    for (pos, u) in [
-        (p00, uv[0]),
-        (p10, uv[1]),
-        (p01, uv[2]),
-        (p01, uv[2]),
-        (p10, uv[1]),
-        (p11, uv[3]),
-    ] {
-        verts.push(UiVertex { pos, uv: u, color });
+    let solid = uv.iter().all(|u| *u == uv[0]);
+    let cx = (x0 + x1) * 0.5;
+    let cy = (y0 + y1) * 0.5;
+    let hx = (x1 - x0) * 0.5;
+    let hy = (y1 - y0) * 0.5;
+    let pad = if solid { 0.5 } else { 0.0 };
+    let xa = (x0 - pad).max(0.0);
+    let xb = (x1 + pad).min(w);
+    let ya = (y0 - pad).max(0.0);
+    let yb = (y1 + pad).min(h);
+    if xb <= xa || yb <= ya {
+        return;
     }
+    let points = [[xa, ya], [xb, ya], [xa, yb], [xb, yb]];
+    let vertices = std::array::from_fn::<_, 4, _>(|i| UiVertex {
+        pos: to_ndc(points[i][0], points[i][1], w, h),
+        uv: uv[i],
+        color,
+        edge: if solid {
+            [points[i][0] - cx, points[i][1] - cy, hx, hy]
+        } else {
+            [0.0, 0.0, -1.0, 0.0]
+        },
+    });
+    verts.extend([
+        vertices[0],
+        vertices[1],
+        vertices[2],
+        vertices[2],
+        vertices[1],
+        vertices[3],
+    ]);
 }
 
 pub(crate) fn push_rect(
@@ -297,7 +427,7 @@ pub(crate) fn push_rect(
 }
 
 pub fn text_width(text: &str, scale: f32) -> f32 {
-    text.chars().count() as f32 * 8.0 * scale
+    typeface::width(Face::Mono, text, scale * 13.333333)
 }
 
 pub(crate) fn push_text(
@@ -309,19 +439,525 @@ pub(crate) fn push_text(
     color: [f32; 4],
     viewport: [f32; 2],
 ) {
-    let step = 8.0 * scale;
+    font_text(
+        verts,
+        [x, y],
+        scale * 13.333333,
+        Face::Mono,
+        text,
+        color,
+        viewport,
+    );
+}
+
+pub(crate) fn eyebrow(
+    v: &mut Vec<UiVertex>,
+    pos: [f32; 2],
+    px: f32,
+    text: &str,
+    color: [f32; 4],
+    vp: [f32; 2],
+) {
+    let mut x = pos[0];
+    for ch in text.chars() {
+        font_text(v, [x, pos[1]], px, Face::Mono, &ch.to_string(), color, vp);
+        x += typeface::width(Face::Mono, &ch.to_string(), px) + px * 0.14;
+    }
+}
+
+pub(crate) fn heading(
+    verts: &mut Vec<UiVertex>,
+    x: f32,
+    y: f32,
+    px: f32,
+    text: &str,
+    color: [f32; 4],
+    viewport: [f32; 2],
+) {
+    font_text(
+        verts,
+        [x, y],
+        px,
+        if px > 48.0 { Face::Display } else { Face::Sans },
+        text,
+        color,
+        viewport,
+    );
+}
+
+pub(crate) fn font_text(
+    verts: &mut Vec<UiVertex>,
+    [x, y]: [f32; 2],
+    px: f32,
+    face: Face,
+    text: &str,
+    color: [f32; 4],
+    viewport: [f32; 2],
+) {
     let mut cx = x;
     for ch in text.chars() {
-        if ch != ' ' {
+        let g = typeface::glyph(face, ch, px);
+        let s = px / g.em;
+        let m = g.metrics;
+        let x0 = cx + m.xmin as f32 * s;
+        let y0 = y + px * 0.8 - (m.ymin as f32 + m.height as f32) * s;
+        if m.width > 0 && m.height > 0 {
             push_quad(
                 verts,
-                [[cx, y], [cx + step, y + step]],
-                glyph_uv(ch as u32),
+                [
+                    [x0, y0],
+                    [x0 + m.width as f32 * s, y0 + m.height as f32 * s],
+                ],
+                g.uv,
                 color,
                 viewport,
             );
         }
-        cx += step;
+        cx += m.advance_width * s;
+    }
+}
+
+pub(crate) fn triangle(
+    v: &mut Vec<UiVertex>,
+    points: [[f32; 2]; 3],
+    color: [f32; 4],
+    vp: [f32; 2],
+) {
+    v.extend(points.map(|p| UiVertex {
+        pos: to_ndc(p[0], p[1], vp[0], vp[1]),
+        uv: solid_uv(),
+        color,
+        edge: [0.0, 0.0, -1.0, 0.0],
+    }));
+}
+
+pub(crate) fn line(
+    v: &mut Vec<UiVertex>,
+    a: [f32; 2],
+    b: [f32; 2],
+    thickness: f32,
+    color: [f32; 4],
+    vp: [f32; 2],
+) {
+    let dx = b[0] - a[0];
+    let dy = b[1] - a[1];
+    let len = dx.hypot(dy).max(0.001);
+    let along = [dx / len, dy / len];
+    let normal = [-along[1], along[0]];
+    let center = [(a[0] + b[0]) * 0.5, (a[1] + b[1]) * 0.5];
+    let half = len * 0.5;
+    let radius = thickness * 0.5;
+    let local = [
+        [-half - 0.5, -radius - 0.5],
+        [half + 0.5, -radius - 0.5],
+        [-half - 0.5, radius + 0.5],
+        [half + 0.5, radius + 0.5],
+    ];
+    let vertices = local.map(|[x, y]| UiVertex {
+        pos: to_ndc(
+            center[0] + x * along[0] + y * normal[0],
+            center[1] + x * along[1] + y * normal[1],
+            vp[0],
+            vp[1],
+        ),
+        uv: solid_uv(),
+        color,
+        edge: [x, y, half, radius],
+    });
+    v.extend([
+        vertices[0],
+        vertices[1],
+        vertices[2],
+        vertices[2],
+        vertices[1],
+        vertices[3],
+    ]);
+}
+
+pub(crate) fn ellipse(
+    v: &mut Vec<UiVertex>,
+    p: [f32; 2],
+    radii: [f32; 2],
+    thickness: f32,
+    color: [f32; 4],
+    vp: [f32; 2],
+) {
+    arc(v, p, radii, thickness, std::f32::consts::TAU, color, vp);
+}
+
+pub(crate) fn arc(
+    v: &mut Vec<UiVertex>,
+    p: [f32; 2],
+    radii: [f32; 2],
+    thickness: f32,
+    sweep: f32,
+    color: [f32; 4],
+    vp: [f32; 2],
+) {
+    arc_from(
+        v,
+        p,
+        radii,
+        thickness,
+        [-std::f32::consts::FRAC_PI_2, sweep],
+        color,
+        vp,
+    );
+}
+
+pub(crate) fn arc_from(
+    v: &mut Vec<UiVertex>,
+    p: [f32; 2],
+    radii: [f32; 2],
+    thickness: f32,
+    [start, sweep]: [f32; 2],
+    color: [f32; 4],
+    vp: [f32; 2],
+) {
+    if sweep <= 0.0 || radii.iter().any(|r| *r <= 0.0) {
+        return;
+    }
+    let n = ((radii[0].max(radii[1]) * sweep / 3.0).ceil() as usize).max(16);
+    let half = thickness * 0.5;
+    let pad = half + 0.75;
+    let radius = radii[0].min(radii[1]);
+    let vertex = |a: f32, side: f32| {
+        let q = [radii[0] * a.cos(), radii[1] * a.sin()];
+        let normal = [a.cos() / radii[0], a.sin() / radii[1]];
+        let len = normal[0].hypot(normal[1]);
+        let dx = q[0] + normal[0] / len * pad * side;
+        let dy = q[1] + normal[1] / len * pad * side;
+        UiVertex {
+            pos: to_ndc(p[0] + dx, p[1] + dy, vp[0], vp[1]),
+            uv: solid_uv(),
+            color,
+            edge: [dx / radii[0], dy / radii[1], radius, -half - 2.0],
+        }
+    };
+    for i in 0..n {
+        let a = start + sweep * i as f32 / n as f32;
+        let b = start + sweep * (i + 1) as f32 / n as f32;
+        let q = [
+            vertex(a, -1.0),
+            vertex(a, 1.0),
+            vertex(b, -1.0),
+            vertex(b, 1.0),
+        ];
+        v.extend([q[0], q[1], q[2], q[2], q[1], q[3]]);
+    }
+}
+
+pub(crate) fn dashed_arc(
+    v: &mut Vec<UiVertex>,
+    p: [f32; 2],
+    radii: [f32; 2],
+    [thickness, dash]: [f32; 2],
+    [start, sweep]: [f32; 2],
+    color: [f32; 4],
+    vp: [f32; 2],
+) {
+    let n = (radii[0].max(radii[1]) * sweep / (dash * 0.2))
+        .ceil()
+        .clamp(32.0, 4096.0) as usize;
+    let point = |i: usize| {
+        let a = start + sweep * i as f32 / n as f32;
+        [p[0] + radii[0] * a.cos(), p[1] + radii[1] * a.sin()]
+    };
+    let mut distance = 0.0;
+    for i in 0..n {
+        let a = point(i);
+        let b = point(i + 1);
+        if distance % (dash * 2.0) < dash {
+            line(v, a, b, thickness, color, vp);
+        }
+        distance += (b[0] - a[0]).hypot(b[1] - a[1]);
+    }
+}
+
+pub(crate) fn disk(v: &mut Vec<UiVertex>, p: [f32; 2], r: f32, color: [f32; 4], vp: [f32; 2]) {
+    let pad = r + 1.0;
+    let local = [[-pad, -pad], [pad, -pad], [-pad, pad], [pad, pad]];
+    let vertices = local.map(|[x, y]| UiVertex {
+        pos: to_ndc(p[0] + x, p[1] + y, vp[0], vp[1]),
+        uv: solid_uv(),
+        color,
+        edge: [x, y, r, -1.0],
+    });
+    v.extend([
+        vertices[0],
+        vertices[1],
+        vertices[2],
+        vertices[2],
+        vertices[1],
+        vertices[3],
+    ]);
+}
+
+pub(crate) fn tracked_heading(
+    v: &mut Vec<UiVertex>,
+    pos: [f32; 2],
+    px: f32,
+    text: &str,
+    tracking: f32,
+    color: [f32; 4],
+    vp: [f32; 2],
+) {
+    let face = if px > 48.0 { Face::Display } else { Face::Sans };
+    let mut x = pos[0];
+    for ch in text.chars() {
+        font_text(v, [x, pos[1]], px, face, &ch.to_string(), color, vp);
+        x += typeface::width(face, &ch.to_string(), px) + tracking;
+    }
+}
+
+pub(crate) fn keycap(
+    v: &mut Vec<UiVertex>,
+    r: Rect,
+    key: &str,
+    s: f32,
+    color: [f32; 4],
+    vp: [f32; 2],
+) {
+    outline(v, r, s.max(0.75), [color[0], color[1], color[2], 0.4], vp);
+    push_text(
+        v,
+        r.x + (r.w - text_width(key, 0.75 * s)) * 0.5,
+        r.y + 2.0 * s,
+        0.75 * s,
+        key,
+        color,
+        vp,
+    );
+}
+
+pub(crate) fn switch(v: &mut Vec<UiVertex>, r: Rect, on: bool, color: [f32; 4], vp: [f32; 2]) {
+    outline(v, r, (r.h / 12.0).max(0.75), color, vp);
+    if on {
+        push_rect(v, r.x, r.y, r.w, r.h, color, vp);
+    }
+    let unit = r.h / 12.0;
+    push_rect(
+        v,
+        r.x + if on { 12.0 * unit } else { 2.0 * unit },
+        r.y + 2.0 * unit,
+        6.0 * unit,
+        6.0 * unit,
+        if on { BG } else { color },
+        vp,
+    );
+}
+
+/// Trim triangle geometry at a scroll viewport; interpolate coverage UVs at each edge.
+pub(crate) fn clip(v: &mut Vec<UiVertex>, start: usize, r: Rect, vp: [f32; 2]) {
+    let min = to_ndc(r.x, r.y + r.h, vp[0], vp[1]);
+    let max = to_ndc(r.x + r.w, r.y, vp[0], vp[1]);
+    let source = v.split_off(start);
+    for tri in source.as_chunks::<3>().0 {
+        let mut poly = tri.to_vec();
+        for (axis, bound, greater) in [
+            (0, min[0], true),
+            (0, max[0], false),
+            (1, min[1], true),
+            (1, max[1], false),
+        ] {
+            let old = std::mem::take(&mut poly);
+            if old.is_empty() {
+                break;
+            }
+            for i in 0..old.len() {
+                let a = old[i];
+                let b = old[(i + 1) % old.len()];
+                let inside = |p: UiVertex| {
+                    if greater {
+                        p.pos[axis] >= bound
+                    } else {
+                        p.pos[axis] <= bound
+                    }
+                };
+                if inside(a) {
+                    poly.push(a);
+                }
+                if inside(a) != inside(b) {
+                    let t = (bound - a.pos[axis]) / (b.pos[axis] - a.pos[axis]);
+                    let mut p = a;
+                    for j in 0..2 {
+                        p.pos[j] = a.pos[j] + t * (b.pos[j] - a.pos[j]);
+                        p.uv[j] = a.uv[j] + t * (b.uv[j] - a.uv[j]);
+                    }
+                    for j in 0..4 {
+                        p.color[j] = a.color[j] + t * (b.color[j] - a.color[j]);
+                        p.edge[j] = a.edge[j] + t * (b.edge[j] - a.edge[j]);
+                    }
+                    poly.push(p);
+                }
+            }
+        }
+        for i in 1..poly.len().saturating_sub(1) {
+            v.extend([poly[0], poly[i], poly[i + 1]]);
+        }
+    }
+}
+
+pub(crate) fn outline(
+    v: &mut Vec<UiVertex>,
+    r: Rect,
+    thickness: f32,
+    color: [f32; 4],
+    vp: [f32; 2],
+) {
+    for edge in [
+        Rect { h: thickness, ..r },
+        Rect {
+            y: r.y + r.h - thickness,
+            h: thickness,
+            ..r
+        },
+        Rect { w: thickness, ..r },
+        Rect {
+            x: r.x + r.w - thickness,
+            w: thickness,
+            ..r
+        },
+    ] {
+        push_rect(v, edge.x, edge.y, edge.w, edge.h, color, vp);
+    }
+}
+
+pub(crate) fn button(
+    v: &mut Vec<UiVertex>,
+    r: Rect,
+    label: &str,
+    s: f32,
+    primary: bool,
+    hovered: bool,
+    vp: [f32; 2],
+) {
+    let mut r = r;
+    if crate::motion::pressed(label, r) {
+        r.y += 3.0 * s;
+    }
+    let color = if primary {
+        ACCENT
+    } else if hovered {
+        [0.6, 0.7, 1.0, 0.13]
+    } else {
+        [0.0; 4]
+    };
+    push_rect(
+        v,
+        r.x,
+        r.y + r.h,
+        r.w,
+        3.0 * s,
+        [0.0006, 0.003, 0.023, 0.8],
+        vp,
+    );
+    push_rect(v, r.x, r.y, r.w, r.h, color, vp);
+    outline(v, r, s.max(0.75), if primary { ACCENT } else { LINE }, vp);
+    let (label, key) = label
+        .rsplit_once(" [")
+        .map_or((label, None), |(a, b)| (a, Some(b.trim_end_matches(']'))));
+    let size = (0.90 * s).min((r.w - 18.0 * s) / text_width(label, 1.0).max(1.0));
+    let ink = if primary { BG } else { INK };
+    let key_w = key.map_or(0.0, |k| text_width(k, 0.75 * s) + 10.0 * s);
+    let total = text_width(label, size) + if key.is_some() { 14.0 * s + key_w } else { 0.0 };
+    let x = r.x + (r.w - total) * 0.5;
+    push_text(v, x, r.center_y() - 6.0 * size, size, label, ink, vp);
+    if let Some(key) = key {
+        keycap(
+            v,
+            Rect {
+                x: x + text_width(label, size) + 14.0 * s,
+                y: r.center_y() - 8.0 * s,
+                w: key_w,
+                h: 16.0 * s,
+            },
+            key,
+            s,
+            ink,
+            vp,
+        );
+    }
+}
+
+pub(crate) fn menu_background(v: &mut Vec<UiVertex>, vp: [f32; 2], s: f32) {
+    let nx = 32;
+    let ny = 18;
+    for iy in 0..ny {
+        for ix in 0..nx {
+            let corners = [[ix, iy], [ix + 1, iy], [ix, iy + 1], [ix + 1, iy + 1]];
+            let vertices = corners.map(|[x, y]| {
+                let px = x as f32 / nx as f32;
+                let py = y as f32 / ny as f32;
+                let d = (((px - 0.5) / 0.7).powi(2) + ((py - 0.42) / 0.6).powi(2)).sqrt();
+                let f = (d / 0.75).clamp(0.0, 1.0);
+                let c = [
+                    BG[0] * (1.0 - f) + 0.00335 * f,
+                    BG[1] * (1.0 - f) + 0.016 * f,
+                    BG[2] * (1.0 - f) + 0.162 * f,
+                    0.66 + 0.20 * f,
+                ];
+                UiVertex {
+                    pos: to_ndc(px * vp[0], py * vp[1], vp[0], vp[1]),
+                    uv: solid_uv(),
+                    color: c,
+                    edge: [0.0, 0.0, -1.0, 0.0],
+                }
+            });
+            v.extend([
+                vertices[0],
+                vertices[1],
+                vertices[2],
+                vertices[2],
+                vertices[1],
+                vertices[3],
+            ]);
+        }
+    }
+    let step = (32.0 * s).max(8.0);
+    let mut x = 0.0;
+    while x < vp[0] {
+        push_rect(v, x.round(), 0.0, 1.0, vp[1], [0.69, 0.75, 1.0, 0.015], vp);
+        x += step;
+    }
+    let mut y = 0.0;
+    while y < vp[1] {
+        push_rect(v, 0.0, y.round(), vp[0], 1.0, [0.69, 0.75, 1.0, 0.015], vp);
+        y += step;
+    }
+}
+
+pub(crate) fn brackets(v: &mut Vec<UiVertex>, r: Rect, color: [f32; 4], s: f32, vp: [f32; 2]) {
+    let progress = crate::motion::snap();
+    let gap = (5.0 + 13.0 * (1.0 - progress).powi(3)) * s;
+    let mut color = color;
+    color[3] *= progress;
+    let len = 12.0 * s;
+    let thick = 1.5 * s;
+    for (x, y, dx, dy) in [
+        (r.x - gap, r.y - gap, 1.0, 1.0),
+        (r.x + r.w + gap, r.y - gap, -1.0, 1.0),
+        (r.x - gap, r.y + r.h + gap, 1.0, -1.0),
+        (r.x + r.w + gap, r.y + r.h + gap, -1.0, -1.0),
+    ] {
+        push_rect(
+            v,
+            if dx > 0.0 { x } else { x - len },
+            if dy > 0.0 { y } else { y - thick },
+            len,
+            thick,
+            color,
+            vp,
+        );
+        push_rect(
+            v,
+            if dx > 0.0 { x } else { x - thick },
+            if dy > 0.0 { y } else { y - len },
+            thick,
+            len,
+            color,
+            vp,
+        );
     }
 }
 
@@ -441,98 +1077,121 @@ pub fn build_lock(
     target: Option<&str>,
 ) {
     let s = layout.scale;
-    let r = layout.lock;
-    let color = if target.is_some() {
-        [0.45, 0.88, 0.77, 1.0]
-    } else {
-        [0.58, 0.65, 0.74, 1.0]
-    };
-    push_rect(
-        verts,
-        r.x,
-        r.y,
-        r.w,
-        r.h,
-        if target.is_some() {
-            [0.045, 0.17, 0.16, 0.98]
-        } else {
-            [0.05, 0.07, 0.10, 0.95]
-        },
-        viewport,
-    );
-    // Padlock body and shackle; unlocked shackle has an open right side.
-    let x = r.x + 9.0 * s;
-    let y = r.y + 12.0 * s;
-    push_rect(verts, x, y, 12.0 * s, 10.0 * s, color, viewport);
-    push_rect(
-        verts,
-        x + 2.0 * s,
-        y - 6.0 * s,
-        2.0 * s,
-        7.0 * s,
-        color,
-        viewport,
-    );
-    push_rect(
-        verts,
-        x + 2.0 * s,
-        y - 7.0 * s,
-        8.0 * s,
-        2.0 * s,
-        color,
-        viewport,
-    );
+    let mut r = layout.lock;
+    if crate::motion::pressed("Unlock [U]", r) {
+        r.y += 3.0 * s;
+    }
+    let color = if target.is_some() { OK } else { MUTED };
     if target.is_some() {
         push_rect(
             verts,
-            x + 8.0 * s,
-            y - 6.0 * s,
-            2.0 * s,
-            7.0 * s,
-            color,
+            r.x,
+            r.y,
+            r.w,
+            r.h,
+            [OK[0], OK[1], OK[2], 0.08],
+            viewport,
+        );
+        outline(verts, r, s, OK, viewport);
+    } else {
+        for (a, b) in [
+            ([r.x, r.y], [r.right(), r.y]),
+            ([r.x, r.y + r.h], [r.right(), r.y + r.h]),
+            ([r.x, r.y], [r.x, r.y + r.h]),
+            ([r.right(), r.y], [r.right(), r.y + r.h]),
+        ] {
+            icon_segment(verts, [a, b], s, LINE, true, viewport);
+        }
+    }
+    let ret = Rect {
+        x: r.x + 14.0 * s,
+        y: r.center_y() - 5.0 * s,
+        w: 10.0 * s,
+        h: 10.0 * s,
+    };
+    brackets(verts, ret, color, s * 0.5, viewport);
+    let x = r.x + 38.0 * s;
+    eyebrow(
+        verts,
+        [x, r.center_y() - 10.0 * s],
+        7.5 * s,
+        if target.is_some() {
+            "FOLLOWING"
+        } else {
+            "FREE LOOK"
+        },
+        color,
+        viewport,
+    );
+    let px = if target.is_some() { 10.5 } else { 8.5 } * s;
+    let mut label = target.unwrap_or("right-click to lock").to_string();
+    let available = r.right() - x - if target.is_some() { 30.0 } else { 9.0 } * s;
+    if typeface::width(Face::Mono, &label, px) > available {
+        while !label.is_empty() && typeface::width(Face::Mono, &format!("{label}…"), px) > available
+        {
+            label.pop();
+        }
+        label.push('…');
+    }
+    font_text(
+        verts,
+        [x, r.center_y() + 2.0 * s],
+        px,
+        Face::Mono,
+        &label,
+        if target.is_some() { INK } else { MUTED },
+        viewport,
+    );
+    if target.is_some() {
+        toolbar_keycap(
+            verts,
+            [r.right() - (9.0 + key_width("U")) * s, r.center_y()],
+            "U",
+            s,
+            OK,
             viewport,
         );
     }
-    let label = if target.is_some() {
-        "Locked [U]"
-    } else {
-        "Unlocked"
-    };
-    push_text(
-        verts,
-        r.x + 30.0 * s,
-        r.y + 6.0 * s,
-        1.0 * s,
-        label,
-        color,
-        viewport,
+}
+
+pub fn build_hidden(v: &mut Vec<UiVertex>, l: &Layout, vp: [f32; 2], target: Option<&str>) {
+    push_rect(
+        v,
+        l.home.x,
+        l.home.y,
+        l.home.w,
+        l.home.h,
+        [BG[0], BG[1], BG[2], 0.93],
+        vp,
     );
-    let detail = target.unwrap_or("[U] / click sky");
-    let columns = ((r.w - 12.0 * s) / (7.0 * s)).floor() as usize;
-    let mut detail: String = detail
-        .chars()
-        .map(|c| if c.is_ascii() { c } else { '?' })
-        .collect();
-    if detail.len() > columns {
-        detail.truncate(columns.saturating_sub(3));
-        detail.push_str("...");
-    }
-    push_text(
-        verts,
-        r.x + 6.0 * s,
-        r.y + 23.0 * s,
-        0.875 * s,
-        &detail,
-        color,
-        viewport,
+    outline(v, l.home, l.scale, LINE, vp);
+    toolbar_button(
+        v,
+        l.home,
+        if l.puzzle { "Maps [M]" } else { "Menu [M]" },
+        l.style,
+        false,
+        false,
+        vp,
     );
+    push_rect(
+        v,
+        l.lock.x,
+        l.lock.y,
+        l.lock.w,
+        l.lock.h,
+        [BG[0], BG[1], BG[2], 0.85],
+        vp,
+    );
+    build_lock(v, l, vp, target);
+    button(v, l.hide, "HUD hidden [H]", l.scale, false, false, vp);
 }
 
 pub(crate) fn toolbar_panel(
     verts: &mut Vec<UiVertex>,
     bar: Rect,
     scale: f32,
-    groups: &[Rect],
+    dividers: &[f32],
     viewport: [f32; 2],
 ) {
     push_rect(
@@ -541,244 +1200,662 @@ pub(crate) fn toolbar_panel(
         bar.y,
         bar.w,
         bar.h,
-        [0.015, 0.02, 0.03, 0.86],
+        [BG[0], BG[1], BG[2], 0.96],
         viewport,
     );
-    push_rect(
-        verts,
-        bar.x,
-        bar.y,
-        bar.w,
-        scale,
-        [1.0, 1.0, 1.0, 0.10],
-        viewport,
+    push_rect(verts, bar.x, bar.y, bar.w, scale, LINE, viewport);
+    for x in dividers {
+        push_rect(verts, *x - scale, bar.y, scale, bar.h, LINE, viewport);
+    }
+}
+
+pub(crate) fn toolbar_keycap(
+    v: &mut Vec<UiVertex>,
+    pos: [f32; 2],
+    key: &str,
+    s: f32,
+    color: [f32; 4],
+    vp: [f32; 2],
+) {
+    let r = Rect {
+        x: pos[0],
+        y: pos[1] - 7.25 * s,
+        w: key_width(key) * s,
+        h: 14.5 * s,
+    };
+    outline(v, r, s, [color[0], color[1], color[2], 0.4], vp);
+    font_text(
+        v,
+        [
+            r.x + (r.w - typeface::width(Face::Mono, key, 8.5 * s)) * 0.5,
+            pos[1] - 4.25 * s,
+        ],
+        8.5 * s,
+        Face::Mono,
+        key,
+        color,
+        vp,
     );
-    for next_group in groups {
-        push_rect(
-            verts,
-            next_group.x - 12.0 * scale,
-            bar.y + 13.0 * scale,
-            scale,
-            26.0 * scale,
-            [0.32, 0.38, 0.46, 0.8],
-            viewport,
+}
+
+// Measured content, with the same 10.5px label and 8.5px keycap in every group.
+// Navigation uses fixed slots; other buttons size to their content without shrinking fonts.
+fn toolbar_content(r: Rect, label: &str, style: ToolbarStyle) -> (f32, Option<f32>, Option<f32>) {
+    let s = style.scale;
+    let (name, binding) = binding(label);
+    let key = binding.filter(|_| style.keys || name == "Check theory");
+    let icon_only = matches!(name, "Targets" | "Hide" | "Settings");
+    let nav = matches!(name, "Menu" | "Maps" | "Theory" | "Observe");
+    let text_w = if icon_only {
+        0.0
+    } else {
+        typeface::width(Face::Mono, name, 10.5 * s)
+    };
+    if nav {
+        return (
+            r.x + 30.0 * s,
+            Some(r.x + 9.0 * s),
+            key.map(|k| r.right() - (9.0 + key_width(k)) * s),
         );
     }
+    let icon_w = if icon_only { 15.0 * s } else { 0.0 };
+    let key_gap = if name == "Check theory" { 24.0 } else { 8.0 };
+    let key_w = key.map_or(0.0, |k| (key_gap + key_width(k)) * s);
+    let x = r.x + (r.w - text_w - icon_w - key_w) * 0.5;
+    (
+        x,
+        icon_only.then_some(x),
+        key.map(|_| x + text_w + icon_w + key_gap * s),
+    )
 }
 
 pub(crate) fn toolbar_button(
     verts: &mut Vec<UiVertex>,
     rect: Rect,
     label: &str,
-    scale: f32,
+    style: ToolbarStyle,
     active: bool,
     hovered: bool,
     viewport: [f32; 2],
 ) {
-    let color = if active {
-        [0.08, 0.25, 0.23, 0.98]
-    } else if hovered {
-        [0.12, 0.20, 0.28, 0.98]
-    } else {
-        [0.10, 0.13, 0.17, 0.95]
-    };
-    push_rect(verts, rect.x, rect.y, rect.w, rect.h, color, viewport);
-    let size = if matches!(label, "←" | "→") {
-        2.0
-    } else {
-        1.1
-    } * scale;
-    let size = size.min((rect.w - 8.0 * scale) / text_width(label, 1.0).max(1.0));
-    push_text(
-        verts,
-        rect.x + (rect.w - text_width(label, size)) * 0.5,
-        rect.center_y() - 4.0 * size,
-        size,
-        label,
-        [0.88, 0.92, 0.98, 1.0],
-        viewport,
-    );
-}
-
-fn build_bar(verts: &mut Vec<UiVertex>, layout: &Layout, w: f32, h: f32, state: HudState<'_>) {
-    let show_labels = state.labels.show;
-    let sim_time = state.sim_time;
-    let s = layout.scale;
-    let bar = layout.bar;
-    toolbar_panel(
-        verts,
-        bar,
-        s,
-        &[layout.time_label, layout.lock, layout.exposure],
-        [w, h],
-    );
-    push_text(
-        verts,
-        layout.time_label.x,
-        layout.time_label.center_y() - 4.4 * s,
-        1.1 * s,
-        "Time",
-        [0.68, 0.75, 0.84, 1.0],
-        [w, h],
-    );
-    build_lock(verts, layout, [w, h], state.lock_label);
-    let ts = 1.1 * s;
-    let button = |verts: &mut Vec<UiVertex>, rect: Rect, label: &str, active: bool| {
-        toolbar_button(verts, rect, label, s, active, false, [w, h]);
-    };
-    button(verts, layout.home, "[M]enu", false);
-    button(verts, layout.orientation, "[S]tars", state.steady_stars);
-    button(
-        verts,
-        layout.toggle,
-        if layout.puzzle {
-            "Draw [Tab]"
-        } else {
-            "[L]abels"
-        },
-        !layout.puzzle && show_labels,
-    );
-    button(
-        verts,
-        layout.stop,
-        "Stop [Spc]",
-        state.minutes_per_second == 0.0,
-    );
-    button(verts, layout.slower, "←", false);
-    button(verts, layout.faster, "→", false);
-    button(verts, layout.previous_day, "-1d [PgDn]", false);
-    button(verts, layout.next_day, "+1d [PgUp]", false);
-    let speed_text = if state.minutes_per_second == 0.0 {
-        "0 min/s".into()
-    } else {
-        format!("{:+} min/s", state.minutes_per_second)
-    };
-    let speed_scale = ts.min((layout.speed.w - 8.0 * s) / text_width(&speed_text, 1.0));
-    push_text(
-        verts,
-        layout.speed.x + (layout.speed.w - text_width(&speed_text, speed_scale)) * 0.5,
-        layout.speed.center_y() - 4.0 * speed_scale,
-        speed_scale,
-        &speed_text,
-        [0.85, 0.88, 0.92, 1.0],
-        [w, h],
-    );
-    let clock = layout.clock;
-    let time_text = if state.day_step_failed {
-        "No day found".into()
-    } else {
-        format!("{:.1} min", sim_time * 1440.0)
-    };
-    let clock_scale = ts.min((clock.w - 8.0 * s) / (time_text.len() as f32 * 8.0));
-    push_text(
-        verts,
-        clock.x + 4.0 * s,
-        clock.center_y() - 4.0 * clock_scale,
-        clock_scale,
-        &time_text,
-        [0.85, 0.88, 0.92, 1.0],
-        [w, h],
-    );
-
-    // Exposure compensation is applied to presentation in both modes.
-    let slider = layout.exposure;
-    let exposure_color = |manual: [f32; 4]| {
-        if state.auto_exposure {
-            [0.46, 0.46, 0.46, 1.0]
-        } else {
-            manual
-        }
-    };
-    let caption = format!("EV {:+.2} [,][.]", state.ev_bias);
-    push_text(
-        verts,
-        slider.x,
-        slider.y,
-        s * 1.1,
-        &caption,
-        exposure_color([0.88, 0.92, 0.98, 1.0]),
-        [w, h],
-    );
-    let track_y = slider.y + 23.0 * s;
-    push_rect(
-        verts,
-        slider.x,
-        track_y,
-        slider.w,
-        2.0 * s,
-        exposure_color([0.3, 0.35, 0.43, 1.0]),
-        [w, h],
-    );
-    let fraction = ((state.ev_bias - MIN_EV) / (MAX_EV - MIN_EV)).clamp(0.0, 1.0);
-    push_rect(
-        verts,
-        slider.x,
-        track_y,
-        slider.w * fraction,
-        2.0 * s,
-        exposure_color([0.45, 0.73, 0.95, 1.0]),
-        [w, h],
-    );
-    push_rect(
-        verts,
-        slider.x + slider.w * 0.5,
-        track_y - 3.0 * s,
-        s,
-        8.0 * s,
-        exposure_color([0.65, 0.68, 0.73, 1.0]),
-        [w, h],
-    );
-    push_rect(
-        verts,
-        slider.x + slider.w * fraction - 3.0 * s,
-        track_y - 4.0 * s,
-        6.0 * s,
-        10.0 * s,
-        exposure_color([0.78, 0.91, 1.0, 1.0]),
-        [w, h],
-    );
-
-    let a = layout.auto;
-    push_rect(verts, a.x, a.y, a.w, a.h, [0.10, 0.11, 0.13, 0.95], [w, h]);
-    let check_y = a.center_y() - 6.0 * s;
-    push_rect(
-        verts,
-        a.x + 8.0 * s,
-        check_y,
-        12.0 * s,
-        12.0 * s,
-        [0.35, 0.40, 0.48, 1.0],
-        [w, h],
-    );
-    push_rect(
-        verts,
-        a.x + 9.0 * s,
-        check_y + s,
-        10.0 * s,
-        10.0 * s,
-        [0.05, 0.06, 0.07, 1.0],
-        [w, h],
-    );
-    if state.auto_exposure {
+    let s = style.scale;
+    let mut r = rect;
+    let pressed = crate::motion::pressed(label, rect);
+    if pressed {
+        r.y += 3.0 * s;
+    }
+    let (name, binding) = binding(label);
+    let primary = name == "Check theory";
+    if primary || active || hovered {
         push_rect(
             verts,
-            a.x + 11.0 * s,
-            check_y + 3.0 * s,
-            6.0 * s,
-            6.0 * s,
-            [0.55, 0.85, 1.0, 1.0],
-            [w, h],
+            r.x,
+            r.y,
+            r.w,
+            r.h,
+            if primary {
+                ACCENT
+            } else if active {
+                INK
+            } else {
+                [INK[0], INK[1], INK[2], 0.10]
+            },
+            viewport,
+        );
+        if !primary {
+            outline(verts, r, s, LINE, viewport);
+        }
+        if (primary || active) && !pressed {
+            push_rect(
+                verts,
+                r.x,
+                r.y + r.h,
+                r.w,
+                3.0 * s,
+                [0.0006, 0.003, 0.023, 0.8],
+                viewport,
+            );
+        }
+    }
+    let ink = if primary || active { BG } else { INK };
+    let (x, icon, key) = toolbar_content(r, label, style);
+    if let Some(x) = icon {
+        toolbar_icon(verts, [x + 7.5 * s, r.center_y()], name, s, ink, viewport);
+    }
+    if !matches!(name, "Targets" | "Hide" | "Settings") {
+        font_text(
+            verts,
+            [x, r.center_y() - 5.25 * s],
+            10.5 * s,
+            Face::Mono,
+            name,
+            ink,
+            viewport,
         );
     }
-    push_text(
-        verts,
-        a.x + 27.0 * s,
-        a.center_y() - 4.0 * ts,
-        ts,
-        "Auto [A]",
-        [0.88, 0.92, 0.98, 1.0],
-        [w, h],
+    if let (Some(x), Some(key)) = (key, binding) {
+        toolbar_keycap(verts, [x, r.center_y()], key, s, ink, viewport);
+    }
+}
+
+fn toolbar_icon(
+    v: &mut Vec<UiVertex>,
+    p: [f32; 2],
+    name: &str,
+    s: f32,
+    ink: [f32; 4],
+    vp: [f32; 2],
+) {
+    match name {
+        "Menu" | "Maps" => {
+            for row in [-3.125, 0.0, 3.125] {
+                line(
+                    v,
+                    [p[0] - 5.0 * s, p[1] + row * s],
+                    [p[0] + 5.0 * s, p[1] + row * s],
+                    s,
+                    ink,
+                    vp,
+                );
+            }
+        }
+        "Observe" | "Hide" => {
+            // The Blueprint eye contour is two quadratic arches.
+            for side in [-1.0, 1.0] {
+                let at = |i: usize| {
+                    let t = i as f32 / 16.0;
+                    [
+                        p[0] + (12.0 * t - 6.0) * s,
+                        p[1] + side * 16.0 * t * (1.0 - t) * s,
+                    ]
+                };
+                for i in 0..16 {
+                    line(v, at(i), at(i + 1), s, ink, vp);
+                }
+            }
+            ellipse(v, p, [2.0 * s, 2.0 * s], s, ink, vp);
+            if name == "Hide" {
+                line(
+                    v,
+                    [p[0] - 5.0 * s, p[1] + 5.0 * s],
+                    [p[0] + 5.0 * s, p[1] - 5.0 * s],
+                    1.2 * s,
+                    ink,
+                    vp,
+                );
+            }
+        }
+        "Settings" => {
+            ellipse(v, p, [2.0 * s, 2.0 * s], s, ink, vp);
+            let at = |i: usize| {
+                let angle = (i as f32 - 0.5) * std::f32::consts::TAU / 32.0;
+                let radius = if i % 4 < 2 { 6.0 } else { 4.5 } * s;
+                [p[0] + angle.cos() * radius, p[1] + angle.sin() * radius]
+            };
+            for i in 0..32 {
+                line(v, at(i), at((i + 1) % 32), s, ink, vp);
+            }
+        }
+        "Targets" => {
+            ellipse(v, p, [5.0 * s, 5.0 * s], s, ink, vp);
+            ellipse(v, p, [1.25 * s, 1.25 * s], s, ink, vp);
+            for axis in 0..2 {
+                for sign in [-1.0, 1.0] {
+                    let mut a = p;
+                    let mut b = p;
+                    a[axis] += sign * 3.75 * s;
+                    b[axis] += sign * 6.25 * s;
+                    line(v, a, b, s, ink, vp);
+                }
+            }
+        }
+        _ => {
+            let u = 15.0 / 24.0 * s;
+            let q = |xy: [f32; 2]| [p[0] + (xy[0] - 12.0) * u, p[1] + (xy[1] - 12.0) * u];
+            for (a, b) in [([9.4, 10.8], [16.0, 7.5]), ([9.4, 13.2], [16.0, 16.5])] {
+                line(v, q(a), q(b), 1.5 * u, ink, vp);
+            }
+            for (point, r) in [([7.0, 12.0], 2.6), ([18.0, 6.5], 2.2), ([18.0, 17.5], 2.2)] {
+                ellipse(v, q(point), [r * u, r * u], 1.5 * u, ink, vp);
+            }
+        }
+    }
+}
+
+// Exact geometry from the Blueprint keepHorizon / keepStars SVGs.
+fn orientation_icon(
+    v: &mut Vec<UiVertex>,
+    origin: [f32; 2],
+    scale: f32,
+    stars: bool,
+    active: bool,
+    vp: [f32; 2],
+) {
+    let u = scale * 30.0 / 32.0;
+    let q = |p: [f32; 2]| [origin[0] + p[0] * u, origin[1] + p[1] * u];
+    let ink = if active { BG } else { INK };
+    let spin = if active {
+        [0.462, 0.254, 0.0, 1.0]
+    } else {
+        ACCENT
+    };
+    let points = if stars {
+        [[8.0, 7.0], [15.0, 4.0], [23.0, 6.0]]
+    } else {
+        [[8.0, 9.0], [15.0, 6.0], [23.0, 8.0]]
+    };
+    for pair in points.windows(2) {
+        icon_segment(v, [q(pair[0]), q(pair[1])], 1.4 * u, ink, !stars, vp);
+    }
+    for p in points {
+        disk(v, q(p), if stars { 1.5 * u } else { 1.3 * u }, ink, vp);
+    }
+    if stars {
+        icon_segment(v, [q([2.0, 20.0]), q([24.0, 14.5])], 1.4 * u, ink, true, vp);
+    } else {
+        line(v, q([2.0, 16.5]), q([30.0, 16.5]), 1.4 * u, ink, vp);
+        for x in [6.0, 12.0, 18.0, 24.0, 30.0] {
+            line(
+                v,
+                q([x, 16.5]),
+                q([x - 2.5, 20.0]),
+                u,
+                [ink[0], ink[1], ink[2], 0.6],
+                vp,
+            );
+        }
+    }
+    let curve = if stars {
+        [[16.0, 21.5], [23.0, 22.0], [29.5, 19.0], [30.5, 12.5]]
+    } else {
+        [[6.0, 4.5], [10.0, 0.5], [21.0, 0.5], [26.0, 4.0]]
+    };
+    let at = |i: usize| {
+        let t = i as f32 / 24.0;
+        let a = 1.0 - t;
+        q([
+            a.powi(3) * curve[0][0]
+                + 3.0 * a * a * t * curve[1][0]
+                + 3.0 * a * t * t * curve[2][0]
+                + t.powi(3) * curve[3][0],
+            a.powi(3) * curve[0][1]
+                + 3.0 * a * a * t * curve[1][1]
+                + 3.0 * a * t * t * curve[2][1]
+                + t.powi(3) * curve[3][1],
+        ])
+    };
+    for i in 0..24 {
+        line(v, at(i), at(i + 1), 1.4 * u, spin, vp);
+    }
+    let (tip, ends) = if stars {
+        ([30.5, 12.5], [[27.9, 14.7], [31.7, 15.7]])
+    } else {
+        ([26.0, 4.0], [[22.8, 4.3], [25.1, 1.0]])
+    };
+    for end in ends {
+        line(v, q(tip), q(end), 1.4 * u, spin, vp);
+    }
+}
+fn icon_segment(
+    v: &mut Vec<UiVertex>,
+    [a, b]: [[f32; 2]; 2],
+    width: f32,
+    color: [f32; 4],
+    dashed: bool,
+    vp: [f32; 2],
+) {
+    if !dashed {
+        line(v, a, b, width, color, vp);
+        return;
+    }
+    let length = (b[0] - a[0]).hypot(b[1] - a[1]);
+    let unit = width / 1.4;
+    let point = |t: f32| {
+        [
+            a[0] + (b[0] - a[0]) * t / length,
+            a[1] + (b[1] - a[1]) * t / length,
+        ]
+    };
+    let mut d = 0.0;
+    while d < length {
+        line(
+            v,
+            point(d),
+            point((d + 2.0 * unit).min(length)),
+            width,
+            [color[0], color[1], color[2], 0.75],
+            vp,
+        );
+        d += 3.8 * unit;
+    }
+}
+
+fn build_bar(v: &mut Vec<UiVertex>, l: &Layout, w: f32, h: f32, state: HudState<'_>) {
+    let vp = [w, h];
+    let s = l.scale;
+    toolbar_panel(v, l.bar, s, &l.dividers, vp);
+    let text = |v: &mut Vec<UiVertex>, r: Rect, y: f32, size: f32, value: &str, color| {
+        let size = size.min((r.w / s - 8.0) / text_width(value, 1.0).max(1.0));
+        push_text(
+            v,
+            r.x + (r.w - text_width(value, size * s)) * 0.5,
+            r.y + y * s,
+            size * s,
+            value,
+            color,
+            vp,
+        )
+    };
+    let b = |v: &mut Vec<UiVertex>, r: Rect, value: &str, on: bool| {
+        toolbar_button(v, r, value, l.style, on, false, vp)
+    };
+    b(
+        v,
+        l.home,
+        if l.puzzle { "Maps [M]" } else { "Menu [M]" },
+        false,
     );
+    b(
+        v,
+        l.toggle,
+        if l.puzzle {
+            "Theory [Tab]"
+        } else {
+            "Labels [L]"
+        },
+        !l.puzzle && state.labels.show,
+    );
+    text(v, l.time_label, 14.0, 0.64, "TIME", MUTED);
+    for (r, right, key) in [(l.slower, false, "←"), (l.faster, true, "→")] {
+        let y = r.y
+            + r.h * 0.5
+            + if crate::motion::pressed(key, r) {
+                3.0 * s
+            } else {
+                0.0
+            };
+        let x = r.x + r.w * 0.5;
+        let sign = if right { 1.0 } else { -1.0 };
+        let tip = [x + sign * 3.0 * s, y];
+        line(v, [x - sign * 3.0 * s, y - 6.0 * s], tip, 1.2 * s, INK, vp);
+        line(v, tip, [x - sign * 3.0 * s, y + 6.0 * s], 1.2 * s, INK, vp);
+    }
+    let speed = if state.minutes_per_second == 0.0 {
+        "0 min/s".into()
+    } else {
+        let magnitude = state.minutes_per_second.abs();
+        let value = if magnitude.round() == 1000.0 {
+            "1,000".into()
+        } else {
+            format!("{magnitude:.0}")
+        };
+        format!(
+            "{}{value} min/s",
+            if state.minutes_per_second < 0.0 {
+                "−"
+            } else {
+                "+"
+            }
+        )
+    };
+    text(v, l.speed, 3.0, 0.825, &speed, INK);
+    let step = crate::WARPS
+        .iter()
+        .position(|n| (*n * 1440.0 - state.minutes_per_second).abs() < 0.001)
+        .unwrap_or(4);
+    for i in 0usize..9 {
+        let height = (4.0 + i.abs_diff(4) as f32 * 2.5) * s;
+        push_rect(
+            v,
+            l.speed.x + 4.0 * s + i as f32 * 5.0 * s,
+            l.speed.y + 31.0 * s - height,
+            3.0 * s,
+            height,
+            if i == step {
+                ACCENT
+            } else {
+                [INK[0], INK[1], INK[2], 0.25]
+            },
+            vp,
+        );
+    }
+    let compact = !l.style.keys;
+    let mut r = l.stop;
+    let pressed = crate::motion::pressed("Play [Spc]", r);
+    if pressed {
+        r.y += 3.0 * s;
+    }
+    push_rect(
+        v,
+        r.x,
+        r.y + r.h,
+        r.w,
+        if pressed { 0.0 } else { 3.0 * s },
+        [0.0006, 0.003, 0.023, 0.8],
+        vp,
+    );
+    push_rect(v, r.x, r.y, r.w, r.h, ACCENT, vp);
+    let p = [
+        r.x + if compact { r.w * 0.5 } else { 15.0 * s },
+        r.y + r.h * 0.5,
+    ];
+    if state.minutes_per_second == 0.0 {
+        triangle(
+            v,
+            [
+                [p[0] - 3.0 * s, p[1] - 5.0 * s],
+                [p[0] + 5.0 * s, p[1]],
+                [p[0] - 3.0 * s, p[1] + 5.0 * s],
+            ],
+            BG,
+            vp,
+        );
+    } else {
+        for x in [-4.0, 2.0] {
+            push_rect(v, p[0] + x * s, p[1] - 5.0 * s, 3.0 * s, 10.0 * s, BG, vp);
+        }
+    }
+    if !compact {
+        toolbar_keycap(
+            v,
+            [r.right() - (9.0 + key_width("Spc")) * s, r.center_y()],
+            "Spc",
+            s,
+            BG,
+            vp,
+        );
+    }
+    b(v, l.previous_day, "−1d [PgDn]", false);
+    b(v, l.next_day, "+1d [PgUp]", false);
+    let elapsed = state.sim_time * 1440.0;
+    let minutes = elapsed.floor() as i64;
+    text(
+        v,
+        l.clock,
+        5.0,
+        0.825,
+        &if state.day_step_failed {
+            "No day found".into()
+        } else {
+            format!("T+ {elapsed:.1} min")
+        },
+        if state.day_step_failed { WARN } else { INK },
+    );
+    text(
+        v,
+        l.clock,
+        23.0,
+        0.60,
+        &if state.day_step_failed {
+            "host is locked to its star".into()
+        } else {
+            format!(
+                "day {} · {:02}:{:02}",
+                minutes.div_euclid(1440),
+                minutes.rem_euclid(1440) / 60,
+                minutes.rem_euclid(60)
+            )
+        },
+        MUTED,
+    );
+    build_lock(v, l, vp, state.lock_label);
+    let orientation = Rect {
+        x: l.horizon.x,
+        y: l.horizon.y,
+        w: l.stars.right() - l.horizon.x,
+        h: l.horizon.h,
+    };
+    outline(v, orientation, s, [LINE[0], LINE[1], LINE[2], 0.18], vp);
+    for (r, stars, label, desc) in [
+        (l.horizon, false, "Horizon", "level"),
+        (l.stars, true, "Stars", "fixed"),
+    ] {
+        let active = stars == state.steady_stars;
+        let mut r = r;
+        if crate::motion::pressed("Orientation [R]", r) && active {
+            r.y += 3.0 * s;
+        }
+        if active {
+            push_rect(
+                v,
+                r.x,
+                r.y + r.h,
+                r.w,
+                3.0 * s,
+                [0.0006, 0.003, 0.023, 0.8],
+                vp,
+            );
+            push_rect(v, r.x, r.y, r.w, r.h, INK, vp);
+        }
+        let color = if active { BG } else { INK };
+        orientation_icon(
+            v,
+            [r.x + 7.0 * s, r.y + r.h * 0.5 - 10.5 * s],
+            s,
+            stars,
+            active,
+            vp,
+        );
+        if l.style.keys {
+            push_text(
+                v,
+                r.x + 44.0 * s,
+                r.y + 8.0 * s,
+                0.7125 * s,
+                label,
+                color,
+                vp,
+            );
+            push_text(
+                v,
+                r.x + 44.0 * s,
+                r.y + 22.0 * s,
+                0.5625 * s,
+                desc,
+                if active {
+                    [BG[0], BG[1], BG[2], 0.7]
+                } else {
+                    MUTED
+                },
+                vp,
+            );
+        }
+    }
+    toolbar_keycap(
+        v,
+        [l.stars.right() + 6.0 * s, l.bar.center_y()],
+        "R",
+        s,
+        MUTED,
+        vp,
+    );
+    let e = l.exposure;
+    let f = ((state.ev_bias - MIN_EV) / (MAX_EV - MIN_EV)).clamp(0.0, 1.0);
+    let cap_y = e.center_y() - 10.0 * s;
+    let ink = if state.auto_exposure { MUTED } else { INK };
+    let sun = [e.x + 6.0 * s, cap_y];
+    ellipse(v, sun, [2.5 * s, 2.5 * s], s, ink, vp);
+    for i in 0..8 {
+        let a = i as f32 * std::f32::consts::FRAC_PI_4;
+        line(
+            v,
+            [sun[0] + a.cos() * 4.0 * s, sun[1] + a.sin() * 4.0 * s],
+            [sun[0] + a.cos() * 6.0 * s, sun[1] + a.sin() * 6.0 * s],
+            s,
+            ink,
+            vp,
+        );
+    }
+    toolbar_keycap(v, [e.x + 15.0 * s, cap_y], ",", s, ink, vp);
+    toolbar_keycap(v, [e.x + 32.0 * s, cap_y], ".", s, ink, vp);
+    let value = format!("{:+.2} EV", state.ev_bias);
+    font_text(
+        v,
+        [
+            e.right() - typeface::width(Face::Mono, &value, 9.5 * s),
+            cap_y - 4.75 * s,
+        ],
+        9.5 * s,
+        Face::Mono,
+        &value,
+        ink,
+        vp,
+    );
+    let y = e.center_y() + 9.0 * s;
+    push_rect(v, e.x, y - 2.0 * s, e.w, 4.0 * s, LINE, vp);
+    push_rect(v, e.x, y - 2.0 * s, e.w * f, 4.0 * s, ACCENT, vp);
+    disk(v, [e.x + e.w * f, y], 4.0 * s, ACCENT, vp);
+    let mut a = l.auto;
+    if crate::motion::pressed("Auto [A]", a) {
+        a.y += 3.0 * s;
+    }
+    let toggle = Rect {
+        x: a.x + 8.0 * s,
+        y: a.center_y() - 6.0 * s,
+        w: 22.0 * s,
+        h: 12.0 * s,
+    };
+    outline(
+        v,
+        toggle,
+        s,
+        if state.auto_exposure { ACCENT } else { LINE },
+        vp,
+    );
+    if state.auto_exposure {
+        push_rect(v, toggle.x, toggle.y, toggle.w, toggle.h, ACCENT, vp);
+    }
+    push_rect(
+        v,
+        toggle.x + if state.auto_exposure { 12.0 } else { 2.0 } * s,
+        toggle.y + 2.0 * s,
+        8.0 * s,
+        8.0 * s,
+        if state.auto_exposure { BG } else { MUTED },
+        vp,
+    );
+    font_text(
+        v,
+        [a.x + 38.0 * s, a.center_y() - 5.25 * s],
+        10.5 * s,
+        Face::Mono,
+        "Auto",
+        INK,
+        vp,
+    );
+    toolbar_keycap(
+        v,
+        [a.right() - (8.0 + key_width("A")) * s, a.center_y()],
+        "A",
+        s,
+        INK,
+        vp,
+    );
+    if !l.puzzle {
+        b(v, l.targets, "Targets [G]", state.targets_open);
+    }
+    b(v, l.settings, "Settings [F11]", false);
+    b(v, l.hide, "Hide [H]", false);
 }
 
 #[cfg(test)]
@@ -855,18 +1932,19 @@ mod tests {
                     l.faster,
                     l.stop,
                     l.previous_day,
-                    l.next_day,
                     l.clock,
+                    l.next_day,
                     l.lock,
-                    l.orientation,
+                    l.horizon,
+                    l.stars,
                     l.exposure,
                     l.auto,
                 ];
                 assert!(l.time_label.x - l.toggle.right() > l.toggle.x - l.home.right());
-                assert!(l.exposure.x - l.orientation.right() > l.auto.x - l.exposure.right());
-                assert!(controls.windows(2).all(|pair| pair[0].right() < pair[1].x));
+                assert!(l.exposure.x - l.stars.right() > l.auto.x - l.exposure.right());
+                assert!(controls.windows(2).all(|pair| pair[0].right() <= pair[1].x));
                 for r in controls {
-                    assert_eq!(r.y, l.lock.y);
+                    assert!((r.center_y() - l.lock.center_y()).abs() < 0.001);
                     assert!(r.x >= 0.0 && r.right() <= w && r.y >= l.bar.y && r.y + r.h <= h);
                 }
                 // Long target names and large/negative minute counts must stay in the viewport.
@@ -878,6 +1956,7 @@ mod tests {
                         w,
                         h,
                         HudState {
+                            targets_open: false,
                             labels: LabelOptions::default(),
                             lock_label: Some(&"Long name ".repeat(20)),
                             sim_time: time,
@@ -906,44 +1985,81 @@ mod tests {
     }
 
     #[test]
-    fn atlas_contains_the_solid_cell_and_glyphs() {
-        let a = build_atlas();
-        assert_eq!(a.len(), ATLAS_W * ATLAS_H);
-        let (cx, cy) = (SOLID_CELL % ATLAS_COLS, SOLID_CELL / ATLAS_COLS);
-        assert_eq!(a[(cy * GLYPH) * ATLAS_W + cx * GLYPH], 255);
-
-        let idx = ('A' as u32 - 32) as usize;
-        let (ax, ay) = (idx % ATLAS_COLS, idx / ATLAS_COLS);
-        let mut ink = 0u32;
-        for y in 0..GLYPH {
-            for x in 0..GLYPH {
-                ink += a[(ay * GLYPH + y) * ATLAS_W + ax * GLYPH + x] as u32;
-            }
-        }
-        assert!(ink > 0, "'A' glyph should have ink");
-        for (ch, cell) in [('←', ARROW_LEFT_CELL), ('→', ARROW_RIGHT_CELL)] {
-            let uv = glyph_uv(ch as u32);
-            assert_eq!(
-                uv[0],
-                [
-                    (cell % ATLAS_COLS) as f32 / ATLAS_COLS as f32,
-                    (cell / ATLAS_COLS) as f32 / ATLAS_ROWS as f32
-                ]
-            );
-            let mut lit = 0;
-            for y in 0..GLYPH {
-                for x in 0..GLYPH {
-                    if a[(cell / ATLAS_COLS * GLYPH + y) * ATLAS_W + cell % ATLAS_COLS * GLYPH + x]
-                        != 0
-                    {
-                        lit += 1;
+    fn right_edge_hide_and_binding_geometry_stay_inside_their_buttons() {
+        for (w, h, requested) in [
+            (1920.0, 1080.0, 1.0),
+            (1600.0, 900.0, 1.0),
+            (1440.0, 900.0, 1.0),
+            (1301.0, 720.0, 1.0),
+            (1300.0, 720.0, 1.0),
+            (1280.0, 480.0, 1.0),
+            (640.0, 480.0, 2.0),
+        ] {
+            let l = layout(w, h, requested);
+            assert!((w - l.hide.right() - 6.0 * l.scale).abs() < 0.001);
+            let controls = [
+                l.home,
+                l.toggle,
+                l.slower,
+                l.speed,
+                l.faster,
+                l.stop,
+                l.previous_day,
+                l.clock,
+                l.next_day,
+                l.lock,
+                l.horizon,
+                l.stars,
+                l.exposure,
+                l.auto,
+                l.targets,
+                l.settings,
+                l.hide,
+            ];
+            assert!(controls.windows(2).all(|p| p[0].right() <= p[1].x + 0.001));
+            for (r, label) in [
+                (l.home, "Maps [M]"),
+                (l.toggle, "Observe [Tab]"),
+                (l.previous_day, "−1d [PgDn]"),
+                (l.next_day, "+1d [PgUp]"),
+                (l.hide, "Hide [H]"),
+                (l.targets, "Targets [G]"),
+                (l.settings, "Settings [F11]"),
+            ] {
+                let (text_x, _, key_x) = toolbar_content(r, label, l.style);
+                if let Some(key_x) = key_x {
+                    let (name, key) = binding(label);
+                    if !matches!(name, "Hide" | "Targets" | "Settings") {
+                        assert!(text_x + typeface::width(Face::Mono, name, 10.5 * l.scale) < key_x);
                     }
+                    let mut v = Vec::new();
+                    toolbar_keycap(
+                        &mut v,
+                        [key_x, r.center_y()],
+                        key.unwrap(),
+                        l.scale,
+                        INK,
+                        [w, h],
+                    );
+                    assert!(
+                        v.iter().all(|v| {
+                            let x = (v.pos[0] + 1.0) * w * 0.5;
+                            let y = (1.0 - v.pos[1]) * h * 0.5;
+                            x >= r.x - 0.001 && x <= r.right() + 0.001 && y >= r.y && y <= r.y + r.h
+                        }),
+                        "{label} keycap must fit at {w}×{h}"
+                    );
                 }
             }
-            assert!(
-                lit > 0 && lit < GLYPH * GLYPH,
-                "arrows must not be missing-glyph blocks"
-            );
         }
+    }
+
+    #[test]
+    fn atlas_contains_coverage_and_a_white_geometry_texel() {
+        typeface::glyph(Face::Mono, 'A', 21.0);
+        let a = build_atlas();
+        assert_eq!(a.len(), ATLAS_W * ATLAS_H);
+        assert_eq!(a[ATLAS_W + 1], 255);
+        assert!(a.iter().any(|&p| p > 0 && p < 255));
     }
 }

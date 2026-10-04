@@ -1,4 +1,4 @@
-// Path tracer with a camera-ray single-scattering atmosphere.
+// Path tracer with single-scattering atmosphere and cached local sky lighting.
 // Scene visibility uses analytic bodies, rings, and metre-scale landscape primitives.
 // Direct light: one solid-angle sample per stellar disc, with power-heuristic MIS.
 // Indirect light: cosine-weighted Lambertian bounces and Russian roulette.
@@ -19,6 +19,7 @@ struct Globals {
 struct Settings {
     g: Globals,
     counts: vec4<u32>, // bodies, accumulated samples, samples this dispatch, max surface vertices
+    background: vec4<f32>, // Milky Way brightness, map width, map height, unused
 };
 struct Body {
     center: vec4<f32>, // xyz = high part of telescope-space centre, w = radius
@@ -38,6 +39,9 @@ struct CatalogueStar {
 // First 256*128+1 entries are offsets into the remaining star-index lists.
 @group(0) @binding(3) var<storage, read> sky_cells: array<u32>;
 @group(0) @binding(4) var<storage, read_write> accumulation: array<vec4<f32>>;
+// One linear RGB10 texel per word.
+@group(0) @binding(6) var<storage, read> milky_way_map: array<u32>;
+@group(0) @binding(7) var<storage, read_write> backdrop_accumulation: array<vec4<f32>>;
 
 const PI: f32 = 3.141592653589793;
 const TAU: f32 = 6.283185307179586;
@@ -229,6 +233,40 @@ fn environment(view_direction: vec3<f32>, primary: bool) -> vec3<f32> {
         }
     }
     return light;
+}
+
+fn milky_way_texel(pixel: vec2<i32>) -> vec3<f32> {
+    let width = i32(settings.background.y);
+    let height = i32(settings.background.z);
+    let x = (pixel.x + width) % width;
+    let y = clamp(pixel.y, 0, height - 1);
+    let index = u32(y * width + x);
+    let packed = milky_way_map[index];
+    return vec3<f32>(f32(packed & 1023u), f32((packed >> 10u) & 1023u),
+        f32((packed >> 20u) & 1023u)) / 1023.0;
+}
+
+fn milky_way(view_direction: vec3<f32>) -> vec3<f32> {
+    if (settings.background.x == 0.0) { return vec3<f32>(0.0); }
+    let direction = world_direction(view_direction);
+    // Match the procedural catalogue's galactic plane and its Duff basis.
+    // This is an illustrative orientation in our fictional systems, not an
+    // Earth equatorial-coordinate model.
+    let pole = normalize(vec3<f32>(0.35, 0.82, 0.45));
+    let a = -1.0 / (1.0 + pole.z);
+    let right = vec3<f32>(pole.x * pole.y * a, 1.0 + pole.y * pole.y * a, -pole.y);
+    let forward = cross(pole, right);
+    let longitude = atan2(dot(direction, forward), dot(direction, right));
+    let uv = vec2<f32>(0.5 - longitude / TAU,
+        acos(clamp(dot(direction, pole), -1.0, 1.0)) / PI);
+    let pixel = uv * settings.background.yz - vec2<f32>(0.5);
+    let lo = vec2<i32>(floor(pixel));
+    let weight = fract(pixel);
+    let luminance = mix(
+        mix(milky_way_texel(lo), milky_way_texel(lo + vec2<i32>(1, 0)), weight.x),
+        mix(milky_way_texel(lo + vec2<i32>(0, 1)), milky_way_texel(lo + vec2<i32>(1, 1)), weight.x),
+        weight.y);
+    return luminance * settings.background.x;
 }
 
 // Retain the original procedural surface material. This modulates reflectance,
@@ -463,10 +501,11 @@ fn atmosphere(origin: vec3<f32>, dir: vec3<f32>, limit: f32, rng: ptr<function, 
     return result;
 }
 
-fn trace(initial: Ray, rng: ptr<function, u32>) -> vec3<f32> {
+fn trace(initial: Ray, rng: ptr<function, u32>, backdrop: ptr<function, vec3<f32>>) -> vec4<f32> {
     var ray = initial;
     var throughput = vec3<f32>(1.0);
     var radiance = vec3<f32>(0.0);
+    *backdrop = vec3<f32>(0.0);
     var previous_pdf = 0.0;
     // Null ring crossings move the ray origin without changing the vertex
     // whose light-sampling PDF competes with this continuation.
@@ -474,6 +513,7 @@ fn trace(initial: Ray, rng: ptr<function, u32>) -> vec3<f32> {
     var depth = 0u;
     var camera_segment = true;
     var catalogue_visibility = 1.0;
+    var milky_way_visibility = 1.0;
     var null_crossings = 0u;
     loop {
         let hit = closest_hit(ray);
@@ -499,6 +539,9 @@ fn trace(initial: Ray, rng: ptr<function, u32>) -> vec3<f32> {
             // reflected bodies retain their normal light transport.
             let sky_luminance = dot(atmo.inscatter, vec3<f32>(0.2126, 0.7152, 0.0722));
             catalogue_visibility = 1.0 - smoothstep(0.001, 0.01, sky_luminance);
+            // Diffuse galactic haze loses contrast much earlier than star
+            // points. Use actual scattered light, including reflected moonlight.
+            milky_way_visibility = 1.0 - smoothstep(0.00001, 0.0001, sky_luminance);
         }
         if (ring.index != MISS) {
             let n = bodies[ring.index].ring_plane.xyz;
@@ -560,6 +603,12 @@ fn trace(initial: Ray, rng: ptr<function, u32>) -> vec3<f32> {
             // Background stars are visible along unscattered camera paths,
             // including straight-through ring crossings.
             radiance += throughput * environment(ray.direction, depth == 0u) * catalogue_visibility;
+            if (depth == 0u && milky_way_visibility > 0.0) {
+                // A colored visual layer, attenuated by the atmosphere
+                // and unscattered ring crossings. Never feed it into bounces.
+                *backdrop = milky_way(ray.direction) * milky_way_visibility * throughput;
+                radiance += *backdrop;
+            }
             break;
         }
         let local = hit.index >= LOCAL_BASE;
@@ -575,7 +624,8 @@ fn trace(initial: Ray, rng: ptr<function, u32>) -> vec3<f32> {
             radiance += throughput * body.material.rgb * weight;
             break;
         }
-        let normal = hit.normal;
+        var normal = hit.normal;
+        if (local) { normal = landscape_shading_normal(ray, hit); }
         var albedo: vec3<f32>;
         var outgoing: Ray;
         if (local) {
@@ -611,6 +661,11 @@ fn trace(initial: Ray, rng: ptr<function, u32>) -> vec3<f32> {
                     * (bsdf_pdf * weight * visibility / sample.pdf);
             }
         }
+        if (local && settings.g.ground_counts.y != 0u && settings.g.atmo_params.w > 0.5) {
+            // Explicit atmosphere lighting. Continuation rays do not also
+            // add this cache on escape, avoiding double-counted sky energy.
+            radiance += throughput * albedo * surface_sky(outgoing, normal, rng);
+        }
         if (last_vertex) {
             break;
         }
@@ -632,7 +687,8 @@ fn trace(initial: Ray, rng: ptr<function, u32>) -> vec3<f32> {
         depth += 1u;
         null_crossings = 0u;
     }
-    return radiance;
+    // W holds backdrop luminance for metering, not presentation alpha.
+    return vec4<f32>(radiance, dot(*backdrop, vec3<f32>(0.2126, 0.7152, 0.0722)));
 }
 
 @compute @workgroup_size(8, 8)
@@ -642,7 +698,8 @@ fn main(@builtin(global_invocation_id) id: vec3<u32>) {
         return;
     }
     let pixel = id.y * dimensions.x + id.x;
-    var sum = vec3<f32>(0.0);
+    var sum = vec4<f32>(0.0);
+    var backdrop_sum = vec3<f32>(0.0);
     for (var s = 0u; s < settings.counts.z; s += 1u) {
         var rng = hash(pixel ^ hash(settings.counts.y + s + 0x9e3779b9u));
         let jitter = vec2<f32>(random(&rng), random(&rng));
@@ -654,14 +711,21 @@ fn main(@builtin(global_invocation_id) id: vec3<u32>) {
         let direction = normalize(vec3<f32>(
             ndc.x * tangent * settings.g.viewport.w,
             ndc.y * tangent, -1.0));
-        sum += trace(Ray(vec3<f32>(0.0), direction, MISS), &rng);
+        var backdrop = vec3<f32>(0.0);
+        sum += trace(Ray(vec3<f32>(0.0), direction, MISS), &rng, &backdrop);
+        backdrop_sum += backdrop;
     }
     let old_count = settings.counts.y;
     let new_count = old_count + settings.counts.z;
     var mean = sum / f32(settings.counts.z);
+    var backdrop_mean = backdrop_sum / f32(settings.counts.z);
     if (old_count > 0u) {
-        let old = accumulation[pixel].rgb;
+        let old = accumulation[pixel];
         mean = old + (mean - old) * (f32(settings.counts.z) / f32(new_count));
+        let old_backdrop = backdrop_accumulation[pixel].rgb;
+        backdrop_mean = old_backdrop + (backdrop_mean - old_backdrop)
+            * (f32(settings.counts.z) / f32(new_count));
     }
-    accumulation[pixel] = vec4<f32>(mean, 1.0);
+    accumulation[pixel] = mean;
+    backdrop_accumulation[pixel] = vec4<f32>(backdrop_mean, 0.0);
 }

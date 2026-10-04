@@ -46,10 +46,10 @@ fn saturn_rings_follow_equator_and_invalidate_history() {
     let pole = glam::Vec3::from_slice(&frame.bodies[8].ring_plane);
     assert!((pole.as_dvec3() - expected).length() < 1e-6);
     let mut history = History::default();
-    history.update(&frame, Options::default());
+    history.update(&frame, test_options());
     history.samples = 99;
     state.scene.bodies[8].rings.as_mut().unwrap().optical_depth *= 2.0;
-    history.update(&state.build_frame(64, 64), Options::default());
+    history.update(&state.build_frame(64, 64), test_options());
     assert_eq!(history.samples, 0);
 }
 
@@ -62,7 +62,7 @@ fn gpu_rings_geometry() {
         wgpu::TextureFormat::Rgba8UnormSrgb,
         (1, 1),
         &[],
-        Options::default(),
+        test_options(),
     );
     // Execute the production WGSL helpers, not a CPU reimplementation.
     let source = format!(
@@ -146,7 +146,7 @@ fn gpu_rings_transport() {
             samples_per_frame: 64,
             max_bounces: 1,
             exposure: 1.0,
-            ..Options::default()
+            ..test_options()
         },
     );
     let mut f = frame();
@@ -201,7 +201,11 @@ fn gpu_rings_transport() {
     }
 }
 
-fn read_exposure(device: &wgpu::Device, queue: &wgpu::Queue, tracer: &PathTracer) -> f32 {
+pub(super) fn read_exposure(
+    device: &wgpu::Device,
+    queue: &wgpu::Queue,
+    tracer: &PathTracer,
+) -> f32 {
     let size = std::mem::size_of::<Exposure>() as u64;
     let buffer = device.create_buffer(&wgpu::BufferDescriptor {
         label: Some("exposure-readback"),
@@ -243,7 +247,7 @@ fn gpu_auto_exposure_meters_saturn() {
         max_bounces: 1,
         auto_exposure: true,
         auto_key: 0.25,
-        ..Options::default()
+        ..test_options()
     };
     let key = options.auto_key;
     let mut tracer = PathTracer::new(
@@ -315,7 +319,7 @@ fn gpu_saturn_scene() {
             samples_per_frame: 8,
             max_bounces: 6,
             auto_exposure: true,
-            ..Options::default()
+            ..test_options()
         },
     );
     let f = state.build_frame(width, height);
@@ -353,7 +357,7 @@ fn gpu_rings_conserve_energy() {
         wgpu::TextureFormat::Rgba8UnormSrgb,
         (1, 1),
         &[],
-        Options::default(),
+        test_options(),
     );
     let source = format!(
         "{TRACE_SHADER}\n{}",
@@ -419,7 +423,7 @@ fn gpu_rings_null_crossings_preserve_mis() {
         Options {
             samples_per_frame: 64,
             max_bounces: 1,
-            ..Options::default()
+            ..test_options()
         },
     );
     let mut f = frame();
@@ -458,7 +462,7 @@ fn gpu_auto_exposure_small_viewport() {
         &[],
         Options {
             auto_exposure: true,
-            ..Options::default()
+            ..test_options()
         },
     );
     let mut f = frame();
@@ -480,7 +484,7 @@ fn gpu_auto_exposure_after_convergence() {
         wgpu::TextureFormat::Rgba8UnormSrgb,
         (8, 8),
         &[],
-        Options::default(),
+        test_options(),
     );
     let mut f = frame();
     f.globals.viewport[..2].copy_from_slice(&[8., 8.]);
@@ -513,7 +517,7 @@ fn gpu_halo_observatory_shows_calyx_rings() {
             samples_per_frame: 8,
             max_bounces: 6,
             auto_exposure: true,
-            ..Options::default()
+            ..test_options()
         },
     );
     let ringed = sample(

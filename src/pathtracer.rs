@@ -16,15 +16,25 @@ const TRACE_SHADER: &str = concat!(
     include_str!("shaders/rings.wgsl"),
     "\n",
     include_str!("shaders/ground.wgsl"),
+    "\n",
+    include_str!("shaders/terrain.wgsl"),
+    "\n",
+    include_str!("shaders/forest.wgsl"),
 );
 const HISTOGRAM_BINS: usize = 256;
 const HISTOGRAM_ZEROS: [u8; HISTOGRAM_BINS * 4] = [0; HISTOGRAM_BINS * 4];
+
+/// Match the shader's central region exactly, including odd/tiny viewports.
+pub(crate) fn exposure_meter_size((w, h): (u32, u32)) -> (u32, u32) {
+    (w - 2 * (w / 4), h - 2 * (h / 4))
+}
 
 #[repr(C)]
 #[derive(Clone, Copy, Pod, Zeroable)]
 struct Settings {
     globals: Globals,
     counts: [u32; 4],
+    background: [f32; 4], // brightness, map width, map height, unused
 }
 
 /// Display-only exposure state, shared with the shaders. `value` is eased on
@@ -63,6 +73,8 @@ pub struct Options {
     pub auto_key: f32,
     /// Which centre-weighted luminance percentile to meter (0..1).
     pub auto_percentile: f32,
+    /// Camera-only Milky Way radiance; zero disables the backdrop.
+    pub milky_way: f32,
 }
 impl Default for Options {
     fn default() -> Self {
@@ -75,6 +87,7 @@ impl Default for Options {
             ev_bias: 0.0,
             auto_key: 0.25,
             auto_percentile: 0.9,
+            milky_way: 0.01,
         }
     }
 }
@@ -118,6 +131,12 @@ impl Options {
             auto_key: positive("STARGAZE_AUTO_KEY", defaults.auto_key),
             auto_percentile: positive("STARGAZE_AUTO_PERCENTILE", defaults.auto_percentile)
                 .clamp(0.01, 0.999),
+            milky_way: std::env::var("STARGAZE_MILKY_WAY")
+                .ok()
+                .and_then(|s| s.parse::<f32>().ok())
+                .filter(|v| v.is_finite() && *v >= 0.0)
+                .unwrap_or(defaults.milky_way)
+                .min(1.0),
         }
     }
 }
@@ -137,6 +156,7 @@ impl History {
         // precision must invalidate history when the simulation is running.
         key.extend_from_slice(&frame.scene_time.to_le_bytes());
         key.extend_from_slice(&options.max_bounces.to_le_bytes());
+        key.extend_from_slice(&options.milky_way.to_le_bytes());
         // Exposure is display-only and deliberately does not invalidate.
         if key != self.key {
             self.key = key;
@@ -147,6 +167,7 @@ impl History {
 
 pub struct PathTracer {
     compute: wgpu::ComputePipeline,
+    sky_light: wgpu::ComputePipeline,
     display: wgpu::RenderPipeline,
     trace_layout: wgpu::BindGroupLayout,
     display_layout: wgpu::BindGroupLayout,
@@ -157,7 +178,9 @@ pub struct PathTracer {
     ground: wgpu::Buffer,
     catalogue: wgpu::Buffer,
     cells: wgpu::Buffer,
+    milky_way: wgpu::Buffer,
     accumulation: wgpu::Buffer,
+    backdrop_accumulation: wgpu::Buffer,
     measure: wgpu::ComputePipeline,
     resolve: wgpu::ComputePipeline,
     exposure_layout: wgpu::BindGroupLayout,
@@ -264,7 +287,17 @@ impl PathTracer {
                 ),
                 buffer_entry(
                     5,
+                    wgpu::BufferBindingType::Storage { read_only: false },
+                    wgpu::ShaderStages::COMPUTE,
+                ),
+                buffer_entry(
+                    6,
                     wgpu::BufferBindingType::Storage { read_only: true },
+                    wgpu::ShaderStages::COMPUTE,
+                ),
+                buffer_entry(
+                    7,
+                    wgpu::BufferBindingType::Storage { read_only: false },
                     wgpu::ShaderStages::COMPUTE,
                 ),
             ],
@@ -284,6 +317,11 @@ impl PathTracer {
                 ),
                 buffer_entry(
                     2,
+                    wgpu::BufferBindingType::Storage { read_only: true },
+                    wgpu::ShaderStages::FRAGMENT,
+                ),
+                buffer_entry(
+                    3,
                     wgpu::BufferBindingType::Storage { read_only: true },
                     wgpu::ShaderStages::FRAGMENT,
                 ),
@@ -328,6 +366,14 @@ impl PathTracer {
             layout: Some(&compute_layout),
             module: &shader,
             entry_point: Some("main"),
+            compilation_options: Default::default(),
+            cache: None,
+        });
+        let sky_light = device.create_compute_pipeline(&wgpu::ComputePipelineDescriptor {
+            label: Some("surface-skylight-cache"),
+            layout: Some(&compute_layout),
+            module: &shader,
+            entry_point: Some("cache_surface_sky"),
             compilation_options: Default::default(),
             cache: None,
         });
@@ -403,12 +449,15 @@ impl PathTracer {
             usage: wgpu::BufferUsages::STORAGE | wgpu::BufferUsages::COPY_DST,
             mapped_at_creation: false,
         });
-        let ground = device.create_buffer(&wgpu::BufferDescriptor {
-            label: Some("local-landscape"),
-            size: (crate::ground::CAPACITY * std::mem::size_of::<crate::ground::Primitive>())
-                as u64,
-            usage: wgpu::BufferUsages::STORAGE | wgpu::BufferUsages::COPY_DST,
-            mapped_at_creation: false,
+        let mut landscape_data =
+            vec![0.0_f32; crate::ground::CAPACITY * 12 + crate::ground::SKY_TEXELS * 4];
+        landscape_data.extend_from_slice(&crate::terrain::cached().data);
+        let ground = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
+            label: Some("landscape-and-heightfield"),
+            contents: bytemuck::cast_slice(&landscape_data),
+            usage: wgpu::BufferUsages::STORAGE
+                | wgpu::BufferUsages::COPY_DST
+                | wgpu::BufferUsages::COPY_SRC,
         });
         let (catalogue_data, cells_data) = stars::ray_catalogue(stars);
         let catalogue = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
@@ -419,6 +468,11 @@ impl PathTracer {
         let cells = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
             label: Some("star-direction-grid"),
             contents: bytemuck::cast_slice(&cells_data),
+            usage: wgpu::BufferUsages::STORAGE,
+        });
+        let milky_way = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
+            label: Some("milky-way-panorama"),
+            contents: bytemuck::cast_slice(crate::sky::panorama()),
             usage: wgpu::BufferUsages::STORAGE,
         });
         let histogram = device.create_buffer(&wgpu::BufferDescriptor {
@@ -435,6 +489,7 @@ impl PathTracer {
                 | wgpu::BufferUsages::COPY_SRC,
             mapped_at_creation: false,
         });
+        let backdrop_accumulation = accumulation(device, dimensions);
         let accumulation = accumulation(device, dimensions);
         let trace_group = group(
             device,
@@ -446,12 +501,14 @@ impl PathTracer {
                 &cells,
                 &accumulation,
                 &ground,
+                &milky_way,
+                &backdrop_accumulation,
             ],
         );
         let display_group = group(
             device,
             &display_layout,
-            &[&settings, &accumulation, &exposure],
+            &[&settings, &accumulation, &exposure, &backdrop_accumulation],
         );
         let exposure_group = group(
             device,
@@ -460,6 +517,7 @@ impl PathTracer {
         );
         Self {
             compute,
+            sky_light,
             display,
             trace_layout,
             display_layout,
@@ -470,7 +528,9 @@ impl PathTracer {
             ground,
             catalogue,
             cells,
+            milky_way,
             accumulation,
+            backdrop_accumulation,
             measure,
             resolve,
             exposure_layout,
@@ -491,6 +551,7 @@ impl PathTracer {
         }
         self.dimensions = dimensions;
         self.accumulation = accumulation(device, dimensions);
+        self.backdrop_accumulation = accumulation(device, dimensions);
         self.trace_group = group(
             device,
             &self.trace_layout,
@@ -501,12 +562,19 @@ impl PathTracer {
                 &self.cells,
                 &self.accumulation,
                 &self.ground,
+                &self.milky_way,
+                &self.backdrop_accumulation,
             ],
         );
         self.display_group = group(
             device,
             &self.display_layout,
-            &[&self.settings, &self.accumulation, &self.exposure],
+            &[
+                &self.settings,
+                &self.accumulation,
+                &self.exposure,
+                &self.backdrop_accumulation,
+            ],
         );
         self.exposure_group = group(
             device,
@@ -531,6 +599,13 @@ impl PathTracer {
     pub fn needs_redraw(&self) -> bool {
         self.history.samples < self.options.sample_limit
             || (self.options.auto_exposure && self.exposure_idle_frames < 60)
+    }
+
+    /// Reset changed scenes before the renderer chooses a safe sample batch.
+    /// Moving views start with one sample; still views can increase their batch.
+    pub fn prepare_frame(&mut self, frame: &Frame) -> bool {
+        self.history.update(frame, self.options);
+        self.history.samples == 0
     }
 
     pub fn set_quality(&mut self, samples: u32, bounces: u32, limit: u32) {
@@ -594,6 +669,12 @@ impl PathTracer {
                 count,
                 self.options.max_bounces,
             ],
+            background: [
+                self.options.milky_way,
+                crate::sky::WIDTH as f32,
+                crate::sky::HEIGHT as f32,
+                0.0,
+            ],
         };
         queue.write_buffer(&self.settings, 0, bytemuck::bytes_of(&settings));
         // Publish the exposure controls. When automatic metering has been on,
@@ -627,6 +708,15 @@ impl PathTracer {
             if !frame.ground.is_empty() {
                 queue.write_buffer(&self.ground, 0, bytemuck::cast_slice(&frame.ground));
             }
+            if self.history.samples == 0 {
+                let mut pass = encoder.begin_compute_pass(&wgpu::ComputePassDescriptor {
+                    label: Some("surface-skylight-cache"),
+                    timestamp_writes: None,
+                });
+                pass.set_pipeline(&self.sky_light);
+                pass.set_bind_group(0, &self.trace_group, &[]);
+                pass.dispatch_workgroups(2, 1, 1);
+            }
             let mut pass = encoder.begin_compute_pass(&wgpu::ComputePassDescriptor {
                 label: Some("pathtrace"),
                 timestamp_writes: None,
@@ -649,11 +739,8 @@ impl PathTracer {
             });
             pass.set_pipeline(&self.measure);
             pass.set_bind_group(0, &self.exposure_group, &[]);
-            pass.dispatch_workgroups(
-                self.dimensions.0.div_ceil(8),
-                self.dimensions.1.div_ceil(8),
-                1,
-            );
+            let meter = exposure_meter_size(self.dimensions);
+            pass.dispatch_workgroups(meter.0.div_ceil(8), meter.1.div_ceil(8), 1);
             drop(pass);
             let mut pass = encoder.begin_compute_pass(&wgpu::ComputePassDescriptor {
                 label: Some("exposure-resolve"),

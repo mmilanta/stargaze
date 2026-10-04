@@ -21,6 +21,7 @@ struct Globals {
 struct Settings {
     g: Globals,
     counts: vec4<u32>,
+    background: vec4<f32>,
 };
 struct Exposure {
     value: f32, // smoothed automatic exposure (updated on the GPU)
@@ -46,17 +47,18 @@ const MAX_EXPOSURE: f32 = 1.0e8;
 @compute @workgroup_size(8, 8)
 fn measure(@builtin(global_invocation_id) id: vec3<u32>) {
     let dimensions = vec2<u32>(settings.g.viewport.xy);
-    if (id.x >= dimensions.x || id.y >= dimensions.y) {
+    // Dispatch only the metered rectangle. At 4K this avoids launching six
+    // million invocations which would immediately return outside the centre.
+    let origin = dimensions / 4u;
+    let meter_dimensions = dimensions - 2u * origin;
+    if (id.x >= meter_dimensions.x || id.y >= meter_dimensions.y) {
         return;
     }
-    // Central half of the frame, in both axes.
-    let x0 = dimensions.x / 4u;
-    let y0 = dimensions.y / 4u;
-    if (id.x < x0 || id.x >= dimensions.x - x0 || id.y < y0 || id.y >= dimensions.y - y0) {
-        return;
-    }
-    let rgb = accumulation[id.y * dimensions.x + id.x].rgb;
-    let luminance = dot(rgb, vec3<f32>(0.2126, 0.7152, 0.0722));
+    let pixel = id.xy + origin;
+    let hdr = accumulation[pixel.y * dimensions.x + pixel.x];
+    // The decorative Milky Way must not change metering of a faint planet or
+    // drive automatic exposure when the centre contains otherwise empty sky.
+    let luminance = max(0.0, dot(hdr.rgb, vec3<f32>(0.2126, 0.7152, 0.0722)) - hdr.w);
     // Zero and any non-finite junk fall into the darkest bin.
     var safe = luminance;
     if (!(safe > 0.0)) {

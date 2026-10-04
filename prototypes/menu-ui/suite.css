@@ -436,3 +436,9 @@ body:not(.rail-closed) .notes{left:calc(var(--rail) + 30px)}
 .hb.tab{width:112px;justify-content:space-between}
 .hud .grp.nav .hb:first-child{width:84px;justify-content:space-between}
 .hud .grp.hide{padding:0 6px}
+
+/* Toolbar keycaps share one size and baseline, including Auto, orientation and EV. */
+.hud kbd{font-size:8.5px;line-height:1;padding:2px 3px;min-width:14px;flex:none}
+.hud .hb svg,.hud .check i{flex:none}
+.hud .grp.nav{flex-shrink:0}
+.hud .grp.hide{flex-shrink:0;margin-left:auto}

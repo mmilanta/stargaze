@@ -6,6 +6,17 @@ mod rings;
 #[path = "ground_tests.rs"]
 mod ground;
 
+#[path = "sky_tests.rs"]
+mod sky;
+
+// Isolate transport regressions from the decorative galactic backdrop.
+fn test_options() -> Options {
+    Options {
+        milky_way: 0.0,
+        ..Options::default()
+    }
+}
+
 fn frame() -> Frame {
     let mut globals = Globals::zeroed();
     globals.cam_right = [1.0, 0.0, 0.0, 0.0];
@@ -73,7 +84,7 @@ fn validate_shaders_and_buffer_layouts() {
 fn history_resets_for_scene_changes_but_not_overlay_changes() {
     let mut history = History::default();
     let mut frame = frame();
-    let options = Options::default();
+    let options = test_options();
     history.update(&frame, options);
     history.samples = 100;
     frame.labels.push(crate::ui::Label {
@@ -183,7 +194,7 @@ fn gpu_quality_limits_rest_resume_and_preserve_valid_samples() {
             max_bounces: 1,
             sample_limit: 65,
             auto_exposure: true,
-            ..Options::default()
+            ..test_options()
         },
     );
     let mut frame = frame();
@@ -255,16 +266,16 @@ fn gpu_display_upscales_hdr_with_correct_orientation_and_edges() {
         wgpu::TextureFormat::Rgba32Float,
         (2, 2),
         &[],
-        Options::default(),
+        test_options(),
     );
     let mut scene = frame();
     scene.globals.viewport[..2].copy_from_slice(&[4., 4.]);
     sample(&device, &queue, &mut tracer, &scene, 1);
     let colors = [
-        [1_f32, 0., 0., 1.],
-        [0., 1., 0., 1.],
-        [0., 0., 1., 1.],
-        [1., 1., 1., 1.],
+        [1_f32, 0., 0., 0.],
+        [0., 1., 0., 0.],
+        [0., 0., 1., 0.],
+        [1., 1., 1., 0.],
     ];
     tracer.accumulation = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
         label: Some("upscale-test-colors"),
@@ -274,7 +285,12 @@ fn gpu_display_upscales_hdr_with_correct_orientation_and_edges() {
     tracer.display_group = group(
         &device,
         &tracer.display_layout,
-        &[&tracer.settings, &tracer.accumulation, &tracer.exposure],
+        &[
+            &tracer.settings,
+            &tracer.accumulation,
+            &tracer.exposure,
+            &tracer.backdrop_accumulation,
+        ],
     );
     for (width, height) in [(4, 4), (2, 2), (1, 1)] {
         let target = device.create_texture(&wgpu::TextureDescriptor {
@@ -377,12 +393,12 @@ fn gpu_transport() {
             samples_per_frame: 64,
             max_bounces: 1,
             exposure: 1.0,
-            ..Options::default()
+            ..test_options()
         },
     );
     let mut frame = frame();
     let black = sample(&device, &queue, &mut tracer, &frame, 1)[0];
-    assert_eq!(black, [0.0, 0.0, 0.0, 1.0]);
+    assert_eq!(black, [0.0; 4]);
 
     // The presentation path checks the viewport on every observing frame.
     // An unchanged size must preserve both the HDR image and sample history.
@@ -396,13 +412,13 @@ fn gpu_transport() {
     frame.bodies = vec![body([0.0, 0.0, -1.0], 1e-6, [2.0, 3.0, 4.0], true)];
     assert_eq!(
         sample(&device, &queue, &mut tracer, &frame, 1)[0],
-        [2.0, 3.0, 4.0, 1.0]
+        [2.0, 3.0, 4.0, 0.0]
     );
     frame.bodies[0].center = [0.0; 3];
     frame.bodies[0].radius = 1.0;
     assert_eq!(
         sample(&device, &queue, &mut tracer, &frame, 1)[0],
-        [2.0, 3.0, 4.0, 1.0]
+        [2.0, 3.0, 4.0, 0.0]
     );
 
     frame.bodies = vec![
@@ -541,7 +557,7 @@ fn gpu_distant_surface() {
             samples_per_frame: 16,
             max_bounces: 1,
             exposure: 1.0,
-            ..Options::default()
+            ..test_options()
         },
     );
     let mut scene = frame();
@@ -583,7 +599,7 @@ fn gpu_scene_smoke() {
             samples_per_frame: 4,
             max_bounces: 8,
             exposure: 1.0,
-            ..Options::default()
+            ..test_options()
         },
     );
     for (name, scene) in [
@@ -667,7 +683,7 @@ fn gpu_solar_planets() {
             samples_per_frame: 16,
             max_bounces: 2,
             exposure: 1.0,
-            ..Options::default()
+            ..test_options()
         },
     );
     for target in [3, 5, 6, 7, 8, 9, 10] {
@@ -711,7 +727,7 @@ fn gpu_surface_observer() {
             samples_per_frame: 64,
             max_bounces: 1,
             exposure: 1.0,
-            ..Options::default()
+            ..test_options()
         },
     );
     let mut state = crate::State::with_scene(crate::sim::binary_scene());
@@ -775,7 +791,7 @@ fn gpu_atmosphere() {
         samples_per_frame: 64,
         max_bounces: 1,
         exposure: 1.0,
-        ..Options::default()
+        ..test_options()
     };
     let mut tracer = PathTracer::new(
         &device,
@@ -815,7 +831,10 @@ fn gpu_atmosphere() {
         );
     }
     scene.globals.atmo_params[3] = 0.0;
-    assert_eq!(sample(&device, &queue, &mut tracer, &scene, 1)[0], [1.0; 4]);
+    assert_eq!(
+        sample(&device, &queue, &mut tracer, &scene, 1)[0],
+        [1.0, 1.0, 1.0, 0.0]
+    );
     scene.globals.atmo_params[3] = 1.0;
 
     // No catalogue: any light in this zenith ray must come from scattering.
@@ -839,11 +858,7 @@ fn gpu_atmosphere() {
         .bodies
         .push(body([0.5, 0.0, -0.5], 0.05, [0.0; 3], false));
     let eclipsed = sample(&device, &queue, &mut tracer, &scene, 4)[0];
-    assert_eq!(
-        eclipsed,
-        [0.0, 0.0, 0.0, 1.0],
-        "occluder must shadow the air"
-    );
+    assert_eq!(eclipsed, [0.0; 4], "occluder must shadow the air");
     scene.bodies.pop();
 
     scene.bodies[1].center = [1.0, 0.0, 0.03];
@@ -853,10 +868,7 @@ fn gpu_atmosphere() {
         "elevated air still sees a set sun: {twilight:?}"
     );
     scene.bodies[1].center = [0.0, 0.0, 1.0];
-    assert_eq!(
-        sample(&device, &queue, &mut tracer, &scene, 1)[0],
-        [0.0, 0.0, 0.0, 1.0]
-    );
+    assert_eq!(sample(&device, &queue, &mut tracer, &scene, 1)[0], [0.0; 4]);
 
     // Dense haze must hide even the brightest catalogue dots during the day,
     // while keeping them visible at night and when an eclipse shadows the air.
@@ -914,7 +926,7 @@ fn gpu_reflected_atmosphere() {
         Options {
             samples_per_frame: 64,
             max_bounces: 1,
-            ..Options::default()
+            ..test_options()
         },
     );
     let mut scene = frame();
@@ -1041,7 +1053,7 @@ fn gpu_dense_level_daylight() {
     let options = Options {
         samples_per_frame: 64,
         max_bounces: 1,
-        ..Options::default()
+        ..test_options()
     };
     let mut sky_tracer = PathTracer::new(
         &device,
@@ -1101,7 +1113,7 @@ fn gpu_star_dots() {
         samples_per_frame: 64,
         max_bounces: 2,
         exposure: 1.0,
-        ..Options::default()
+        ..test_options()
     };
     let star = CatalogueStar {
         dir: glam::Vec3::new(0.8, 0.0, -1.0).normalize().to_array(),
@@ -1166,7 +1178,7 @@ fn gpu_display_extreme_exposure() {
         wgpu::TextureFormat::Rgba32Float,
         (1, 1),
         &[],
-        Options::default(),
+        test_options(),
     );
     let mut f = frame();
     f.bodies = vec![body([0., 0., -3.], 1., [10.; 3], true)];
@@ -1271,7 +1283,8 @@ fn gpu_night_ground_has_no_catalogue_fireflies() {
             stars,
             Options {
                 samples_per_frame: 64,
-                ..Options::default()
+                milky_way: Options::default().milky_way,
+                ..test_options()
             },
         );
         let pixels = sample(&device, &queue, &mut tracer, &f, 1);
@@ -1286,6 +1299,11 @@ fn gpu_night_ground_has_no_catalogue_fireflies() {
             bright, 0,
             "the unlit ground must not contain bright speckles"
         );
-        assert_eq!(max, 0.0, "catalogue light must not leak into ground paths");
+        // The atmosphere contributes about 8e-14 even before the backdrop
+        // was added. Keep the tolerance far below any visible illumination.
+        assert!(
+            max < 1e-12,
+            "background light must not leak into ground paths"
+        );
     }
 }
