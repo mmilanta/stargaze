@@ -1,0 +1,108 @@
+{
+  "adapter": {
+    "backend": "Vulkan",
+    "device": 29824,
+    "device_type": "DiscreteGpu",
+    "driver": "radv",
+    "driver_info": "Mesa 26.2.2-arch1.1",
+    "name": "AMD Radeon RX 7600 XT (RADV NAVI33)",
+    "vendor": 4098
+  },
+  "cases": [
+    {
+      "frame_fingerprints": [
+        "e24f6cbdc73d4952",
+        "41111dfe42921914",
+        "5413d1b7d529c4a3",
+        "91cef0acb7dca77c"
+      ],
+      "images": [
+        {
+          "exposure": 1.0,
+          "name": "eclipse-umbra-edge-spp1",
+          "spp": 1
+        },
+        {
+          "exposure": 1.0,
+          "name": "eclipse-umbra-edge-spp256",
+          "spp": 256
+        },
+        {
+          "exposure": 1.0,
+          "name": "eclipse-umbra-edge-moving-2",
+          "spp": 1
+        },
+        {
+          "exposure": 1.0,
+          "name": "eclipse-umbra-edge-moving-3",
+          "spp": 1
+        }
+      ],
+      "initial_time_days": 0.0,
+      "modes": [
+        {
+          "mode": "paused",
+          "repeats": [
+            [
+              {
+                "gpu_ms": 0.88668,
+                "spp": 1,
+                "wall_ms": 1.0629190000000002
+              },
+              {
+                "gpu_ms": 0.89332,
+                "spp": 2,
+                "wall_ms": 0.992133
+              },
+              {
+                "gpu_ms": 0.89044,
+                "spp": 3,
+                "wall_ms": 0.9746410000000001
+              },
+              {
+                "gpu_ms": 0.88808,
+                "spp": 4,
+                "wall_ms": 0.9649220000000001
+              }
+            ]
+          ]
+        },
+        {
+          "mode": "advancing",
+          "repeats": [
+            [
+              {
+                "gpu_ms": 0.88924,
+                "spp": 1,
+                "wall_ms": 0.9712329999999999
+              },
+              {
+                "gpu_ms": 0.88816,
+                "spp": 1,
+                "wall_ms": 0.967326
+              },
+              {
+                "gpu_ms": 0.88488,
+                "spp": 1,
+                "wall_ms": 0.96374
+              },
+              {
+                "gpu_ms": 0.88424,
+                "spp": 1,
+                "wall_ms": 0.9632179999999999
+              }
+            ]
+          ]
+        }
+      ],
+      "name": "eclipse-umbra-edge"
+    }
+  ],
+  "suite_version": 1,
+  "timestamp_period_ns": 10.0,
+  "trace_size": [
+    480,
+    270
+  ],
+  "variant": "view12"
+}

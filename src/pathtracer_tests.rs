@@ -132,7 +132,7 @@ fn history_resets_for_scene_changes_but_not_overlay_changes() {
     assert_eq!(history.samples, 0);
 }
 
-fn gpu() -> (wgpu::Device, wgpu::Queue) {
+pub(super) fn gpu() -> (wgpu::Device, wgpu::Queue) {
     let instance = wgpu::Instance::new(wgpu::InstanceDescriptor::new_without_display_handle());
     let adapter =
         pollster::block_on(instance.request_adapter(&wgpu::RequestAdapterOptions::default()))
@@ -165,7 +165,7 @@ fn read_pixels(device: &wgpu::Device, queue: &wgpu::Queue, tracer: &PathTracer) 
     pixels
 }
 
-fn sample(
+pub(super) fn sample(
     device: &wgpu::Device,
     queue: &wgpu::Queue,
     tracer: &mut PathTracer,

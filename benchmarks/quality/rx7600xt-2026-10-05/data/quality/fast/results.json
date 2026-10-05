@@ -1,0 +1,548 @@
+{
+  "adapter": {
+    "backend": "Vulkan",
+    "device": 29824,
+    "device_type": "DiscreteGpu",
+    "driver": "radv",
+    "driver_info": "Mesa 26.2.2-arch1.1",
+    "name": "AMD Radeon RX 7600 XT (RADV NAVI33)",
+    "vendor": 4098
+  },
+  "cases": [
+    {
+      "frame_fingerprints": [
+        "fb0480ef2d409945",
+        "655a81509c31db91",
+        "fd3cc0a32a8832f4",
+        "e6a858e0b1bc0b0b"
+      ],
+      "images": [
+        {
+          "exposure": 1.0,
+          "name": "halo-rings-spp1",
+          "spp": 1
+        },
+        {
+          "exposure": 1.0,
+          "name": "halo-rings-spp256",
+          "spp": 256
+        },
+        {
+          "exposure": 1.0,
+          "name": "halo-rings-moving-2",
+          "spp": 1
+        },
+        {
+          "exposure": 1.0,
+          "name": "halo-rings-moving-3",
+          "spp": 1
+        }
+      ],
+      "initial_time_days": 0.0,
+      "modes": [
+        {
+          "mode": "paused",
+          "repeats": [
+            [
+              {
+                "gpu_ms": 8.7946,
+                "spp": 1,
+                "wall_ms": 9.096001
+              },
+              {
+                "gpu_ms": 8.21668,
+                "spp": 2,
+                "wall_ms": 8.342075
+              },
+              {
+                "gpu_ms": 8.33288,
+                "spp": 3,
+                "wall_ms": 8.600701
+              },
+              {
+                "gpu_ms": 8.4392,
+                "spp": 4,
+                "wall_ms": 8.53759
+              }
+            ]
+          ]
+        },
+        {
+          "mode": "advancing",
+          "repeats": [
+            [
+              {
+                "gpu_ms": 8.79832,
+                "spp": 1,
+                "wall_ms": 9.071024000000001
+              },
+              {
+                "gpu_ms": 8.68844,
+                "spp": 1,
+                "wall_ms": 8.788842
+              },
+              {
+                "gpu_ms": 7.95248,
+                "spp": 1,
+                "wall_ms": 8.208118
+              },
+              {
+                "gpu_ms": 7.22268,
+                "spp": 1,
+                "wall_ms": 7.318843
+              }
+            ]
+          ]
+        }
+      ],
+      "name": "halo-rings"
+    },
+    {
+      "frame_fingerprints": [
+        "664caa95aae7d0c2",
+        "30e4e0d8b532b951",
+        "682c2bf3bd461723",
+        "25bdf21f44f5f186"
+      ],
+      "images": [
+        {
+          "exposure": 1.0,
+          "name": "earth-daylight-spp1",
+          "spp": 1
+        },
+        {
+          "exposure": 1.0,
+          "name": "earth-daylight-spp256",
+          "spp": 256
+        },
+        {
+          "exposure": 1.0,
+          "name": "earth-daylight-moving-2",
+          "spp": 1
+        },
+        {
+          "exposure": 1.0,
+          "name": "earth-daylight-moving-3",
+          "spp": 1
+        }
+      ],
+      "initial_time_days": 0.599,
+      "modes": [
+        {
+          "mode": "paused",
+          "repeats": [
+            [
+              {
+                "gpu_ms": 33.03716,
+                "spp": 1,
+                "wall_ms": 33.390854
+              },
+              {
+                "gpu_ms": 24.42176,
+                "spp": 2,
+                "wall_ms": 25.140363999999998
+              },
+              {
+                "gpu_ms": 19.99808,
+                "spp": 3,
+                "wall_ms": 20.329039
+              },
+              {
+                "gpu_ms": 17.42004,
+                "spp": 4,
+                "wall_ms": 17.682634
+              }
+            ]
+          ]
+        },
+        {
+          "mode": "advancing",
+          "repeats": [
+            [
+              {
+                "gpu_ms": 17.96848,
+                "spp": 1,
+                "wall_ms": 18.129310999999998
+              },
+              {
+                "gpu_ms": 17.8528,
+                "spp": 1,
+                "wall_ms": 18.011805
+              },
+              {
+                "gpu_ms": 17.91328,
+                "spp": 1,
+                "wall_ms": 18.086408000000002
+              },
+              {
+                "gpu_ms": 17.67348,
+                "spp": 1,
+                "wall_ms": 17.83147
+              }
+            ]
+          ]
+        }
+      ],
+      "name": "earth-daylight"
+    },
+    {
+      "frame_fingerprints": [
+        "f799dff1fe7c3eab",
+        "6def3e9b518e61d2",
+        "16bc1b3ea9aed451",
+        "cdd140486d0dbbc1"
+      ],
+      "images": [
+        {
+          "exposure": 1.0,
+          "name": "earth-twilight-spp1",
+          "spp": 1
+        },
+        {
+          "exposure": 1.0,
+          "name": "earth-twilight-spp256",
+          "spp": 256
+        },
+        {
+          "exposure": 1.0,
+          "name": "earth-twilight-moving-2",
+          "spp": 1
+        },
+        {
+          "exposure": 1.0,
+          "name": "earth-twilight-moving-3",
+          "spp": 1
+        }
+      ],
+      "initial_time_days": 1.04,
+      "modes": [
+        {
+          "mode": "paused",
+          "repeats": [
+            [
+              {
+                "gpu_ms": 16.40492,
+                "spp": 1,
+                "wall_ms": 16.670081
+              },
+              {
+                "gpu_ms": 16.33904,
+                "spp": 2,
+                "wall_ms": 16.597772
+              },
+              {
+                "gpu_ms": 16.3608,
+                "spp": 3,
+                "wall_ms": 16.640143
+              },
+              {
+                "gpu_ms": 14.70708,
+                "spp": 4,
+                "wall_ms": 14.97989
+              }
+            ]
+          ]
+        },
+        {
+          "mode": "advancing",
+          "repeats": [
+            [
+              {
+                "gpu_ms": 10.13764,
+                "spp": 1,
+                "wall_ms": 10.260850999999999
+              },
+              {
+                "gpu_ms": 9.49092,
+                "spp": 1,
+                "wall_ms": 9.665912
+              },
+              {
+                "gpu_ms": 8.72024,
+                "spp": 1,
+                "wall_ms": 8.911354999999999
+              },
+              {
+                "gpu_ms": 8.19312,
+                "spp": 1,
+                "wall_ms": 8.295323999999999
+              }
+            ]
+          ]
+        }
+      ],
+      "name": "earth-twilight"
+    },
+    {
+      "frame_fingerprints": [
+        "39a61f79baa2fb56",
+        "33338f8e6a7847fa",
+        "720ef0883d1717f7",
+        "768e77bd97617487"
+      ],
+      "images": [
+        {
+          "exposure": 1.0,
+          "name": "median-dense-spp1",
+          "spp": 1
+        },
+        {
+          "exposure": 1.0,
+          "name": "median-dense-spp256",
+          "spp": 256
+        },
+        {
+          "exposure": 1.0,
+          "name": "median-dense-moving-2",
+          "spp": 1
+        },
+        {
+          "exposure": 1.0,
+          "name": "median-dense-moving-3",
+          "spp": 1
+        }
+      ],
+      "initial_time_days": 0.25,
+      "modes": [
+        {
+          "mode": "paused",
+          "repeats": [
+            [
+              {
+                "gpu_ms": 22.6828,
+                "spp": 1,
+                "wall_ms": 22.990788000000002
+              },
+              {
+                "gpu_ms": 21.12184,
+                "spp": 2,
+                "wall_ms": 21.46411
+              },
+              {
+                "gpu_ms": 17.1484,
+                "spp": 3,
+                "wall_ms": 17.457318
+              },
+              {
+                "gpu_ms": 14.25588,
+                "spp": 4,
+                "wall_ms": 14.866161
+              }
+            ]
+          ]
+        },
+        {
+          "mode": "advancing",
+          "repeats": [
+            [
+              {
+                "gpu_ms": 10.9546,
+                "spp": 1,
+                "wall_ms": 11.131311
+              },
+              {
+                "gpu_ms": 10.63976,
+                "spp": 1,
+                "wall_ms": 10.758246000000002
+              },
+              {
+                "gpu_ms": 11.24356,
+                "spp": 1,
+                "wall_ms": 11.40748
+              },
+              {
+                "gpu_ms": 11.50664,
+                "spp": 1,
+                "wall_ms": 11.674463
+              }
+            ]
+          ]
+        }
+      ],
+      "name": "median-dense"
+    },
+    {
+      "frame_fingerprints": [
+        "353e6cff103010d2",
+        "a12f6b68a22872b2",
+        "835e9aa06a99e42f",
+        "df711d83c55447aa"
+      ],
+      "images": [
+        {
+          "exposure": 8.0,
+          "name": "vantus-eclipse-spp1",
+          "spp": 1
+        },
+        {
+          "exposure": 8.0,
+          "name": "vantus-eclipse-spp256",
+          "spp": 256
+        },
+        {
+          "exposure": 8.0,
+          "name": "vantus-eclipse-moving-2",
+          "spp": 1
+        },
+        {
+          "exposure": 8.0,
+          "name": "vantus-eclipse-moving-3",
+          "spp": 1
+        }
+      ],
+      "initial_time_days": 444.478,
+      "modes": [
+        {
+          "mode": "paused",
+          "repeats": [
+            [
+              {
+                "gpu_ms": 7.52972,
+                "spp": 1,
+                "wall_ms": 7.668712
+              },
+              {
+                "gpu_ms": 7.21292,
+                "spp": 2,
+                "wall_ms": 7.334642
+              },
+              {
+                "gpu_ms": 7.19928,
+                "spp": 3,
+                "wall_ms": 7.45381
+              },
+              {
+                "gpu_ms": 7.19828,
+                "spp": 4,
+                "wall_ms": 7.291779
+              }
+            ]
+          ]
+        },
+        {
+          "mode": "advancing",
+          "repeats": [
+            [
+              {
+                "gpu_ms": 7.52864,
+                "spp": 1,
+                "wall_ms": 7.797879
+              },
+              {
+                "gpu_ms": 7.5406,
+                "spp": 1,
+                "wall_ms": 7.631721
+              },
+              {
+                "gpu_ms": 7.52068,
+                "spp": 1,
+                "wall_ms": 7.800975
+              },
+              {
+                "gpu_ms": 7.25116,
+                "spp": 1,
+                "wall_ms": 7.352055
+              }
+            ]
+          ]
+        }
+      ],
+      "name": "vantus-eclipse"
+    },
+    {
+      "frame_fingerprints": [
+        "6d0314c1dd28675f",
+        "12fa24787245a19b",
+        "24158d3c415d62bc",
+        "3afb177610e87af3"
+      ],
+      "images": [
+        {
+          "exposure": 64.0,
+          "name": "moonlit-air-spp1",
+          "spp": 1
+        },
+        {
+          "exposure": 64.0,
+          "name": "moonlit-air-spp256",
+          "spp": 256
+        },
+        {
+          "exposure": 64.0,
+          "name": "moonlit-air-moving-2",
+          "spp": 1
+        },
+        {
+          "exposure": 64.0,
+          "name": "moonlit-air-moving-3",
+          "spp": 1
+        }
+      ],
+      "initial_time_days": 0.0,
+      "modes": [
+        {
+          "mode": "paused",
+          "repeats": [
+            [
+              {
+                "gpu_ms": 1.31816,
+                "spp": 1,
+                "wall_ms": 1.425924
+              },
+              {
+                "gpu_ms": 1.40268,
+                "spp": 2,
+                "wall_ms": 1.4902769999999999
+              },
+              {
+                "gpu_ms": 1.43468,
+                "spp": 3,
+                "wall_ms": 1.519843
+              },
+              {
+                "gpu_ms": 1.45432,
+                "spp": 4,
+                "wall_ms": 1.5343609999999999
+              }
+            ]
+          ]
+        },
+        {
+          "mode": "advancing",
+          "repeats": [
+            [
+              {
+                "gpu_ms": 1.51348,
+                "spp": 1,
+                "wall_ms": 1.6014300000000001
+              },
+              {
+                "gpu_ms": 1.51844,
+                "spp": 1,
+                "wall_ms": 1.604636
+              },
+              {
+                "gpu_ms": 1.52052,
+                "spp": 1,
+                "wall_ms": 1.654181
+              },
+              {
+                "gpu_ms": 1.52332,
+                "spp": 1,
+                "wall_ms": 1.613764
+              }
+            ]
+          ]
+        }
+      ],
+      "name": "moonlit-air"
+    }
+  ],
+  "suite_version": 1,
+  "timestamp_period_ns": 10.0,
+  "trace_size": [
+    480,
+    270
+  ],
+  "variant": "fast"
+}

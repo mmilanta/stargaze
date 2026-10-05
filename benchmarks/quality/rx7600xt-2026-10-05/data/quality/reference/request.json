@@ -1,0 +1,22 @@
+{
+  "width": 640,
+  "height": 360,
+  "scale": 75,
+  "bounces": 4,
+  "vegetation": 70,
+  "warmup": 2,
+  "frames": 4,
+  "repeats": 1,
+  "image_samples": 256,
+  "output": "/home/marco/Documents/stargaze/target/benchmarks/quality-refinement/reference",
+  "adapter": "",
+  "cases": [
+    "halo-rings",
+    "earth-daylight",
+    "earth-twilight",
+    "median-dense",
+    "vantus-eclipse",
+    "moonlit-air"
+  ],
+  "variant": "reference"
+}

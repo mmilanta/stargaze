@@ -1,0 +1,210 @@
+[
+  {
+    "case": "halo-rings",
+    "mode": "paused",
+    "gpu_median_ms": 35.05154,
+    "gpu_p95_ms": 35.239502,
+    "wall_median_ms": 70.435726,
+    "repeat_medians_ms": [
+      35.06922,
+      35.05154,
+      35.02778
+    ],
+    "count": 48
+  },
+  {
+    "case": "halo-rings",
+    "mode": "advancing",
+    "gpu_median_ms": 35.28594,
+    "gpu_p95_ms": 35.356024,
+    "wall_median_ms": 71.904126,
+    "repeat_medians_ms": [
+      35.298779999999994,
+      35.276219999999995,
+      35.28594
+    ],
+    "count": 48
+  },
+  {
+    "case": "earth-daylight",
+    "mode": "paused",
+    "gpu_median_ms": 125.33358,
+    "gpu_p95_ms": 125.705958,
+    "wall_median_ms": 165.1499385,
+    "repeat_medians_ms": [
+      125.4248,
+      125.22826,
+      125.28492
+    ],
+    "count": 48
+  },
+  {
+    "case": "earth-daylight",
+    "mode": "advancing",
+    "gpu_median_ms": 125.4276,
+    "gpu_p95_ms": 125.849464,
+    "wall_median_ms": 168.417327,
+    "repeat_medians_ms": [
+      125.27674,
+      125.51148,
+      125.53376
+    ],
+    "count": 48
+  },
+  {
+    "case": "earth-twilight",
+    "mode": "paused",
+    "gpu_median_ms": 42.41548,
+    "gpu_p95_ms": 42.918966,
+    "wall_median_ms": 80.560033,
+    "repeat_medians_ms": [
+      42.38964,
+      42.4217,
+      42.423959999999994
+    ],
+    "count": 48
+  },
+  {
+    "case": "earth-twilight",
+    "mode": "advancing",
+    "gpu_median_ms": 42.8351,
+    "gpu_p95_ms": 42.964672,
+    "wall_median_ms": 77.405292,
+    "repeat_medians_ms": [
+      42.8656,
+      42.83592,
+      42.83022
+    ],
+    "count": 48
+  },
+  {
+    "case": "median-dense",
+    "mode": "paused",
+    "gpu_median_ms": 78.28272,
+    "gpu_p95_ms": 78.458608,
+    "wall_median_ms": 115.0072585,
+    "repeat_medians_ms": [
+      78.21826,
+      78.27068,
+      78.28836
+    ],
+    "count": 48
+  },
+  {
+    "case": "median-dense",
+    "mode": "advancing",
+    "gpu_median_ms": 78.22458,
+    "gpu_p95_ms": 78.407022,
+    "wall_median_ms": 118.3177235,
+    "repeat_medians_ms": [
+      78.19391999999999,
+      78.16998,
+      78.25146000000001
+    ],
+    "count": 48
+  },
+  {
+    "case": "vantus-eclipse",
+    "mode": "paused",
+    "gpu_median_ms": 32.89243999999999,
+    "gpu_p95_ms": 33.113415999999994,
+    "wall_median_ms": 67.498572,
+    "repeat_medians_ms": [
+      32.90696,
+      32.89716,
+      32.8523
+    ],
+    "count": 48
+  },
+  {
+    "case": "vantus-eclipse",
+    "mode": "advancing",
+    "gpu_median_ms": 33.1232,
+    "gpu_p95_ms": 33.20342,
+    "wall_median_ms": 70.1351875,
+    "repeat_medians_ms": [
+      33.10976,
+      33.111180000000004,
+      33.1884
+    ],
+    "count": 48
+  },
+  {
+    "case": "vantus-airless",
+    "mode": "paused",
+    "gpu_median_ms": 2.5191,
+    "gpu_p95_ms": 2.532946,
+    "wall_median_ms": 40.934527,
+    "repeat_medians_ms": [
+      2.51926,
+      2.5170000000000003,
+      2.52406
+    ],
+    "count": 48
+  },
+  {
+    "case": "vantus-airless",
+    "mode": "advancing",
+    "gpu_median_ms": 2.44552,
+    "gpu_p95_ms": 2.475124,
+    "wall_median_ms": 36.0580695,
+    "repeat_medians_ms": [
+      2.4709000000000003,
+      2.44056,
+      2.4463
+    ],
+    "count": 48
+  },
+  {
+    "case": "dual-eclipse",
+    "mode": "paused",
+    "gpu_median_ms": 0.87372,
+    "gpu_p95_ms": 0.881158,
+    "wall_median_ms": 36.3380315,
+    "repeat_medians_ms": [
+      0.8684000000000001,
+      0.87246,
+      0.87734
+    ],
+    "count": 48
+  },
+  {
+    "case": "dual-eclipse",
+    "mode": "advancing",
+    "gpu_median_ms": 0.8597600000000001,
+    "gpu_p95_ms": 0.8691,
+    "wall_median_ms": 33.299088999999995,
+    "repeat_medians_ms": [
+      0.8553999999999999,
+      0.86296,
+      0.8631
+    ],
+    "count": 48
+  },
+  {
+    "case": "moonlit-air",
+    "mode": "paused",
+    "gpu_median_ms": 8.316780000000001,
+    "gpu_p95_ms": 8.386496000000001,
+    "wall_median_ms": 39.886193000000006,
+    "repeat_medians_ms": [
+      8.33164,
+      8.339300000000001,
+      8.287939999999999
+    ],
+    "count": 48
+  },
+  {
+    "case": "moonlit-air",
+    "mode": "advancing",
+    "gpu_median_ms": 7.71538,
+    "gpu_p95_ms": 7.740042,
+    "wall_median_ms": 45.3050085,
+    "repeat_medians_ms": [
+      7.7218599999999995,
+      7.72298,
+      7.70534
+    ],
+    "count": 48
+  }
+]

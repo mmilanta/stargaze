@@ -91,6 +91,8 @@ inputs, define a new fixture/version instead of silently comparing unlike work.
 | `vantus-eclipse` | Binary system, day 444.478; telescope tracks Vantus, FOV 2.5× angular radius | Multiple moon transits/shadows and atmospheric transport at deep zoom |
 | `vantus-airless` | Exactly the same Vantus geometry/time/camera, atmosphere disabled | Controlled airless counterpart, isolates atmospheric workload differences |
 | `dual-eclipse` | Synthetic ringed sphere, two finite suns and two aligned occluders | Overlapping soft eclipse shadows, colored lighting, ring transmission, indirect light without atmosphere |
+| `moonlit-air` (optional) | Synthetic large moon illuminated by a sun below the observer horizon | Reflected atmospheric glow |
+| `eclipse-umbra-edge` (optional) | Nearly point-like sun, observer just inside totality, transverse shadow motion | Sharp atmospheric illumination boundary: bright sky to the left, dark sky to the right and dark ground |
 
 Advancing mode uses **one simulated second per sequence frame**, not elapsed
 wall time. Each repetition replays the same sequence. Telescope cases track their
@@ -167,3 +169,32 @@ Ordinary tests validate deterministic fixtures, day/twilight conditions and
 occluder alignment, plus comparison statistics, errors, and compatibility checks.
 The ignored `render_benchmark` test is invoked by the Python runner with `--release`.
 The checked-in baseline and repeatability report document the hardware runs.
+
+## Rendering-quality investigation
+
+[Review all six atmosphere approximations](quality/rx7600xt-2026-10-05/README.md)
+with [interactive image comparisons](quality/rx7600xt-2026-10-05/index.html).
+These benchmark-only variants await visual review; timing results from that
+investigation are provisional because another application shared the GPU.
+
+## Atmospheric eclipse boundary
+
+The `eclipse-umbra-edge` stress case captures a recently eclipsed tiny star:
+the observer is in totality while dense atmosphere to the left still sees the
+star. [Inspect all six variants](quality/eclipse-umbra-edge/index.html), including
+1-, 32-, and 256-sample images. See the [geometry and validation notes](quality/eclipse-umbra-edge/README.md).
+
+```sh
+python3 scripts/benchmark.py run target/benchmarks/umbra-reference --cases eclipse-umbra-edge
+python3 scripts/benchmark.py run target/benchmarks/umbra-fast --cases eclipse-umbra-edge --variant fast
+python3 scripts/benchmark.py compare target/benchmarks/umbra-reference target/benchmarks/umbra-fast target/benchmarks/umbra-comparison
+```
+
+The seven default cases are preserved for comparisons against historical runs.
+Select the new case explicitly with `--cases eclipse-umbra-edge`, or append it to
+your case list. An independent finite-disc geometry test and the ignored GPU test
+`gpu_umbra_edge_contrast` check totality, lit neighbouring air and dark ground.
+The ignored `render_umbra_edge_study` captures all seven shader variants (including
+reference) at both image settings into a new `target/benchmarks/umbra-edge-study`
+directory; it refuses to overwrite previous runs. Standard Python invocations
+above are the recommended repeatable route and also create their reports.

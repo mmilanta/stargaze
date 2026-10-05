@@ -1,0 +1,108 @@
+{
+  "baseline": "/home/marco/Documents/stargaze/target/benchmarks/umbra-edge-study/full/reference",
+  "candidate": "/home/marco/Documents/stargaze/target/benchmarks/umbra-edge-study/full/view12",
+  "baseline_variant": "reference",
+  "candidate_variant": "view12",
+  "timings": [
+    {
+      "case": "eclipse-umbra-edge",
+      "mode": "paused",
+      "baseline": {
+        "gpu_median_ms": 3.11112,
+        "gpu_p95_ms": 3.142836,
+        "wall_median_ms": 3.190204,
+        "repeat_medians_ms": [
+          3.10384,
+          3.12194,
+          3.10488
+        ],
+        "count": 48
+      },
+      "candidate": {
+        "gpu_median_ms": 2.8113599999999996,
+        "gpu_p95_ms": 3.198506,
+        "wall_median_ms": 2.900676,
+        "repeat_medians_ms": [
+          3.1954000000000002,
+          2.8113599999999996,
+          1.9784
+        ],
+        "count": 48
+      },
+      "speedup": 1.1066245518183373
+    },
+    {
+      "case": "eclipse-umbra-edge",
+      "mode": "advancing",
+      "baseline": {
+        "gpu_median_ms": 2.98836,
+        "gpu_p95_ms": 3.04094,
+        "wall_median_ms": 3.0710565,
+        "repeat_medians_ms": [
+          3.02886,
+          2.98836,
+          2.9625399999999997
+        ],
+        "count": 48
+      },
+      "candidate": {
+        "gpu_median_ms": 1.72724,
+        "gpu_p95_ms": 1.756284,
+        "wall_median_ms": 1.8059115000000001,
+        "repeat_medians_ms": [
+          1.6732399999999998,
+          1.74558,
+          1.724
+        ],
+        "count": 48
+      },
+      "speedup": 1.7301359394177995
+    }
+  ],
+  "images": [
+    {
+      "name": "eclipse-umbra-edge-spp1",
+      "display_mae_255": 2.637394024884259,
+      "display_rmse_255": 6.563547728311931,
+      "display_max_255": 157,
+      "display_psnr_db": 31.788030655468653,
+      "pixels_changed_over_1_255_percent": 33.068033854166664,
+      "linear_rgb_rmse": 0.11321879292937505,
+      "linear_rgb_relative_rmse": 0.34050580991261387,
+      "log1p_rgb_rmse": 0.04805255943697301
+    },
+    {
+      "name": "eclipse-umbra-edge-spp32",
+      "display_mae_255": 1.9074934895833333,
+      "display_rmse_255": 4.462181782667989,
+      "display_max_255": 124,
+      "display_psnr_db": 35.139858432253,
+      "pixels_changed_over_1_255_percent": 31.91449652777778,
+      "linear_rgb_rmse": 0.07063093669330077,
+      "linear_rgb_relative_rmse": 0.21478254600149815,
+      "log1p_rgb_rmse": 0.029005596326031703
+    },
+    {
+      "name": "eclipse-umbra-edge-moving-8",
+      "display_mae_255": 3.3606177662037036,
+      "display_rmse_255": 7.876298853058153,
+      "display_max_255": 173,
+      "display_psnr_db": 30.20435988147103,
+      "pixels_changed_over_1_255_percent": 32.29850260416667,
+      "linear_rgb_rmse": 0.10794251955982928,
+      "linear_rgb_relative_rmse": 0.37370006535868733,
+      "log1p_rgb_rmse": 0.04954883531846436
+    },
+    {
+      "name": "eclipse-umbra-edge-moving-15",
+      "display_mae_255": 3.761740089699074,
+      "display_rmse_255": 8.713112121643373,
+      "display_max_255": 141,
+      "display_psnr_db": 29.327337555938115,
+      "pixels_changed_over_1_255_percent": 31.5263671875,
+      "linear_rgb_rmse": 0.1012559232031405,
+      "linear_rgb_relative_rmse": 0.39054510393670194,
+      "log1p_rgb_rmse": 0.049565459349877765
+    }
+  ]
+}

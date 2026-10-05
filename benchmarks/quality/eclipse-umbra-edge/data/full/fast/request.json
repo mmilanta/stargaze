@@ -1,0 +1,17 @@
+{
+  "output": "target/benchmarks/umbra-edge-study/full/fast",
+  "width": 1280,
+  "height": 720,
+  "scale": 75,
+  "bounces": 4,
+  "vegetation": 70,
+  "warmup": 8,
+  "frames": 16,
+  "repeats": 3,
+  "image_samples": 32,
+  "adapter": "",
+  "cases": [
+    "eclipse-umbra-edge"
+  ],
+  "variant": "fast"
+}

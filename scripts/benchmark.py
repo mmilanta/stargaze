@@ -21,7 +21,7 @@ import zlib
 ROOT = Path(__file__).resolve().parents[1]
 CASES = ["halo-rings", "earth-daylight", "earth-twilight", "median-dense",
          "vantus-eclipse", "vantus-airless", "dual-eclipse"]
-EXTRA_CASES = ["moonlit-air"]
+EXTRA_CASES = ["moonlit-air", "eclipse-umbra-edge"]
 VARIANTS = ["reference", "sun6", "view12", "balanced", "fast", "planetshine-quarter", "no-planetshine"]
 COMPATIBLE = ["width", "height", "scale", "bounces", "vegetation", "warmup", "frames", "repeats", "image_samples"]
 
@@ -102,11 +102,7 @@ def report_run(output):
     print("\n".join(lines))
 
 
-def run(args):
-    output = fresh_directory(args.output)
-    config = {k: getattr(args, k) for k in COMPATIBLE}
-    config.update(output=str(output), adapter=args.adapter, cases=args.cases or CASES, variant=args.variant)
-    write_json(output / "request.json", config)
+def record_provenance(output, invocation=None):
     files = sorted([*ROOT.glob("src/**/*.rs"), *ROOT.glob("src/**/*.wgsl"), *ROOT.glob("configs/*.yaml"), *ROOT.glob("scripts/*benchmark*.py"), ROOT / "Cargo.toml", ROOT / "Cargo.lock"])
     manifest = {"created_utc": datetime.datetime.now(datetime.timezone.utc).isoformat(),
                 "git_commit": command("git", "rev-parse", "HEAD"), "git_status": command("git", "status", "--short"),
@@ -114,8 +110,16 @@ def run(args):
                 "rustc": command("rustc", "--version"), "cargo": command("cargo", "--version"),
                 "cpu": next((line.split(":", 1)[1].strip() for line in Path("/proc/cpuinfo").read_text().splitlines() if line.startswith("model name")), "unknown"),
                 "source_sha256": {str(p.relative_to(ROOT)): hashlib.sha256(p.read_bytes()).hexdigest() for p in files},
-                "invocation": sys.argv, "note": "Uncapped serial offscreen renderer benchmark, not presented application FPS."}
+                "invocation": invocation if invocation is not None else sys.argv, "note": "Uncapped serial offscreen renderer benchmark, not presented application FPS."}
     write_json(output / "manifest.json", manifest)
+
+
+def run(args):
+    output = fresh_directory(args.output)
+    config = {k: getattr(args, k) for k in COMPATIBLE}
+    config.update(output=str(output), adapter=args.adapter, cases=args.cases or CASES, variant=args.variant)
+    write_json(output / "request.json", config)
+    record_provenance(output)
     env = {k: v for k, v in os.environ.items() if not k.startswith("STARGAZE_")}
     env["STARGAZE_BENCH_CONFIG"] = str(output / "request.json")
     cmd = ["cargo", "test", "--locked", "--release", "pathtracer::benchmark::render_benchmark", "--",
