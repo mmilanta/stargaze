@@ -174,8 +174,14 @@ The checked-in baseline and repeatability report document the hardware runs.
 
 [Review all six atmosphere approximations](quality/rx7600xt-2026-10-05/README.md)
 with [interactive image comparisons](quality/rx7600xt-2026-10-05/index.html).
-These benchmark-only variants await visual review; timing results from that
-investigation are provisional because another application shared the GPU.
+The reviewed `fast` variant is now the production default: 8 view steps and
+4 light-path steps. New `reference` runs use that production shader; `fast`
+is an identical alias. Other named experiments retain their reviewed settings,
+including 24/12 steps for the two planetshine experiments. Archived review
+images and timings retain the original 24/12 reference and their capture-time
+source hashes. Their timing results are provisional because another application
+shared the GPU. Compare against those captures when measuring the change from
+the previous default.
 
 ## Atmospheric eclipse boundary
 

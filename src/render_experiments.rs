@@ -14,7 +14,12 @@ pub const VARIANTS: &[&str] = &[
 
 pub fn source(variant: &str) -> String {
     assert!(VARIANTS.contains(&variant));
+    if variant == "reference" {
+        return TRACE_SHADER.to_string();
+    }
     let mut source = TRACE_SHADER.to_string();
+    // Keep the named experiments at their reviewed settings. The reference
+    // follows production, which now uses the accepted fast integration counts.
     let (view, sun) = match variant {
         "sun6" => (24, 6),
         "view12" => (12, 12),
@@ -31,11 +36,11 @@ pub fn source(variant: &str) -> String {
         source = source.replacen(from, to, 1);
     };
     replace(
-        "const ATMO_VIEW_STEPS: u32 = 24u;",
+        "const ATMO_VIEW_STEPS: u32 = 8u;",
         &format!("const ATMO_VIEW_STEPS: u32 = {view}u;"),
     );
     replace(
-        "const ATMO_SUN_STEPS: u32 = 12u;",
+        "const ATMO_SUN_STEPS: u32 = 4u;",
         &format!("const ATMO_SUN_STEPS: u32 = {sun}u;"),
     );
     if variant == "no-planetshine" {
@@ -97,6 +102,7 @@ pub fn install(device: &wgpu::Device, tracer: &mut PathTracer, variant: &str) {
 #[test]
 fn approximate_shaders_validate_and_reference_is_unchanged() {
     assert_eq!(source("reference"), TRACE_SHADER);
+    assert_eq!(source("fast"), TRACE_SHADER);
     for variant in VARIANTS {
         let source = source(variant);
         let module = naga::front::wgsl::parse_str(&source)
