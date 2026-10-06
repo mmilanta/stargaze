@@ -53,8 +53,8 @@ const MISS: u32 = 0xffffffffu;
 // capped: they grow to their true physical size when zoomed in.
 const STAR_DOT_PIXELS: f32 = 3.0;
 // View-ray and light-ray samples used by the single-scattering atmosphere.
-const ATMO_VIEW_STEPS: u32 = 24u;
-const ATMO_SUN_STEPS: u32 = 12u;
+const ATMO_VIEW_STEPS: u32 = 8u;
+const ATMO_SUN_STEPS: u32 = 4u;
 
 struct Ray {
     // Origin = bodies[anchor].center + offset; MISS means camera origin.

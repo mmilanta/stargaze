@@ -100,7 +100,9 @@ All scene visibility and illumination are traced in a WGSL compute shader:
   Halo, the puzzle lookout, and the legacy Saturn observatory use Earth-like
   scattering. Median's Cadence observatory uses the `dense` preset, with
   three times the scattering coefficients and a daylight sky that hides
-  background stars. Integration uses 24 view steps and 12 light-path steps.
+  background stars. Integration uses 8 view steps and 4 light-path steps
+  (the reviewed `fast` setting). This reduces atmospheric rendering cost,
+  with coarser integration of sky gradients and eclipse-shadow boundaries.
   One external reflecting body is sampled per camera path, weighted by its
   apparent size and albedo; its visible surface is sampled at each view step.
   This models one surface reflection followed by one atmospheric scattering,

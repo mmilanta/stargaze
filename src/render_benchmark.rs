@@ -1,9 +1,12 @@
-//! Opt-in, offscreen benchmark of the unmodified production tracing/display path.
+//! Opt-in, offscreen benchmark of production rendering and explicit quality experiments.
 //! Run through scripts/benchmark.py to capture provenance and compare artifacts.
 use super::*;
 use anyhow::{Context, Result, ensure};
 use serde::{Deserialize, Serialize};
 use std::{path::Path, time::Instant};
+
+#[path = "render_experiments.rs"]
+mod experiments;
 
 const CASES: &[&str] = &[
     "halo-rings",
@@ -13,10 +16,12 @@ const CASES: &[&str] = &[
     "vantus-eclipse",
     "vantus-airless",
     "dual-eclipse",
+    "moonlit-air",
+    "eclipse-umbra-edge",
 ];
 const FORMAT: wgpu::TextureFormat = wgpu::TextureFormat::Rgba8UnormSrgb;
 
-#[derive(Deserialize)]
+#[derive(Deserialize, Serialize)]
 #[serde(deny_unknown_fields)]
 struct Config {
     output: String,
@@ -31,9 +36,19 @@ struct Config {
     image_samples: u32,
     adapter: String,
     cases: Vec<String>,
+    #[serde(default = "reference_variant")]
+    variant: String,
 }
+fn reference_variant() -> String {
+    "reference".into()
+}
+
 impl Config {
     fn validate(&self) -> Result<()> {
+        ensure!(
+            experiments::VARIANTS.contains(&self.variant.as_str()),
+            "unknown shader variant"
+        );
         ensure!(
             (16..=3840).contains(&self.width) && (16..=2160).contains(&self.height),
             "invalid dimensions"
@@ -123,6 +138,98 @@ fn fixture(name: &str, step: u32, cfg: &Config) -> Frame {
                 sphere([3.0, 2.0, -1.0], 0.45, [12.0, 18.0, 25.0], 1.0),
                 sphere([-1.5 + step as f32 * 0.003, 1.0, -1.5], 0.3, [0.3; 3], 0.0),
                 sphere([1.5 - step as f32 * 0.003, 1.0, -1.5], 0.25, [0.3; 3], 0.0),
+            ],
+            ground: vec![],
+            scene_time: dt,
+            labels: vec![],
+        };
+    }
+    if name == "eclipse-umbra-edge" {
+        // Camera is 2 m above an Earth-size black host, looking 12 degrees
+        // above the horizon. A nearly point-like sun is on the camera axis.
+        // Its 1000 km-radius occultor is 100,000 km away, displaced 998 km
+        // right: the observer is just inside totality, while air to the left
+        // still sees the sun. Motion carries the shadow farther left.
+        let km = (1.0 / crate::sim::AU_KM) as f32;
+        let radius_m = 6_371_000.0_f32;
+        let altitude = 12_f32.to_radians();
+        let up = glam::Vec3::new(0.0, altitude.cos(), -altitude.sin());
+        let north = glam::Vec3::new(0.0, altitude.sin(), altitude.cos());
+        let center = -up * ((6371.0 + 0.002) * km);
+        let air = crate::sim::Atmosphere::earthlike();
+        let mut g = Globals::zeroed();
+        g.cam_right = [1.0, 0.0, 0.0, 0.0];
+        g.cam_up = [0.0, 1.0, 0.0, 0.0];
+        g.cam_forward = [0.0, 0.0, -1.0, 30_f32.to_radians().tan()];
+        g.viewport = [cfg.width as f32, cfg.height as f32, 1.0, 0.0];
+        g.atmo_center = [center.x, center.y, center.z, 6371.0 * km];
+        g.atmo_rayleigh = [
+            air.rayleigh[0] as f32,
+            air.rayleigh[1] as f32,
+            air.rayleigh[2] as f32,
+            air.mie as f32,
+        ];
+        g.atmo_params = [
+            air.mie_g as f32,
+            air.scale_height as f32,
+            air.thickness as f32,
+            1.0,
+        ];
+        g.ground_east = [1.0, 0.0, 0.0, 2.0];
+        g.ground_up = [up.x, up.y, up.z, radius_m];
+        g.ground_north = [north.x, north.y, north.z, 1.0];
+        return Frame {
+            globals: g,
+            bodies: vec![
+                sphere(center.to_array(), 6371.0 * km, [0.0; 3], 0.0),
+                sphere([0.0, 0.0, -1.0], 1.0e-5, [2.0e10; 3], 1.0),
+                sphere(
+                    [(998.0 - step as f32 * 0.1) * km, 0.0, -100_000.0 * km],
+                    1000.0 * km,
+                    [0.0; 3],
+                    0.0,
+                ),
+            ],
+            ground: vec![],
+            scene_time: dt,
+            labels: vec![],
+        };
+    }
+    if name == "moonlit-air" {
+        // Synthetic moonlit-air stress view based on gpu_reflected_atmosphere:
+        // the sun is below the host horizon but illuminates the large moon.
+        let mut g = Globals::zeroed();
+        g.cam_right = [1.0, 0.0, 0.0, 0.0];
+        g.cam_up = [0.0, 1.0, 0.0, 0.0];
+        g.cam_forward = [0.0, 0.0, -1.0, (27.5_f32.to_radians()).tan()];
+        g.viewport = [cfg.width as f32, cfg.height as f32, 1.0, 0.0];
+        let air = crate::sim::Atmosphere::earthlike();
+        let radius = (6371.0 / crate::sim::AU_KM) as f32;
+        let center = [0.0, 0.0, radius + (0.002 / crate::sim::AU_KM) as f32];
+        g.atmo_center = [center[0], center[1], center[2], radius];
+        g.atmo_rayleigh = [
+            air.rayleigh[0] as f32,
+            air.rayleigh[1] as f32,
+            air.rayleigh[2] as f32,
+            air.mie as f32,
+        ];
+        g.atmo_params = [
+            air.mie_g as f32,
+            air.scale_height as f32,
+            air.thickness as f32,
+            1.0,
+        ];
+        return Frame {
+            globals: g,
+            bodies: vec![
+                sphere(center, radius, [0.0; 3], 0.0),
+                sphere(
+                    [0.0004 + step as f32 * 1e-7, 0.0, -0.002],
+                    0.00015,
+                    [0.8; 3],
+                    0.0,
+                ),
+                sphere([0.3, 0.0, 1.0], 0.005, [100_000.0; 3], 1.0),
             ],
             ground: vec![],
             scene_time: dt,
@@ -369,6 +476,10 @@ fn render_benchmark() -> Result<()> {
     );
     let config_path = std::env::var("STARGAZE_BENCH_CONFIG").context("run scripts/benchmark.py")?;
     let cfg: Config = serde_json::from_slice(&std::fs::read(config_path)?)?;
+    run_benchmark(&cfg)
+}
+
+fn run_benchmark(cfg: &Config) -> Result<()> {
     cfg.validate()?;
     let instance = wgpu::Instance::new(wgpu::InstanceDescriptor {
         backends: wgpu::Backends::VULKAN,
@@ -432,6 +543,7 @@ fn render_benchmark() -> Result<()> {
         ..Options::default()
     };
     let mut tracer = PathTracer::new(&device, FORMAT, cfg.trace_size(), &stars, options);
+    experiments::install(&device, &mut tracer, &cfg.variant);
     let mut cases = vec![];
     for name in &cfg.cases {
         let frames: Vec<_> = (0..cfg.frames.max(cfg.warmup))
@@ -483,6 +595,7 @@ fn render_benchmark() -> Result<()> {
         // Fixed manual exposure makes image differences independent of adaptation history.
         let exposure = match name.as_str() {
             "vantus-eclipse" | "vantus-airless" => 8.0,
+            "moonlit-air" => 64.0,
             _ => 1.0,
         };
         let image_options = Options {
@@ -530,7 +643,7 @@ fn render_benchmark() -> Result<()> {
             "frame_fingerprints": frames[..cfg.frames as usize].iter().map(fingerprint).collect::<Vec<_>>(),
             "modes": modes, "images": images }));
     }
-    let result = serde_json::json!({"suite_version": 1, "adapter": {
+    let result = serde_json::json!({"suite_version": 1, "variant": cfg.variant, "adapter": {
         "name": info.name, "vendor": info.vendor, "device": info.device,
         "device_type": format!("{:?}", info.device_type), "backend": format!("{:?}", info.backend),
         "driver": info.driver, "driver_info": info.driver_info,
@@ -556,6 +669,7 @@ fn benchmark_fixtures_are_deterministic_and_cover_requested_workloads() {
         repeats: 3,
         image_samples: 32,
         adapter: String::new(),
+        variant: reference_variant(),
         cases: CASES.iter().map(|v| v.to_string()).collect(),
     };
     cfg.validate().unwrap();
@@ -582,6 +696,60 @@ fn benchmark_fixtures_are_deterministic_and_cover_requested_workloads() {
             }
             assert!(!a.ground.is_empty());
         }
+        if name == "eclipse-umbra-edge" {
+            use glam::DVec3;
+            // Independent angular-disc geometry, not the shader's ray test.
+            let clearance = |frame: &Frame, point: DVec3| {
+                let sun = DVec3::from_array(frame.bodies[1].center.map(f64::from)) - point;
+                let moon = DVec3::from_array(frame.bodies[2].center.map(f64::from)) - point;
+                let separation = sun.normalize().cross(moon.normalize()).length().asin();
+                let sun_radius = (f64::from(frame.bodies[1].radius) / sun.length()).asin();
+                let moon_radius = (f64::from(frame.bodies[2].radius) / moon.length()).asin();
+                (separation, sun_radius, moon_radius)
+            };
+            let km = 1.0 / crate::sim::AU_KM;
+            for step in [0, 8, 15] {
+                let f = fixture(name, step, &cfg);
+                for point in [DVec3::ZERO, DVec3::new(15.0, 5.0, -30.0) * km] {
+                    let (separation, sun, moon) = clearance(&f, point);
+                    assert!(
+                        separation + sun < moon,
+                        "observer/right-hand air must be in totality"
+                    );
+                }
+                let (separation, sun, moon) = clearance(&f, DVec3::new(-15.0, 5.0, -30.0) * km);
+                assert!(
+                    separation > sun + moon,
+                    "left-hand air must see the entire star"
+                );
+            }
+            let mut before = fixture(name, 0, &cfg);
+            // Forty seconds earlier at the same 100 m/s transverse speed.
+            before.bodies[2].center[0] += (4.0 * km) as f32;
+            let (separation, sun, moon) = clearance(&before, DVec3::ZERO);
+            assert!(
+                separation > sun + moon,
+                "the star was unobscured just before ingress"
+            );
+            let (_, sun, _) = clearance(&a, DVec3::ZERO);
+            let pixels =
+                sun.tan() * f64::from(cfg.trace_size().1) / f64::from(a.globals.cam_forward[3]);
+            assert!(
+                pixels < 0.02,
+                "the stellar diameter must be far below a pixel"
+            );
+            let host = DVec3::new(
+                f64::from(a.globals.atmo_center[0]),
+                f64::from(a.globals.atmo_center[1]),
+                f64::from(a.globals.atmo_center[2]),
+            );
+            let p = DVec3::new(-15.0, 5.0, -30.0) * km;
+            let height = (p - host).length() - f64::from(a.globals.atmo_center[3]);
+            assert!(
+                (5.0 * km..20.0 * km).contains(&height),
+                "sunlit sample must be in dense atmosphere"
+            );
+        }
         if name == "dual-eclipse" {
             assert_eq!(a.bodies.iter().filter(|b| b.emissive > 0.5).count(), 2);
             // Both occluders lie on the segment from the front of the planet to a sun.
@@ -592,4 +760,107 @@ fn benchmark_fixtures_are_deterministic_and_cover_requested_workloads() {
             }
         }
     }
+}
+
+fn umbra_config(output: String, variant: &str) -> Config {
+    Config {
+        output,
+        width: 1280,
+        height: 720,
+        scale: 75,
+        bounces: 4,
+        vegetation: 70,
+        warmup: 8,
+        frames: 16,
+        repeats: 3,
+        image_samples: 32,
+        adapter: String::new(),
+        variant: variant.into(),
+        cases: vec!["eclipse-umbra-edge".into()],
+    }
+}
+
+#[test]
+#[ignore = "requires a GPU; verifies lit air beside totality using production WGSL"]
+fn gpu_umbra_edge_contrast() {
+    let cfg = umbra_config(String::new(), "reference");
+    let (device, queue) = super::tests::gpu();
+    let mut tracer = PathTracer::new(
+        &device,
+        FORMAT,
+        (96, 54),
+        &[],
+        Options {
+            samples_per_frame: 8,
+            max_bounces: 4,
+            milky_way: 0.0,
+            ..Options::default()
+        },
+    );
+    for step in [0, 8, 15] {
+        let scene = fixture("eclipse-umbra-edge", step, &cfg);
+        let pixels = super::tests::sample(&device, &queue, &mut tracer, &scene, 4);
+        let mean = |x0: usize, x1: usize, y0: usize, y1: usize| {
+            let mut sum = 0.0_f64;
+            for y in y0..y1 {
+                for x in x0..x1 {
+                    sum += pixels[y * 96 + x][..3]
+                        .iter()
+                        .map(|v| f64::from(*v))
+                        .sum::<f64>();
+                }
+            }
+            sum / ((x1 - x0) * (y1 - y0) * 3) as f64
+        };
+        let left = mean(12, 30, 14, 23);
+        let right = mean(66, 84, 14, 23);
+        let ground = mean(12, 84, 45, 52);
+        eprintln!("umbra step {step}: left={left}, right={right}, ground={ground}");
+        assert!(left > 0.001, "left-hand atmosphere must be visibly sunlit");
+        assert!(
+            right < left * 0.001,
+            "right-hand atmosphere must remain dark"
+        );
+        assert!(
+            ground < 1e-8,
+            "the observer's ground must remain in totality"
+        );
+    }
+}
+
+#[test]
+#[ignore = "hardware study; writes new full/quality runs for every umbra-edge variant"]
+fn render_umbra_edge_study() -> Result<()> {
+    ensure!(!cfg!(debug_assertions), "benchmark requires --release");
+    ensure!(
+        std::env::var_os("STARGAZE_GROUND").is_none(),
+        "remove STARGAZE_GROUND override"
+    );
+    for quality in [false, true] {
+        for variant in experiments::VARIANTS {
+            let kind = if quality { "quality" } else { "full" };
+            let output = format!("target/benchmarks/umbra-edge-study/{kind}/{variant}");
+            ensure!(
+                !Path::new(&output).exists(),
+                "output already exists: {output}"
+            );
+            std::fs::create_dir_all(&output)?;
+            let mut cfg = umbra_config(output.clone(), variant);
+            if quality {
+                cfg.width = 640;
+                cfg.height = 360;
+                cfg.image_samples = 256;
+                cfg.warmup = 2;
+                cfg.frames = 4;
+                cfg.repeats = 1;
+            }
+            std::fs::write(
+                Path::new(&output).join("request.json"),
+                serde_json::to_vec_pretty(&cfg)?,
+            )?;
+            eprintln!("Umbra study: {kind}/{variant}");
+            run_benchmark(&cfg)?;
+        }
+    }
+    Ok(())
 }

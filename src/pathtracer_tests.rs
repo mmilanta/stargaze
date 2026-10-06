@@ -132,7 +132,7 @@ fn history_resets_for_scene_changes_but_not_overlay_changes() {
     assert_eq!(history.samples, 0);
 }
 
-fn gpu() -> (wgpu::Device, wgpu::Queue) {
+pub(super) fn gpu() -> (wgpu::Device, wgpu::Queue) {
     let instance = wgpu::Instance::new(wgpu::InstanceDescriptor::new_without_display_handle());
     let adapter =
         pollster::block_on(instance.request_adapter(&wgpu::RequestAdapterOptions::default()))
@@ -165,7 +165,7 @@ fn read_pixels(device: &wgpu::Device, queue: &wgpu::Queue, tracer: &PathTracer) 
     pixels
 }
 
-fn sample(
+pub(super) fn sample(
     device: &wgpu::Device,
     queue: &wgpu::Queue,
     tracer: &mut PathTracer,
@@ -824,9 +824,16 @@ fn gpu_atmosphere() {
         let column = a.scale_height
             * ((-0.002 / crate::sim::AU_KM / a.scale_height).exp()
                 - (-a.thickness / a.scale_height).exp());
-        let expected = (-(a.rayleigh[channel] + a.mie) * column).exp() as f32;
+        // For an exponential vertical profile, eight midpoint cells integrate
+        // exactly x/(2*sinh(x/2)) times the continuous column (a geometric
+        // series), where x is one cell's thickness in scale heights. Account
+        // explicitly for the accepted fast setting's quadrature bias instead
+        // of widening the old 24-cell test's tolerance to continuous extinction.
+        let x = (a.thickness - 0.002 / crate::sim::AU_KM) / (8.0 * a.scale_height);
+        let midpoint_column = column * x / (2.0 * (x * 0.5).sinh());
+        let expected = (-(a.rayleigh[channel] + a.mie) * midpoint_column).exp() as f32;
         assert!(
-            (actual - expected).abs() < 0.01,
+            (actual - expected).abs() < 0.001,
             "extinction: {actual} vs {expected}"
         );
     }

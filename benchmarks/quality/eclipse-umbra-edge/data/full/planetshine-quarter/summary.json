@@ -1,0 +1,28 @@
+[
+  {
+    "case": "eclipse-umbra-edge",
+    "mode": "paused",
+    "gpu_median_ms": 3.06402,
+    "gpu_p95_ms": 5.468554,
+    "wall_median_ms": 3.142763,
+    "repeat_medians_ms": [
+      5.41666,
+      3.04266,
+      3.02644
+    ],
+    "count": 48
+  },
+  {
+    "case": "eclipse-umbra-edge",
+    "mode": "advancing",
+    "gpu_median_ms": 2.94946,
+    "gpu_p95_ms": 2.975568,
+    "wall_median_ms": 3.0301435000000003,
+    "repeat_medians_ms": [
+      2.96474,
+      2.95328,
+      2.9042399999999997
+    ],
+    "count": 48
+  }
+]

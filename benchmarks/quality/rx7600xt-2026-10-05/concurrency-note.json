@@ -1,0 +1,4 @@
+{
+  "observed_utc": "2026-10-04T21:32:14.837703+00:00",
+  "condition": "Another application held approximately 7 GiB of VRAM on PCI 0000:03:00.0 and accumulated graphics-engine time during the study. Timings are provisional under concurrent load; image comparisons remain valid."
+}

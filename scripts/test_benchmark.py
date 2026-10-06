@@ -52,6 +52,11 @@ class BenchmarkTests(unittest.TestCase):
             mutate(candidate)
             with self.assertRaises(ValueError):
                 b.check_compatible(report, candidate, config, config)
+        # An explicitly labelled approximation is comparable to the reference.
+        candidate = dict(report, variant="view12")
+        b.check_compatible(report, candidate, config, dict(config, variant="view12"))
+        with self.assertRaisesRegex(ValueError, "variant metadata"):
+            b.check_compatible(report, candidate, config, config)
         candidate_config = dict(config, bounces=2)
         with self.assertRaises(ValueError):
             b.check_compatible(report, report, config, candidate_config)

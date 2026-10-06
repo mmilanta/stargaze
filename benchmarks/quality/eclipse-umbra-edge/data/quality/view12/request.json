@@ -1,0 +1,17 @@
+{
+  "output": "target/benchmarks/umbra-edge-study/quality/view12",
+  "width": 640,
+  "height": 360,
+  "scale": 75,
+  "bounces": 4,
+  "vegetation": 70,
+  "warmup": 2,
+  "frames": 4,
+  "repeats": 1,
+  "image_samples": 256,
+  "adapter": "",
+  "cases": [
+    "eclipse-umbra-edge"
+  ],
+  "variant": "view12"
+}

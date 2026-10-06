@@ -1,0 +1,24 @@
+{
+  "width": 1280,
+  "height": 720,
+  "scale": 75,
+  "bounces": 4,
+  "vegetation": 70,
+  "warmup": 8,
+  "frames": 16,
+  "repeats": 3,
+  "image_samples": 32,
+  "output": "/home/marco/Documents/stargaze/target/benchmarks/quality-study/planetshine-quarter",
+  "adapter": "",
+  "cases": [
+    "halo-rings",
+    "earth-daylight",
+    "earth-twilight",
+    "median-dense",
+    "vantus-eclipse",
+    "vantus-airless",
+    "dual-eclipse",
+    "moonlit-air"
+  ],
+  "variant": "planetshine-quarter"
+}

@@ -1,0 +1,100 @@
+{
+  "baseline": "/home/marco/Documents/stargaze/target/benchmarks/umbra-edge-study/quality/reference",
+  "candidate": "/home/marco/Documents/stargaze/target/benchmarks/umbra-edge-study/quality/planetshine-quarter",
+  "baseline_variant": "reference",
+  "candidate_variant": "planetshine-quarter",
+  "timings": [
+    {
+      "case": "eclipse-umbra-edge",
+      "mode": "paused",
+      "baseline": {
+        "gpu_median_ms": 1.4644599999999999,
+        "gpu_p95_ms": 1.467168,
+        "wall_median_ms": 1.552984,
+        "repeat_medians_ms": [
+          1.4644599999999999
+        ],
+        "count": 4
+      },
+      "candidate": {
+        "gpu_median_ms": 1.47558,
+        "gpu_p95_ms": 1.4830519999999998,
+        "wall_median_ms": 1.564792,
+        "repeat_medians_ms": [
+          1.47558
+        ],
+        "count": 4
+      },
+      "speedup": 0.9924639802653872
+    },
+    {
+      "case": "eclipse-umbra-edge",
+      "mode": "advancing",
+      "baseline": {
+        "gpu_median_ms": 1.46902,
+        "gpu_p95_ms": 1.476872,
+        "wall_median_ms": 1.5509555000000002,
+        "repeat_medians_ms": [
+          1.46902
+        ],
+        "count": 4
+      },
+      "candidate": {
+        "gpu_median_ms": 1.47744,
+        "gpu_p95_ms": 1.480706,
+        "wall_median_ms": 1.5571065,
+        "repeat_medians_ms": [
+          1.47744
+        ],
+        "count": 4
+      },
+      "speedup": 0.9943009529997834
+    }
+  ],
+  "images": [
+    {
+      "name": "eclipse-umbra-edge-spp1",
+      "display_mae_255": 0.0,
+      "display_rmse_255": 0.0,
+      "display_max_255": 0,
+      "display_psnr_db": null,
+      "pixels_changed_over_1_255_percent": 0.0,
+      "linear_rgb_rmse": 0.0,
+      "linear_rgb_relative_rmse": 0.0,
+      "log1p_rgb_rmse": 0.0
+    },
+    {
+      "name": "eclipse-umbra-edge-spp256",
+      "display_mae_255": 0.0,
+      "display_rmse_255": 0.0,
+      "display_max_255": 0,
+      "display_psnr_db": null,
+      "pixels_changed_over_1_255_percent": 0.0,
+      "linear_rgb_rmse": 0.0,
+      "linear_rgb_relative_rmse": 0.0,
+      "log1p_rgb_rmse": 0.0
+    },
+    {
+      "name": "eclipse-umbra-edge-moving-2",
+      "display_mae_255": 0.0,
+      "display_rmse_255": 0.0,
+      "display_max_255": 0,
+      "display_psnr_db": null,
+      "pixels_changed_over_1_255_percent": 0.0,
+      "linear_rgb_rmse": 0.0,
+      "linear_rgb_relative_rmse": 0.0,
+      "log1p_rgb_rmse": 0.0
+    },
+    {
+      "name": "eclipse-umbra-edge-moving-3",
+      "display_mae_255": 0.0,
+      "display_rmse_255": 0.0,
+      "display_max_255": 0,
+      "display_psnr_db": null,
+      "pixels_changed_over_1_255_percent": 0.0,
+      "linear_rgb_rmse": 0.0,
+      "linear_rgb_relative_rmse": 0.0,
+      "log1p_rgb_rmse": 0.0
+    }
+  ]
+}
