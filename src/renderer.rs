@@ -188,9 +188,6 @@ impl Renderer {
     pub fn ev_bias(&self) -> f32 {
         self.tracer.ev_bias()
     }
-    pub fn manual_exposure(&self) -> f32 {
-        self.tracer.manual_exposure()
-    }
 
     /// Trace a small initial backdrop once; menus reuse it while the GPU rests.
     pub fn prepare_background(&mut self, frame: &Frame) {

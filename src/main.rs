@@ -32,7 +32,7 @@ use glam::DVec3;
 use winit::application::ApplicationHandler;
 use winit::event::{ElementState, MouseButton, MouseScrollDelta, WindowEvent};
 use winit::event_loop::{ActiveEventLoop, ControlFlow, EventLoop};
-use winit::keyboard::{KeyCode, PhysicalKey};
+use winit::keyboard::{KeyCode, ModifiersState, PhysicalKey};
 use winit::window::{Window, WindowId};
 
 use camera::{Observer, ViewFrame};
@@ -918,6 +918,7 @@ struct App {
     cursor: (f64, f64),
     motion: motion::Motion,
     pressed_key: Option<KeyCode>,
+    modifiers: ModifiersState,
     mouse_down: bool,
     show_labels: bool,
     show_hud: bool,
@@ -1728,6 +1729,13 @@ impl ApplicationHandler for App {
                     self.pacer.request();
                     return;
                 }
+                if self.renderer.as_mut().is_some_and(|r| !r.poll_work()) {
+                    // The GPU is still tracing: skip advancing and building a
+                    // frame that render() would only reject. about_to_wait
+                    // polls for completion and redraws as soon as it is idle.
+                    self.pacer.request();
+                    return;
+                }
                 if self.world_visible() {
                     self.state.advance();
                     self.state.track();
@@ -1737,11 +1745,13 @@ impl ApplicationHandler for App {
                 let (frame, vertices) = self.build_frame(w, h);
                 if let (Some(r), Some(window)) = (self.renderer.as_mut(), self.window.as_ref()) {
                     let outcome = r.render(window, frame.as_ref(), &vertices);
-                    self.pacer.rendered(started);
                     if matches!(outcome, renderer::RenderOutcome::Retry) {
-                        // Menus do not have a continuous redraw loop to retry a
-                        // lost surface or a timed-out acquisition for them.
+                        // Nothing was presented, so the frame interval has not
+                        // restarted. Menus do not have a continuous redraw loop
+                        // to retry a lost surface or a timed-out acquisition.
                         self.pacer.request();
+                    } else {
+                        self.pacer.rendered(started);
                     }
                     let title = if self.graphics.open {
                         "stargaze · Settings".into()
@@ -1760,11 +1770,9 @@ impl ApplicationHandler for App {
                     } else if self.game.is_some() {
                         "stargaze · Field study".into()
                     } else {
-                        format!(
-                            "stargaze · Observatory · {} spp · exposure {:.3}",
-                            r.samples(),
-                            r.manual_exposure()
-                        )
+                        // No per-frame counters: a title that changes every
+                        // frame floods compositors and shells that log it.
+                        "stargaze · Observatory".into()
                     };
                     if title != self.last_title {
                         window.set_title(&title);
@@ -1880,6 +1888,10 @@ impl ApplicationHandler for App {
                 }
             }
             WindowEvent::Focused(false) | WindowEvent::CursorLeft { .. } => {
+                if matches!(event, WindowEvent::Focused(false)) {
+                    // Modifier releases while unfocused may never reach us.
+                    self.modifiers = ModifiersState::empty();
+                }
                 self.pressed_key = None;
                 self.mouse_down = false;
                 if let Some(game) = self.game.as_mut() {
@@ -1941,15 +1953,23 @@ impl ApplicationHandler for App {
                 self.state.observer.fov_y =
                     fov.clamp(MIN_FOV_DEG.to_radians(), MAX_FOV_DEG.to_radians());
             }
+            WindowEvent::ModifiersChanged(modifiers) => {
+                self.modifiers = modifiers.state();
+            }
             WindowEvent::KeyboardInput { event, .. } => {
+                // Cmd/Ctrl chords (Cmd+M, Cmd+W, Ctrl+Tab, ...) belong to the
+                // system, not to the single-key shortcuts below.
+                let chord = self.modifiers.super_key() || self.modifiers.control_key();
                 if let PhysicalKey::Code(key) = event.physical_key {
                     if event.state == ElementState::Pressed {
-                        self.pressed_key = Some(key);
+                        if !chord {
+                            self.pressed_key = Some(key);
+                        }
                     } else if self.pressed_key == Some(key) {
                         self.pressed_key = None;
                     }
                 }
-                if event.state != ElementState::Pressed {
+                if event.state != ElementState::Pressed || chord {
                     return;
                 }
                 let PhysicalKey::Code(key) = event.physical_key else {
@@ -2126,6 +2146,15 @@ impl ApplicationHandler for App {
         }
     }
 
+    fn exiting(&mut self, event_loop: &ActiveEventLoop) {
+        // Our own exits go through event_loop.exit() after the keep/discard
+        // flow. macOS Cmd+Q terminates the app without CloseRequested, so
+        // there is no chance to ask: keep the session, as a quit would.
+        if !event_loop.exiting() {
+            self.save_progress();
+        }
+    }
+
     fn about_to_wait(&mut self, event_loop: &ActiveEventLoop) {
         let size = self
             .renderer
@@ -2194,6 +2223,7 @@ fn main() -> Result<()> {
         cursor: (0.0, 0.0),
         motion: motion::Motion::default(),
         pressed_key: None,
+        modifiers: ModifiersState::empty(),
         mouse_down: false,
         show_labels: true,
         show_hud: true,
@@ -2287,6 +2317,7 @@ mod app_tests {
             cursor: (0.0, 0.0),
             motion: motion::Motion::default(),
             pressed_key: None,
+            modifiers: ModifiersState::empty(),
             mouse_down: false,
             show_labels: true,
             show_hud: true,
