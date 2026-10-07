@@ -360,6 +360,35 @@ fn density_integral(origin: vec3<f32>, dir: vec3<f32>, steps: u32) -> f32 {
     return sum * dt;
 }
 
+// A ray origin relative to the host centre. Anchored origins subtract the
+// nearly equal high parts first, as the body is usually the host itself.
+fn host_offset(origin: Ray) -> vec3<f32> {
+    if (origin.anchor == MISS) {
+        return origin.offset - settings.g.atmo_center.xyz;
+    }
+    let body = bodies[origin.anchor];
+    return (body.center.xyz - settings.g.atmo_center.xyz) + body.low.xyz + origin.offset;
+}
+
+fn inside_air(origin: Ray) -> bool {
+    if (settings.g.atmo_params.w < 0.5) {
+        return false;
+    }
+    let oc = host_offset(origin);
+    return dot(oc, oc) < atmosphere_top() * atmosphere_top();
+}
+
+// Extinction from a point to the top of the host atmosphere along `dir`, for
+// light that reaches surfaces inside the shell. Points outside see no host air.
+fn air_transmittance(origin: Ray, dir: vec3<f32>) -> vec3<f32> {
+    if (!inside_air(origin)) {
+        return vec3<f32>(1.0);
+    }
+    let beta_ext = settings.g.atmo_rayleigh.rgb + vec3<f32>(settings.g.atmo_rayleigh.w);
+    let p = settings.g.atmo_center.xyz + host_offset(origin);
+    return exp(-beta_ext * density_integral(p, dir, ATMO_SUN_STEPS));
+}
+
 fn rayleigh_phase(cos_theta: f32) -> f32 {
     return 3.0 / (16.0 * PI) * (1.0 + cos_theta * cos_theta);
 }
@@ -527,9 +556,20 @@ fn trace(initial: Ray, rng: ptr<function, u32>, backdrop: ptr<function, vec3<f32
     var catalogue_visibility = 1.0;
     var milky_way_visibility = 1.0;
     var null_crossings = 0u;
+    // The previous vertex lies inside the host air. Its in-scatter comes from
+    // the sky cache; extinction is applied once the continuation leaves the
+    // local scene (metre-scale hops between props see negligible air).
+    var in_air = false;
     loop {
         let hit = closest_hit(ray);
         let ring = closest_ring(ray, hit.distance);
+        if (in_air) {
+            in_air = false;
+            let host = u32(settings.g.atmo_params.w) - 1u;
+            if (ring.index != MISS || (hit.index < LOCAL_BASE && hit.index != host)) {
+                throughput *= air_transmittance(ray, ray.direction);
+            }
+        }
         if (camera_segment) {
             camera_segment = false;
             // Blanket the camera ray in the host planet's atmosphere. The sky
@@ -672,6 +712,7 @@ fn trace(initial: Ray, rng: ptr<function, u32>, backdrop: ptr<function, vec3<f32
                     weight = 1.0;
                 }
                 radiance += throughput * albedo * bodies[i].material.rgb
+                    * air_transmittance(outgoing, sample.direction)
                     * (bsdf_pdf * weight * visibility / sample.pdf);
             }
         }
@@ -698,6 +739,7 @@ fn trace(initial: Ray, rng: ptr<function, u32>, backdrop: ptr<function, vec3<f32
         }
         ray = outgoing;
         previous_vertex = outgoing;
+        in_air = inside_air(outgoing);
         depth += 1u;
         null_crossings = 0u;
     }
