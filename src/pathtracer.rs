@@ -657,9 +657,6 @@ impl PathTracer {
     pub fn ev_bias(&self) -> f32 {
         self.options.ev_bias
     }
-    pub fn manual_exposure(&self) -> f32 {
-        self.options.exposure
-    }
 
     pub fn encode(
         &mut self,

@@ -1830,6 +1830,7 @@ mod tests {
             cursor: (0.0, 0.0),
             motion: crate::motion::Motion::default(),
             pressed_key: None,
+            modifiers: winit::keyboard::ModifiersState::empty(),
             mouse_down: false,
             show_labels: true,
             show_hud: true,
