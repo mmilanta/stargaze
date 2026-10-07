@@ -1,0 +1,68 @@
+{
+  "region_xyxy": [
+    60,
+    211,
+    420,
+    260
+  ],
+  "measurements": {
+    "reference-1": {
+      "mean_luminance": 0.008408062387091408,
+      "rmse_to_reference1024": 0.09643020035068221
+    },
+    "reference-16": {
+      "mean_luminance": 0.00806321796341285,
+      "rmse_to_reference1024": 0.023482914835888605
+    },
+    "reference-64": {
+      "mean_luminance": 0.008322082366134468,
+      "rmse_to_reference1024": 0.011740465332795939
+    },
+    "reference-1024": {
+      "mean_luminance": 0.008232468404722816,
+      "rmse_to_reference1024": 0.0
+    },
+    "guided-ground-1": {
+      "mean_luminance": 0.008403157692435227,
+      "rmse_to_reference1024": 0.019503084982552123
+    },
+    "guided-ground-16": {
+      "mean_luminance": 0.008258676270110949,
+      "rmse_to_reference1024": 0.005195736082046049
+    },
+    "guided-ground-64": {
+      "mean_luminance": 0.008267527180601536,
+      "rmse_to_reference1024": 0.003758144179117617
+    },
+    "guided-ground-1024": {
+      "mean_luminance": 0.008258081204496484,
+      "rmse_to_reference1024": 0.003051358685494713
+    },
+    "no-surface-sky-64": {
+      "mean_luminance": 0.006805580531896075,
+      "rmse_to_reference1024": 0.011813780082094357
+    },
+    "no-ground-bounces-64": {
+      "mean_luminance": 0.0015115031533216544,
+      "rmse_to_reference1024": 0.007401735416393805
+    }
+  },
+  "gpu": {
+    "reference": {
+      "median_ms": 6.52016,
+      "repeat_medians_ms": [
+        6.85216,
+        6.51172,
+        6.481920000000001
+      ]
+    },
+    "guided-ground": {
+      "median_ms": 6.43246,
+      "repeat_medians_ms": [
+        6.573980000000001,
+        6.42468,
+        6.37188
+      ]
+    }
+  }
+}

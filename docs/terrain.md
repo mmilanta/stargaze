@@ -23,10 +23,10 @@ The last two kilometres feather down to the host sphere. Planetary curvature
 is included in every vertex and conservative intersection bound. The patch
 scales down on worlds smaller than a 200 km radius.
 
-Generation runs once per process. Heights, derivatives and a min/max quadtree
+Generation runs once per preset per process. Heights, derivatives and a min/max quadtree
 occupy about 3.68 MiB in the landscape GPU buffer. A compute pass caches
 host-curved bounds, vertices and normals in a further 8.02 MiB; it reruns only
-when the host radius changes. Camera turns, animation and accumulation resets
+when the host radius or terrain preset changes. Camera turns, animation and accumulation resets
 reuse that geometry. The shader traverses bounds near to far with a 256-byte
 per-ray stack and intersects exact triangles only in surviving leaves;
 it does not evaluate fractal noise or erosion for each ray. Surface normals
@@ -39,6 +39,18 @@ This is a seeded illustrative landscape shared by the hosts, not a geological
 model for each planet. It cannot represent caves or overhangs. Direct lighting still uses the existing
 stellar transport. Local surfaces now also receive atmospheric sky lighting as
 described below.
+
+`camera.ground: desert` selects a broad gravel basin with sparse rocks, barren
+ridges and a narrow, meandering off-road trail. Two dusty tyre tracks blend
+into the surrounding gravel, with no paving or painted markings. Its colours
+are procedural diffuse materials. Its seeded rocks mix slabs, elongated fragments
+and chunky boulders with different sizes and earth tones. Their three-axis
+rotations are stored as packed angles in the existing prop record; rotated
+bounds and normals use the same orientation. The preset omits vegetation and buildings;
+vegetation density therefore has no effect on it. The default `forest` preset
+preserves the original landscape. Switching themes uploads the selected source
+heightfield and invalidates the curved geometry cache, even at the same host
+radius. Both presets use the same GPU buffer. See [the desert level](atacama.md).
 
 ## References
 

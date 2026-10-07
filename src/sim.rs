@@ -200,6 +200,7 @@ pub struct Scene {
     pub host: usize,
     /// Atmosphere of the host body, if it has one.
     pub atmosphere: Option<Atmosphere>,
+    pub ground: crate::ground::Theme,
     /// Body to aim at on startup.
     pub default_target: usize,
     /// Field of view, in degrees, for the startup view.
@@ -626,6 +627,7 @@ pub fn binary_scene() -> Scene {
         bodies,
         host: 5, // Calyx
         atmosphere: Some(Atmosphere::earthlike()),
+        ground: crate::ground::Theme::Forest,
         default_target: 6, // Halo
         default_fov_deg: 20.0,
         initial_direction_deg: None,

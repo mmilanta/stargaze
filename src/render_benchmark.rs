@@ -8,6 +8,9 @@ use std::{path::Path, time::Instant};
 #[path = "render_experiments.rs"]
 mod experiments;
 
+#[path = "lowlight_diagnostics.rs"]
+mod lowlight;
+
 const CASES: &[&str] = &[
     "halo-rings",
     "earth-daylight",
@@ -20,6 +23,139 @@ const CASES: &[&str] = &[
     "eclipse-umbra-edge",
 ];
 const FORMAT: wgpu::TextureFormat = wgpu::TextureFormat::Rgba8UnormSrgb;
+
+#[test]
+#[ignore = "requires GPU; writes desert level day/night previews to target/atacama-preview"]
+fn gpu_atacama_preview() -> Result<()> {
+    let (device, queue) = super::tests::gpu();
+    let mut cfg = umbra_config("target/atacama-preview".into(), "reference");
+    cfg.width = 960;
+    cfg.height = 540;
+    std::fs::create_dir_all(&cfg.output)?;
+    let texture = device.create_texture(&wgpu::TextureDescriptor {
+        label: Some("desert-preview"),
+        size: wgpu::Extent3d {
+            width: cfg.width,
+            height: cfg.height,
+            depth_or_array_layers: 1,
+        },
+        mip_level_count: 1,
+        sample_count: 1,
+        dimension: wgpu::TextureDimension::D2,
+        format: FORMAT,
+        usage: wgpu::TextureUsages::RENDER_ATTACHMENT | wgpu::TextureUsages::COPY_SRC,
+        view_formats: &[],
+    });
+    let view = texture.create_view(&Default::default());
+    let stars = stars::generate(3500, 2500, 0x5EED_1234);
+    let mut tracer = PathTracer::new(
+        &device,
+        FORMAT,
+        (cfg.width, cfg.height),
+        &stars,
+        Options {
+            samples_per_frame: 1,
+            max_bounces: 4,
+            ..Options::default()
+        },
+    );
+    let arrival = crate::config::parse(include_str!("../configs/atacama.yaml"))?
+        .initial_time_days
+        .unwrap();
+    for (name, time) in [("arrival", arrival), ("night", 0.0), ("daylight", 0.14)] {
+        let scene = crate::config::parse(include_str!("../configs/atacama.yaml"))?;
+        let mut s = state(scene, time);
+        s.point_initial_view();
+        let p = s.scene.positions(time);
+        let vf = s.observer.frame(&s.scene, time, &p);
+        for (i, b) in s.scene.bodies.iter().enumerate() {
+            if i == s.scene.host {
+                continue;
+            }
+            let d = (p[i] - vf.position).normalize();
+            eprintln!(
+                "{name} {}: altitude {:.2}, azimuth {:.2}",
+                b.name,
+                d.dot(vf.zenith).asin().to_degrees(),
+                d.dot(vf.east).atan2(d.dot(vf.north)).to_degrees()
+            );
+        }
+        let frame = s.build_frame(cfg.width, cfg.height);
+        reset(
+            &mut tracer,
+            Options {
+                samples_per_frame: 1,
+                max_bounces: 4,
+                auto_exposure: true,
+                ..Options::default()
+            },
+        );
+        for _ in 0..64 {
+            render(&device, &queue, &mut tracer, &frame, &view, None)?;
+        }
+        capture(&device, &queue, &tracer, &texture, &cfg, name)?;
+    }
+    Ok(())
+}
+
+#[test]
+#[ignore = "requires GPU; compares distant planets to a bright star at 720p/60-degree sampling"]
+fn gpu_atacama_planet_brightness() {
+    let (device, queue) = super::tests::gpu();
+    for name in ["Cobre", "Sal", "Hielo"] {
+        let scene = crate::config::parse(include_str!("../configs/atacama.yaml")).unwrap();
+        let mut s = state(scene, 0.0);
+        let i = s.scene.bodies.iter().position(|b| b.name == name).unwrap();
+        let fov = 2.0 * (30_f64.to_radians().tan() * 32.0 / 720.0).atan();
+        s.point_at_fov(i, fov);
+        let positions = s.scene.positions(s.sim_time);
+        let vf = s.observer.frame(&s.scene, s.sim_time, &positions);
+        let bright_star = stars::CatalogueStar {
+            dir: (positions[i] - vf.position)
+                .normalize()
+                .as_vec3()
+                .to_array(),
+            color: [1.0; 3],
+            bright: 1.62,
+            angular_radius: 0.00136,
+        };
+        let opts = Options {
+            samples_per_frame: 16,
+            max_bounces: 4,
+            milky_way: 0.0,
+            ..Options::default()
+        };
+        let mut planet = PathTracer::new(&device, FORMAT, (32, 32), &[], opts);
+        let mut reference = PathTracer::new(&device, FORMAT, (32, 32), &[bright_star], opts);
+        let mut scene = s.build_frame(32, 32);
+        let rendered = super::tests::sample(&device, &queue, &mut planet, &scene, 64);
+        // Remove only the target so the reference dot sees the same air and
+        // sky. The tiny target contributes negligibly to atmospheric lighting.
+        scene.bodies[i].radius = 0.0;
+        let reference_pixels = super::tests::sample(&device, &queue, &mut reference, &scene, 64);
+        let sky = super::tests::sample(&device, &queue, &mut planet, &scene, 64);
+        let flux = |pixels: &[[f32; 4]]| {
+            let mut sum = 0.0_f64;
+            for y in 13..19 {
+                for x in 13..19 {
+                    let j = y * 32 + x;
+                    sum += f64::from(
+                        (pixels[j][0] - sky[j][0]) * 0.2126
+                            + (pixels[j][1] - sky[j][1]) * 0.7152
+                            + (pixels[j][2] - sky[j][2]) * 0.0722,
+                    );
+                }
+            }
+            sum
+        };
+        let ratio = flux(&rendered) / flux(&reference_pixels);
+        eprintln!("{name}: planet/star apparent linear luminance ratio {ratio:.3}");
+        assert!(
+            (1.1..1.6).contains(&ratio),
+            "{name}: should be modestly brighter than the reference star, got {ratio}"
+        );
+    }
+}
 
 #[derive(Deserialize, Serialize)]
 #[serde(deny_unknown_fields)]

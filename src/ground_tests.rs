@@ -1,5 +1,36 @@
 use super::*;
 
+#[test]
+#[ignore = "requires GPU; switching ground themes must rebuild terrain and reset history"]
+fn gpu_ground_theme_switch() {
+    let (device, queue) = gpu();
+    let mut tracer = PathTracer::new(
+        &device,
+        wgpu::TextureFormat::Rgba8UnormSrgb,
+        (48, 32),
+        &[],
+        Options {
+            samples_per_frame: 4,
+            max_bounces: 2,
+            ..test_options()
+        },
+    );
+    let mut scene = local_frame(3_200_000.0);
+    scene.globals.ground_counts = [0, 1, 0, 0];
+    let forest = sample(&device, &queue, &mut tracer, &scene, 1);
+    assert_eq!(tracer.samples(), 4);
+    scene.globals.ground_counts[2] = 1;
+    let desert = sample(&device, &queue, &mut tracer, &scene, 1);
+    assert_eq!(tracer.samples(), 4);
+    assert_eq!(tracer.terrain_theme, crate::ground::Theme::Desert);
+    assert!(desert.iter().flatten().all(|v| v.is_finite()));
+    assert_ne!(forest, desert);
+    scene.globals.ground_counts[2] = 0;
+    let restored = sample(&device, &queue, &mut tracer, &scene, 1);
+    assert_eq!(forest, restored);
+    assert_eq!(tracer.samples(), 4);
+}
+
 fn local_frame(radius_m: f32) -> Frame {
     let mut scene = frame();
     let metre = 1.0 / 149_597_870_700.0_f32;
@@ -402,31 +433,34 @@ fn gpu_terrain_bounds_preserve_images_and_night_stays_dark() {
             ..test_options()
         },
     );
-    for azimuth in [0.0, 1.7, 4.0] {
-        state.observer.az = azimuth;
-        let mut scene = state.build_frame(48, 27);
-        let bounded = sample(&device, &queue, &mut tracer, &scene, 1);
-        scene.ground.retain(|p| p.center[3] >= 0.0);
-        scene.globals.ground_counts[0] = scene.ground.len() as u32;
-        let flat = sample(&device, &queue, &mut tracer, &scene, 1);
-        for (a, b) in bounded.iter().zip(&flat) {
-            for c in 0..3 {
-                assert!(
-                    (a[c] - b[c]).abs() < 1e-5,
-                    "bound changed visibility: {a:?} vs {b:?}"
-                );
+    for theme in [crate::ground::Theme::Forest, crate::ground::Theme::Desert] {
+        state.scene.ground = theme;
+        for azimuth in [0.0, 1.7, 4.0] {
+            state.observer.az = azimuth;
+            let mut scene = state.build_frame(48, 27);
+            let bounded = sample(&device, &queue, &mut tracer, &scene, 1);
+            scene.ground.retain(|p| p.center[3] >= 0.0);
+            scene.globals.ground_counts[0] = scene.ground.len() as u32;
+            let flat = sample(&device, &queue, &mut tracer, &scene, 1);
+            for (a, b) in bounded.iter().zip(&flat) {
+                for c in 0..3 {
+                    assert!(
+                        (a[c] - b[c]).abs() < 1e-5,
+                        "bound changed visibility: {a:?} vs {b:?}"
+                    );
+                }
             }
+            scene
+                .bodies
+                .iter_mut()
+                .filter(|b| b.emissive > 0.5)
+                .for_each(|b| b.color = [0.0; 3]);
+            let dark = sample(&device, &queue, &mut tracer, &scene, 1);
+            assert!(
+                dark.iter()
+                    .all(|p| p[..3].iter().all(|v| v.is_finite() && v.abs() < 1e-12))
+            );
         }
-        scene
-            .bodies
-            .iter_mut()
-            .filter(|b| b.emissive > 0.5)
-            .for_each(|b| b.color = [0.0; 3]);
-        let dark = sample(&device, &queue, &mut tracer, &scene, 1);
-        assert!(
-            dark.iter()
-                .all(|p| p[..3].iter().all(|v| v.is_finite() && v.abs() < 1e-12))
-        );
     }
 }
 

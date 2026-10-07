@@ -41,6 +41,7 @@ Body ordering is arbitrary; the loader resolves parents before children and reje
 | `direction` | Optional `{azimuth_deg: 0, altitude_deg: 25}` for a fixed initial sky direction; overrides pointing at `look_at` |
 | `fov_deg` | Required vertical FOV, 0.001–90 |
 | `atmosphere` | Optional `earthlike` or `dense`; omission/null gives an airless view |
+| `ground` | Optional `forest` (default) or `desert`; selects the local terrain, props and materials |
 
 The atmosphere is only rendered around the camera host: an 8.5 km exponential scale height and 80 km top with Rayleigh/Mie scattering. `earthlike` uses Earth-like coefficients; `dense` triples both scattering coefficients for thicker haze. Scattered sky light suppresses the decorative background stars in daylight; stars return as the sky darkens. Finite system suns remain visible through physical atmospheric extinction. Custom coefficients are not supported by version 1. The camera is attached to a spherical surface, including on gas giants; clouds and gas layers are not modeled.
 

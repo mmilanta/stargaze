@@ -19,8 +19,16 @@ pub struct Terrain {
 }
 
 pub fn cached() -> &'static Terrain {
+    for_theme(crate::ground::Theme::Forest)
+}
+
+pub fn for_theme(theme: crate::ground::Theme) -> &'static Terrain {
     static TERRAIN: OnceLock<Terrain> = OnceLock::new();
-    TERRAIN.get_or_init(|| Terrain::generate(SEED))
+    static DESERT: OnceLock<Terrain> = OnceLock::new();
+    match theme {
+        crate::ground::Theme::Forest => TERRAIN.get_or_init(|| Terrain::generate(SEED, theme)),
+        crate::ground::Theme::Desert => DESERT.get_or_init(|| Terrain::generate(SEED, theme)),
+    }
 }
 
 /// Quadratic spacing gives sub-metre geometry at the observatory, with
@@ -130,6 +138,17 @@ fn elevation(x: f32, z: f32, seed: u32) -> f32 {
     (mountain + floor).max(0.0) * clearing * edge
 }
 
+fn desert_elevation(x: f32, z: f32, seed: u32) -> f32 {
+    // Broad barren alluvial basin and distant broken ridges, not sand dunes.
+    let basin = smooth(450.0, 2400.0, (x + 150.0 * (z / 3000.0).sin()).abs());
+    let hills = 700.0 * basin * ridges(x / 2800.0 + 2.1, z / 3300.0 + 7.0, seed);
+    let plain = 3.0
+        + 5.0 * fbm(x / 650.0, z / 650.0, seed, 4)
+        + 0.35 * fbm(x / 25.0, z / 25.0, seed ^ 0x1234, 3);
+    let edge = 1.0 - smooth(EXTENT - 2000.0, EXTENT, x.abs().max(z.abs()));
+    (hills + plain).max(0.0) * smooth(15.0, 90.0, x.hypot(z)) * edge
+}
+
 /// Talus relaxation transports material between neighbouring samples. The
 /// transfer conserves volume even though the grid cells have different areas.
 fn erode(heights: &mut [f32], coordinates: &[f32], iterations: usize) {
@@ -172,11 +191,17 @@ fn erode(heights: &mut [f32], coordinates: &[f32], iterations: usize) {
 }
 
 impl Terrain {
-    fn generate(seed: u32) -> Self {
+    fn generate(seed: u32, theme: crate::ground::Theme) -> Self {
         let started = std::time::Instant::now();
         let coordinates: Vec<_> = (0..WIDTH).map(coordinate).collect();
         let mut heights: Vec<_> = (0..WIDTH * WIDTH)
-            .map(|i| elevation(coordinates[i % WIDTH], coordinates[i / WIDTH], seed))
+            .map(|i| {
+                let (x, z) = (coordinates[i % WIDTH], coordinates[i / WIDTH]);
+                match theme {
+                    crate::ground::Theme::Forest => elevation(x, z, seed),
+                    crate::ground::Theme::Desert => desert_elevation(x, z, seed),
+                }
+            })
             .collect();
         erode(&mut heights, &coordinates, 18);
         let mut data = vec![0.0; BOUNDS_OFFSET + 2 * NODE_COUNT];
@@ -256,41 +281,42 @@ mod tests {
     use super::*;
     #[test]
     fn generated_surface_is_finite_continuous_and_bounds_enclose_every_vertex() {
-        let terrain = cached();
-        assert_eq!(terrain.data.len(), BOUNDS_OFFSET + 2 * NODE_COUNT);
-        assert!(terrain.data.iter().all(|v| v.is_finite()));
-        assert_eq!(terrain.height(0.0, 0.0), 0.0);
-        let heights = &terrain.data[..WIDTH * WIDTH];
-        assert!(heights.iter().all(|h| *h >= -1e-5));
-        assert!(heights.iter().copied().fold(0.0, f32::max) > 500.0);
-        fn check(t: &Terrain, node: usize, x: usize, z: usize, size: usize) {
-            let lo = t.data[BOUNDS_OFFSET + 2 * node];
-            let hi = t.data[BOUNDS_OFFSET + 2 * node + 1];
-            for row in z..=z + size {
-                for col in x..=x + size {
-                    let h = t.data[row * WIDTH + col];
-                    assert!(h >= lo && h <= hi);
+        for terrain in [cached(), for_theme(crate::ground::Theme::Desert)] {
+            assert_eq!(terrain.data.len(), BOUNDS_OFFSET + 2 * NODE_COUNT);
+            assert!(terrain.data.iter().all(|v| v.is_finite()));
+            assert_eq!(terrain.height(0.0, 0.0), 0.0);
+            let heights = &terrain.data[..WIDTH * WIDTH];
+            assert!(heights.iter().all(|h| *h >= -1e-5));
+            assert!(heights.iter().copied().fold(0.0, f32::max) > 500.0);
+            fn check(t: &Terrain, node: usize, x: usize, z: usize, size: usize) {
+                let lo = t.data[BOUNDS_OFFSET + 2 * node];
+                let hi = t.data[BOUNDS_OFFSET + 2 * node + 1];
+                for row in z..=z + size {
+                    for col in x..=x + size {
+                        let h = t.data[row * WIDTH + col];
+                        assert!(h >= lo && h <= hi);
+                    }
+                }
+                if size > LEAF {
+                    for corner in 0..4 {
+                        check(
+                            t,
+                            node * 4 + corner + 1,
+                            x + (corner & 1) * size / 2,
+                            z + (corner >> 1) * size / 2,
+                            size / 2,
+                        );
+                    }
                 }
             }
-            if size > LEAF {
-                for corner in 0..4 {
-                    check(
-                        t,
-                        node * 4 + corner + 1,
-                        x + (corner & 1) * size / 2,
-                        z + (corner >> 1) * size / 2,
-                        size / 2,
-                    );
-                }
+            check(terrain, 0, 0, 0, CELLS);
+            for i in 0..WIDTH {
+                assert!(heights[i].abs() < 1e-6 && heights[CELLS * WIDTH + i].abs() < 1e-6);
+                assert!(heights[i * WIDTH].abs() < 1e-6 && heights[i * WIDTH + CELLS].abs() < 1e-6);
             }
-        }
-        check(terrain, 0, 0, 0, CELLS);
-        for i in 0..WIDTH {
-            assert!(heights[i].abs() < 1e-6 && heights[CELLS * WIDTH + i].abs() < 1e-6);
-            assert!(heights[i * WIDTH].abs() < 1e-6 && heights[i * WIDTH + CELLS].abs() < 1e-6);
-        }
-        for (x, z) in [(100.0, 230.0), (2_000.0, -3_000.0), (-4_000.0, 1_000.0)] {
-            assert!((terrain.height(x + 0.001, z) - terrain.height(x - 0.001, z)).abs() < 0.1);
+            for (x, z) in [(100.0, 230.0), (2_000.0, -3_000.0), (-4_000.0, 1_000.0)] {
+                assert!((terrain.height(x + 0.001, z) - terrain.height(x - 0.001, z)).abs() < 0.1);
+            }
         }
     }
     #[test]

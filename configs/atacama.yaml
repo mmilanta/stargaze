@@ -1,0 +1,96 @@
+# Fictional compact system. Orbital periods are illustrative Keplerian tracks,
+# not a long-term N-body stability calculation. The observer lives on the
+# second of Bruma's three moons; Seca rotates freely, not synchronously.
+version: 1
+name: Seca — the desert road
+# Low morning light reveals the desert and road; rewind to day 0 for stars.
+time_days: 0.14
+camera:
+  body: seca
+  latitude_deg: -25
+  longitude_deg: 75
+  height_m: 2
+  look_at: bruma
+  direction: {azimuth_deg: 0, altitude_deg: 12}
+  fov_deg: 60
+  atmosphere: earthlike
+  ground: desert
+targets: [bruma, ascua, nacar, mota, cobre, sal, hielo, lumbre]
+bodies:
+  - id: lumbre
+    name: Lumbre
+    kind: star
+    radius_km: 220000
+    luminosity: 0.16
+    emission: [1.0, 0.94, 0.84]
+    rotation: {mode: free, period_days: 22}
+  - id: cobre
+    name: Cobre
+    kind: planet
+    parent: lumbre
+    radius_km: 18000
+    albedo: [0.486, 0.414, 0.324]
+    orbit: {semi_major_axis_au: 0.10, period_days: 19.524, mean_anomaly_deg: 50}
+    rotation: {mode: free, period_days: 1.9, obliquity_deg: 11}
+  - id: bruma
+    name: Bruma
+    kind: planet
+    parent: lumbre
+    radius_km: 32000
+    albedo: [0.64, 0.52, 0.36]
+    orbit: {semi_major_axis_au: 0.16, period_days: 39.514}
+    rotation: {mode: free, period_days: 0.48, obliquity_deg: 27}
+    rings:
+      inner_radius: 1.16
+      outer_radius: 1.42
+      optical_depth: 0.65
+      albedo: [0.78, 0.70, 0.54]
+      banded: true
+  - id: ascua
+    name: Ascua
+    kind: moon
+    parent: bruma
+    radius_km: 1500
+    albedo: [0.42, 0.30, 0.20]
+    orbit: {semi_major_axis_km: 110000, period_days: 0.893, inclination_deg: 40, mean_anomaly_deg: 175}
+    rotation: {mode: tidal_lock}
+  - id: seca
+    name: Seca
+    kind: moon
+    parent: bruma
+    radius_km: 3200
+    albedo: [0.46, 0.32, 0.19]
+    orbit: {semi_major_axis_km: 230000, period_days: 2.7, inclination_deg: 45, mean_anomaly_deg: 240}
+    rotation: {mode: free, period_days: 1.35, obliquity_deg: 0}
+  - id: mota
+    name: Mota
+    kind: moon
+    parent: seca
+    radius_km: 130
+    albedo: [0.47, 0.44, 0.38]
+    orbit: {semi_major_axis_km: 10500, period_days: 0.40, inclination_deg: 32, ascending_node_deg: 20, mean_anomaly_deg: 0}
+    rotation: {mode: tidal_lock}
+  - id: nacar
+    name: Nacar
+    kind: moon
+    parent: bruma
+    radius_km: 2100
+    albedo: [0.62, 0.65, 0.66]
+    orbit: {semi_major_axis_km: 360000, period_days: 5.287, inclination_deg: 48, mean_anomaly_deg: 70}
+    rotation: {mode: tidal_lock}
+  - id: sal
+    name: Sal
+    kind: planet
+    parent: lumbre
+    radius_km: 23000
+    albedo: [0.602, 0.568, 0.473]
+    orbit: {semi_major_axis_au: 0.23, period_days: 68.101, mean_anomaly_deg: 35}
+    rotation: {mode: free, period_days: 0.72, obliquity_deg: 18}
+  - id: hielo
+    name: Hielo
+    kind: planet
+    parent: lumbre
+    radius_km: 30000
+    albedo: [0.88, 0.90, 0.92]
+    orbit: {semi_major_axis_au: 0.33, period_days: 117.039, mean_anomaly_deg: 20}
+    rotation: {mode: free, period_days: 0.63, obliquity_deg: 29}

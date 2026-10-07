@@ -27,7 +27,7 @@ pub struct Globals {
     pub ground_east: [f32; 4],   // w = observer height
     pub ground_up: [f32; 4],     // w = host radius
     pub ground_north: [f32; 4],  // w = host GPU index + 1 (0 disables)
-    pub ground_counts: [u32; 4], // x = local primitive count
+    pub ground_counts: [u32; 4], // x = prop count; y = terrain enabled; z = theme (0 forest, 1 desert)
 }
 
 #[repr(C)]
