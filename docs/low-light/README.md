@@ -1,5 +1,9 @@
 # Low-light ground sampling study
 
+These are the original reviewed captures, before PR #2 added atmospheric
+extinction to ground lighting. See the [combined-renderer rerun](with-extinction/README.md)
+for measurements and images with that fix included. Both sets are retained for review.
+
 The Atacama night view has bright ground speckles because much of its illumination
 comes from Bruma. The current renderer explicitly samples emissive stars, but a
 ground bounce discovers a reflecting planet only when its random direction hits

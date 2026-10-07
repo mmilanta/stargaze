@@ -92,3 +92,10 @@ the orbital hierarchy, free rotation, morning framing, preset parsing, and terra
 Validated on the RX 7600 XT: 107 ordinary Rust tests passed, alongside the
 GPU theme-switch, brightness and preview checks. The config checker accepts
 the nine-body system.
+
+Integration with PR #2's ground-light extinction fix also passes the low-light
+study, planet-brightness and preview checks. Ten of the eleven ground GPU tests
+pass on the RX 7600 XT. `gpu_heightfield_matches_exhaustive_triangles` fails at
+radius 5,000, ray 7 (GPU miss versus CPU distance 18.525682); the identical failure
+was reproduced on unchanged main at `c917ba8`, so it predates this integration.
+See the [updated low-light results](low-light/with-extinction/README.md).
