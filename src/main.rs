@@ -69,15 +69,24 @@ fn scene_for_startup() -> Result<Option<Scene>> {
     let mut args = std::env::args_os().skip(1);
     let mut path = None;
     let mut check_only = false;
+    let mut guided_override = None;
     while let Some(arg) = args.next() {
         match arg.to_str() {
             Some("--help" | "-h") => {
                 println!(
-                    "Stargaze — an observatory in a configurable star system\n\nUsage: stargaze [--game] [--config FILE | --check-config FILE]\n\n--game               Play the anonymous system reconstruction puzzle\n--config FILE        Load a YAML system and its camera\n--check-config FILE  Validate without opening a window\n\nDefaults to configs/halo.yaml, or configs/puzzle.yaml with --game. STARGAZE_CONFIG also selects a file."
+                    "Stargaze — an observatory in a configurable star system\n\nUsage: stargaze [--game] [--unguided-ground] [--config FILE | --check-config FILE]\n\n--game               Play the anonymous system reconstruction puzzle\n--unguided-ground    Use the original ground sampler for comparison\n--guided-ground      Use guided ground sampling (default)\n--config FILE        Load a YAML system and its camera\n--check-config FILE  Validate without opening a window\n\nDefaults to configs/halo.yaml, or configs/puzzle.yaml with --game. STARGAZE_CONFIG also selects a file."
                 );
                 return Ok(None);
             }
             Some("--game") => {}
+            Some("--guided-ground" | "--unguided-ground") => {
+                let guided = arg == "--guided-ground";
+                anyhow::ensure!(
+                    guided_override.is_none_or(|previous| previous == guided),
+                    "choose only one ground sampling mode"
+                );
+                guided_override = Some(guided);
+            }
             Some("--config" | "--check-config") => {
                 anyhow::ensure!(path.is_none(), "specify only one configuration file");
                 check_only = arg == "--check-config";
@@ -1637,7 +1646,12 @@ impl ApplicationHandler for App {
                 .expect("failed to create window"),
         );
 
-        match Renderer::new(window.clone(), &self.stars, self.graphics.settings) {
+        match Renderer::new(
+            window.clone(),
+            &self.stars,
+            self.graphics.settings,
+            !std::env::args_os().any(|arg| arg == "--unguided-ground"),
+        ) {
             Ok(mut renderer) => {
                 log::info!("renderer ready: {:?}", window.inner_size());
                 self.scale = window.scale_factor() as f32

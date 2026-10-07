@@ -7,6 +7,9 @@ mod tests;
 #[path = "render_benchmark.rs"]
 mod benchmark;
 
+#[path = "guided_ground.rs"]
+mod guided_ground;
+
 use bytemuck::{Pod, Zeroable};
 use wgpu::util::DeviceExt;
 
@@ -259,6 +262,20 @@ impl PathTracer {
         stars: &[CatalogueStar],
         options: Options,
     ) -> Self {
+        // Retain the original constructor for reference comparisons and tests.
+        // The app selects guided sampling unless --unguided-ground is given.
+        Self::new_with_guided_ground(device, format, dimensions, stars, options, false)
+    }
+
+    /// Select the startup sampler; the app defaults to the reviewed guided mode.
+    pub fn new_with_guided_ground(
+        device: &wgpu::Device,
+        format: wgpu::TextureFormat,
+        dimensions: (u32, u32),
+        stars: &[CatalogueStar],
+        options: Options,
+        guided: bool,
+    ) -> Self {
         log::info!(
             "path tracer: {} spp/frame, {} surface vertices, exposure {}",
             options.samples_per_frame,
@@ -360,9 +377,15 @@ impl PathTracer {
                 ),
             ],
         });
+        let trace_source = if guided {
+            log::info!("guided ground sampling enabled");
+            std::borrow::Cow::Owned(guided_ground::source())
+        } else {
+            std::borrow::Cow::Borrowed(TRACE_SHADER)
+        };
         let shader = device.create_shader_module(wgpu::ShaderModuleDescriptor {
             label: Some("pathtrace"),
-            source: wgpu::ShaderSource::Wgsl(TRACE_SHADER.into()),
+            source: wgpu::ShaderSource::Wgsl(trace_source),
         });
         let compute_layout = device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
             label: Some("pathtrace-pipeline-layout"),

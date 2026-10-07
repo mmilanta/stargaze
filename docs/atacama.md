@@ -43,8 +43,21 @@ illustrative; the simulator does not integrate tidal evolution or N-body stabili
 
 ## Night visibility
 
-See the [low-light sampling study](low-light/README.md) for a benchmark-only
-prototype and side-by-side comparisons of ground noise in this scene.
+See the [low-light sampling study](low-light/README.md) for side-by-side
+comparisons of ground noise in this scene.
+
+Guided ground sampling is enabled by default. To open the scene at night:
+
+```sh
+STARGAZE_TIME=0 cargo run --release -- --config configs/atacama.yaml
+```
+
+Add `--unguided-ground` to compare with the original sampler, using the same
+graphics/exposure settings. The selected mode stays active through scene changes
+and resizing and is not saved to graphics preferences. `--guided-ground` remains
+accepted for existing launch commands, but is no longer necessary. Pause time to
+compare refinement; resume to judge noise during motion. Guided sampling affects
+planet-lit ground; atmosphere noise can remain visible.
 
 Rewind to day 0, or launch a separate night view:
 

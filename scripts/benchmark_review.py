@@ -16,11 +16,11 @@ def main():
     parser.add_argument('--timing-note', default='Another application was using the GPU during the timing runs. Treat speedups as provisional. Image comparisons remain valid.')
     args = parser.parse_args()
     out = b.fresh_directory(args.output)
-    variants = b.VARIANTS[1:]
+    variants = b.QUALITY_VARIANTS[1:]
     cases = json.loads((args.quality/'reference/results.json').read_text())['cases']
     cases = [c['name'] for c in cases]
     data = {'variants': variants, 'cases': cases, 'timings': {}, 'metrics': {}}
-    for variant in b.VARIANTS:
+    for variant in b.QUALITY_VARIANTS:
         image_dir = out/'images'/variant
         image_dir.mkdir(parents=True)
         for kind, parent in [('full', args.full), ('quality', args.quality)]:

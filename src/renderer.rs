@@ -74,6 +74,7 @@ impl Renderer {
         window: Arc<Window>,
         stars: &[CatalogueStar],
         graphics: graphics::Settings,
+        guided_ground: bool,
     ) -> Result<Self> {
         let instance = wgpu::Instance::new(wgpu::InstanceDescriptor::new_without_display_handle());
         let surface = instance.create_surface(window.clone())?;
@@ -121,13 +122,24 @@ impl Renderer {
         options.samples_per_frame = graphics.samples_per_frame;
         options.max_bounces = graphics.max_bounces;
         options.sample_limit = graphics.sample_limit();
-        let tracer = PathTracer::new(
-            &device,
-            format,
-            graphics.render_size((width, height)),
-            stars,
-            options,
-        );
+        let tracer = if guided_ground {
+            PathTracer::new_with_guided_ground(
+                &device,
+                format,
+                graphics.render_size((width, height)),
+                stars,
+                options,
+                true,
+            )
+        } else {
+            PathTracer::new(
+                &device,
+                format,
+                graphics.render_size((width, height)),
+                stars,
+                options,
+            )
+        };
 
         let ui_format = config.view_formats.first().copied().unwrap_or(format);
         let gui = crate::gui::Gui::new(&device, &queue, ui_format);

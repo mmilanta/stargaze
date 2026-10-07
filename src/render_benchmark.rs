@@ -21,6 +21,8 @@ const CASES: &[&str] = &[
     "dual-eclipse",
     "moonlit-air",
     "eclipse-umbra-edge",
+    "atacama-day",
+    "atacama-night",
 ];
 const FORMAT: wgpu::TextureFormat = wgpu::TextureFormat::Rgba8UnormSrgb;
 
@@ -382,10 +384,14 @@ fn fixture(name: &str, step: u32, cfg: &Config) -> Frame {
         ),
         "vantus-eclipse" => state(crate::sim::binary_scene(), 444.478 + dt),
         "vantus-airless" => state(crate::sim::binary_scene(), 444.478 + dt),
+        "atacama-day" | "atacama-night" => state(
+            crate::config::parse(include_str!("../configs/atacama.yaml")).unwrap(),
+            if name == "atacama-day" { 0.14 + dt } else { dt },
+        ),
         _ => panic!("unknown fixture"),
     };
     match name {
-        "halo-rings" => s.point_initial_view(),
+        "halo-rings" | "atacama-day" | "atacama-night" => s.point_initial_view(),
         "earth-daylight" | "earth-twilight" => {
             s.ground_view();
             s.observer.alt = 3_f64.to_radians();
@@ -813,6 +819,14 @@ fn benchmark_fixtures_are_deterministic_and_cover_requested_workloads() {
         let a = fixture(name, 0, &cfg);
         assert_eq!(fingerprint(&a), fingerprint(&fixture(name, 0, &cfg)));
         assert_ne!(fingerprint(&a), fingerprint(&fixture(name, 1, &cfg)));
+        if name.starts_with("atacama-") {
+            assert_eq!(a.globals.ground_counts[2], 1, "desert preset");
+            assert!(!a.ground.is_empty());
+            let sun = a.bodies.iter().find(|b| b.emissive > 0.5).unwrap();
+            let up = glam::Vec3::from_array(a.globals.ground_up[..3].try_into().unwrap());
+            let altitude = glam::Vec3::from(sun.center).normalize().dot(up);
+            assert_eq!(altitude > 0.0, name == "atacama-day");
+        }
         assert_eq!(
             a.globals.atmo_params[3] > 0.0,
             !matches!(name, "vantus-airless" | "dual-eclipse")
@@ -898,6 +912,45 @@ fn benchmark_fixtures_are_deterministic_and_cover_requested_workloads() {
     }
 }
 
+#[test]
+#[ignore = "GPU equivalence check for benchmark-only raw optimizations; no timing claims"]
+fn gpu_raw_optimization_equivalence() {
+    let (device, queue) = super::tests::gpu();
+    let mut cfg = umbra_config(String::new(), "reference");
+    cfg.width = 33;
+    cfg.height = 19;
+    let stars = stars::generate(3500, 2500, 0x5EED_1234);
+    let options = Options {
+        samples_per_frame: 1,
+        max_bounces: 4,
+        auto_exposure: false,
+        ..Options::default()
+    };
+    let frames: Vec<_> = CASES
+        .iter()
+        .flat_map(|name| [0, 15].map(|step| (*name, step, fixture(name, step, &cfg))))
+        .collect();
+    let mut reference = PathTracer::new(&device, FORMAT, (33, 19), &stars, options);
+    let expected: Vec<_> = frames
+        .iter()
+        .map(|(_, _, frame)| {
+            reset(&mut reference, options);
+            super::tests::sample(&device, &queue, &mut reference, frame, 4)
+        })
+        .collect();
+    for variant in ["sky-any-hit", "dark-reflection", "raw-combined"] {
+        let mut tracer = PathTracer::new(&device, FORMAT, (33, 19), &stars, options);
+        experiments::install(&device, &mut tracer, variant);
+        for ((name, step, frame), expected) in frames.iter().zip(&expected) {
+            reset(&mut tracer, options);
+            let actual = super::tests::sample(&device, &queue, &mut tracer, frame, 4);
+            for (pixel, (a, b)) in actual.iter().zip(expected).enumerate() {
+                assert_eq!(a, b, "{variant}, {name}, step {step}, pixel {pixel}");
+            }
+        }
+    }
+}
+
 fn umbra_config(output: String, variant: &str) -> Config {
     Config {
         output,
@@ -973,7 +1026,7 @@ fn render_umbra_edge_study() -> Result<()> {
         "remove STARGAZE_GROUND override"
     );
     for quality in [false, true] {
-        for variant in experiments::VARIANTS {
+        for variant in experiments::QUALITY_VARIANTS {
             let kind = if quality { "quality" } else { "full" };
             let output = format!("target/benchmarks/umbra-edge-study/{kind}/{variant}");
             ensure!(

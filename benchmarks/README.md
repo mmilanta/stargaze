@@ -1,5 +1,16 @@
 # Renderer performance and image comparisons
 
+**Current app default:** guided ground sampling. For reproducibility, benchmark
+`reference` retains the original unguided sampler with 8/4 atmosphere integration;
+use `--variant guided-ground` to measure the accepted app default. Existing
+captures keep their original labels and source provenance. The app accepts
+`--unguided-ground` for direct comparison.
+
+The [October 7 follow-up investigation](optimizations/followup-2026-10-07/README.md)
+adds raw and rendering-quality candidates, desert day/night fixtures, and a
+bracketed study runner. It records completed equivalence checks and the current
+hardware-timing limitation; no new speedup is claimed without measurements.
+
 This suite measures the existing production path tracer, exposure meter, and
 display shader on a hardware Vulkan GPU. It also captures deterministic images
 so a faster implementation can be checked for visual changes. It does not modify
@@ -174,9 +185,10 @@ The checked-in baseline and repeatability report document the hardware runs.
 
 [Review all six atmosphere approximations](quality/rx7600xt-2026-10-05/README.md)
 with [interactive image comparisons](quality/rx7600xt-2026-10-05/index.html).
-The reviewed `fast` variant is now the production default: 8 view steps and
-4 light-path steps. New `reference` runs use that production shader; `fast`
-is an identical alias. Other named experiments retain their reviewed settings,
+The reviewed `fast` integration counts are used by the app: 8 view steps and
+4 light-path steps. `reference` and `fast` retain the original unguided ground
+sampler and are identical aliases; `guided-ground` selects the app default.
+Other named experiments retain their reviewed settings,
 including 24/12 steps for the two planetshine experiments. Archived review
 images and timings retain the original 24/12 reference and their capture-time
 source hashes. Their timing results are provisional because another application

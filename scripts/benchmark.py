@@ -21,8 +21,11 @@ import zlib
 ROOT = Path(__file__).resolve().parents[1]
 CASES = ["halo-rings", "earth-daylight", "earth-twilight", "median-dense",
          "vantus-eclipse", "vantus-airless", "dual-eclipse"]
-EXTRA_CASES = ["moonlit-air", "eclipse-umbra-edge"]
-VARIANTS = ["reference", "sun6", "view12", "balanced", "fast", "planetshine-quarter", "no-planetshine"]
+EXTRA_CASES = ["moonlit-air", "eclipse-umbra-edge", "atacama-day", "atacama-night"]
+QUALITY_VARIANTS = ["reference", "sun6", "view12", "balanced", "fast", "planetshine-quarter", "no-planetshine"]
+OPTIMIZATION_VARIANTS = ["sky-any-hit", "dark-reflection", "raw-combined", "view6-sun4",
+                         "view8-sun2", "reflect-half", "guided-ground", "guided-raw"]
+VARIANTS = QUALITY_VARIANTS + OPTIMIZATION_VARIANTS
 COMPATIBLE = ["width", "height", "scale", "bounces", "vegetation", "warmup", "frames", "repeats", "image_samples"]
 
 
@@ -103,7 +106,7 @@ def report_run(output):
 
 
 def record_provenance(output, invocation=None):
-    files = sorted([*ROOT.glob("src/**/*.rs"), *ROOT.glob("src/**/*.wgsl"), *ROOT.glob("configs/*.yaml"), *ROOT.glob("scripts/*benchmark*.py"), ROOT / "Cargo.toml", ROOT / "Cargo.lock"])
+    files = sorted([*ROOT.glob("src/**/*.rs"), *ROOT.glob("src/**/*.wgsl"), *ROOT.glob("configs/*.yaml"), *ROOT.glob("scripts/*.py"), ROOT / "Cargo.toml", ROOT / "Cargo.lock"])
     manifest = {"created_utc": datetime.datetime.now(datetime.timezone.utc).isoformat(),
                 "git_commit": command("git", "rev-parse", "HEAD"), "git_status": command("git", "status", "--short"),
                 "git_diff_stat": command("git", "diff", "--stat"), "os": platform.platform(),
@@ -341,7 +344,7 @@ def main():
         p.add_argument("--"+key, type=int, default=default)
     p.add_argument("--adapter", default="", help="case-insensitive name substring; default: first discrete GPU")
     p.add_argument("--cases", nargs="+", choices=CASES + EXTRA_CASES)
-    p.add_argument("--variant", choices=VARIANTS, default="reference", help="benchmark-only approximation; production stays unchanged")
+    p.add_argument("--variant", choices=VARIANTS, default="reference", help="benchmark-only experiment; production stays unchanged")
     p.set_defaults(function=run)
     p = sub.add_parser("compare", help="compare matching runs, including HDR and displayed image differences")
     p.add_argument("baseline", type=Path)

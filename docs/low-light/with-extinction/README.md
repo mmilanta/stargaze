@@ -13,8 +13,10 @@ The [original reviewed results](../README.md) remain available.
 Guided sampling retains a **3.11× lower measured foreground error** at 64 samples,
 with a **0.27%** difference in mean brightness at 1,024 samples and comparable
 GPU cost. Atmospheric extinction makes the ground darker in both versions.
-Guided sampling remains benchmark-only; normal gameplay uses the production
-reference, including the extinction fix.
+Normal gameplay now uses the reviewed guided sampler, including the extinction
+fix. Use `--unguided-ground` for the original sampler; see the
+[app instructions](../../atacama.md#night-visibility). The recorded reference below
+and benchmark `reference` variant retain the original sampler.
 
 This uses the same RX 7600 XT, 480×270 resolution, four bounces, fixed exposure 1,
 foreground region and timing protocol as the original study. The 1,024-sample

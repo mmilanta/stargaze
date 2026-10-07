@@ -56,7 +56,7 @@ body{background:#141820;color:#e9e8e4;font:16px system-ui;max-width:1100px;margi
 a{color:#8fcbff}.pair{display:grid;grid-template-columns:1fr 1fr;gap:12px}img{width:100%}figure{margin:0}p{line-height:1.5}
 @media(max-width:650px){.pair{grid-template-columns:1fr}}
 </style><h1>Low-light sampling</h1><p>Left: current renderer. Right: guided ground bounces.
-Both use the same exposure, resolution and number of samples. The prototype is benchmark-only.
+Both use the same exposure, resolution and number of samples. Guided sampling is now the app default; use <code>--unguided-ground</code> for the original sampler.
 <a href="README.md">Measurements and limitations</a>.</p>'''
     for spp in [1,16,64,1024]:
         page += f'<h2>{spp} samples per pixel</h2><div class="pair">'

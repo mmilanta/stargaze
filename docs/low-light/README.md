@@ -9,12 +9,17 @@ comes from Bruma. The current renderer explicitly samples emissive stars, but a
 ground bounce discovers a reflecting planet only when its random direction hits
 that planet. Rare hits carry large contributions.
 
-The benchmark-only `guided-ground` prototype mixes ordinary cosine-weighted
+The `guided-ground` prototype mixes ordinary cosine-weighted
 directions with directions aimed at reflecting bodies, in equal proportions on
 the first ground bounce. Contributions use the full mixture probability,
 including overlapping planetary discs. Direct-star MIS weights also account for
 the changed continuation distribution. This targets the existing lighting integral
-without adding a blur or changing materials. The production shader is unchanged.
+without adding a blur or changing materials.
+
+The reviewed sampler is now the **app default**. Use `--unguided-ground` to
+compare with the original. See the [launch instructions](../atacama.md#night-visibility).
+These recorded measurements describe the benchmark at capture time; its
+`reference` variant retains the original sampler for reproducible comparisons.
 
 ## Images and measurements
 

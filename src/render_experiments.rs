@@ -1,8 +1,11 @@
-//! Deliberately approximate, benchmark-only shader variants. Production never
+//! Raw and approximate benchmark-only shader variants. Production never
 //! compiles this module. Keep each change explicit and preserve fixture inputs.
 use super::*;
 
-pub const VARIANTS: &[&str] = &[
+#[path = "render_optimizations.rs"]
+mod optimizations;
+
+pub const QUALITY_VARIANTS: &[&str] = &[
     "reference",
     "sun6",
     "view12",
@@ -12,14 +15,36 @@ pub const VARIANTS: &[&str] = &[
     "no-planetshine",
 ];
 
+pub const VARIANTS: &[&str] = &[
+    "reference",
+    "sun6",
+    "view12",
+    "balanced",
+    "fast",
+    "planetshine-quarter",
+    "no-planetshine",
+    "sky-any-hit",
+    "dark-reflection",
+    "raw-combined",
+    "view6-sun4",
+    "view8-sun2",
+    "reflect-half",
+    "guided-ground",
+    "guided-raw",
+];
+
 pub fn source(variant: &str) -> String {
     assert!(VARIANTS.contains(&variant));
     if variant == "reference" {
         return TRACE_SHADER.to_string();
     }
+    if optimizations::VARIANTS.contains(&variant) {
+        return optimizations::source(variant);
+    }
     let mut source = TRACE_SHADER.to_string();
     // Keep the named experiments at their reviewed settings. The reference
-    // follows production, which now uses the accepted fast integration counts.
+    // retains unguided ground and accepted fast integration counts; the
+    // guided-ground variant measures the app's accepted ground sampler.
     let (view, sun) = match variant {
         "sun6" => (24, 6),
         "view12" => (12, 12),

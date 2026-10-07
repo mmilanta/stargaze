@@ -1,4 +1,4 @@
-//! Opt-in noise diagnosis and a sampling prototype; production is unchanged.
+//! Opt-in noise diagnosis and comparisons for the guided ground preview.
 use super::*;
 
 fn replace(source: &mut String, from: &str, to: &str) {
@@ -10,7 +10,7 @@ fn replace(source: &mut String, from: &str, to: &str) {
     *source = source.replacen(from, to, 1);
 }
 
-fn source(variant: &str) -> String {
+pub(super) fn source(variant: &str) -> String {
     let mut s = TRACE_SHADER.to_string();
     match variant {
         "reference" => {}
@@ -24,69 +24,7 @@ fn source(variant: &str) -> String {
             "if (last_vertex) {\n            break;\n        }\n        let u = random(rng);",
             "if (last_vertex || local) {\n            break;\n        }\n        let u = random(rng);",
         ),
-        "guided-ground" => {
-            // Propose a 50/50 mixture of cosine directions and directions
-            // toward reflective bodies. Weight by the FULL mixture density,
-            // including overlapping discs; preserve the original path budget.
-            s.push_str(
-                r#"
-fn ground_reflector_pdf(ray: Ray) -> f32 {
-    let host = u32(settings.g.atmo_params.w) - 1u;
-    var total = 0.0;
-    var density = 0.0;
-    for (var b = 0u; b < settings.counts.x; b += 1u) {
-        let body = bodies[b];
-        if (b == host || body.material.w > 0.5) { continue; }
-        let width = cone_width(ray,b);
-        let weight = width * max(body.material.r,max(body.material.g,body.material.b));
-        if (weight <= 0.0) { continue; }
-        total += weight;
-        if (sphere_hit(ray,b).index != MISS) {
-            density += weight / (TAU * width);
-        }
-    }
-    return density / max(total,1.0e-30);
-}
-"#,
-            );
-            replace(
-                &mut s,
-                "let last_vertex = depth + 1u == settings.counts.w;\n        for (var light_slot",
-                r#"var ground_reflector = ReflectorSample(MISS, 0.0);
-        if (local && depth == 0u && settings.g.atmo_params.w > 0.5) {
-            ground_reflector = sample_reflector(camera_origin(outgoing), rng);
-        }
-        let guided = ground_reflector.index != MISS;
-        let last_vertex = depth + 1u == settings.counts.w;
-        for (var light_slot"#,
-            );
-            replace(
-                &mut s,
-                "var weight = power_weight(sample.pdf, bsdf_pdf);",
-                r#"var path_pdf = bsdf_pdf;
-                if (guided) {
-                    path_pdf = 0.5 * (bsdf_pdf + ground_reflector_pdf(outgoing));
-                }
-                var weight = power_weight(sample.pdf, path_pdf);"#,
-            );
-            replace(
-                &mut s,
-                "previous_pdf = cosine / PI;\n        throughput *= albedo;",
-                r#"previous_pdf = cosine / PI;
-        var path_weight = 1.0;
-        if (guided) {
-            if (random(rng) < 0.5) {
-                outgoing.direction = sample_light(outgoing, ground_reflector.index, rng).direction;
-            }
-            let sampled_cosine = max(dot(normal, outgoing.direction), 0.0);
-            if (sampled_cosine == 0.0) { break; }
-            let brdf_pdf = sampled_cosine / PI;
-            previous_pdf = 0.5 * (brdf_pdf + ground_reflector_pdf(outgoing));
-            path_weight = brdf_pdf / previous_pdf;
-        }
-        throughput *= albedo * path_weight;"#,
-            );
-        }
+        "guided-ground" => return super::guided_ground::source(),
         _ => panic!("unknown diagnostic variant"),
     }
     s
@@ -118,6 +56,44 @@ fn install(device: &wgpu::Device, tracer: &mut PathTracer, variant: &str) {
         compilation_options: Default::default(),
         cache: None,
     });
+}
+
+#[test]
+#[ignore = "GPU check: app preview matches the reviewed benchmark sampler"]
+fn gpu_guided_app_matches_benchmark() {
+    let (device, queue) = super::super::tests::gpu();
+    let stars = stars::generate(3500, 2500, 0x5EED_1234);
+    let options = Options {
+        samples_per_frame: 1,
+        max_bounces: 4,
+        auto_exposure: false,
+        ..Options::default()
+    };
+    let mut cfg = umbra_config(String::new(), "reference");
+    cfg.width = 33;
+    cfg.height = 19;
+    let mut app =
+        PathTracer::new_with_guided_ground(&device, FORMAT, (33, 19), &stars, options, true);
+    let mut benchmark = PathTracer::new(&device, FORMAT, (33, 19), &stars, options);
+    install(&device, &mut benchmark, "guided-ground");
+    let mut original = PathTracer::new(&device, FORMAT, (33, 19), &stars, options);
+    for name in ["atacama-night", "atacama-day", "earth-twilight"] {
+        let frame = fixture(name, 0, &cfg);
+        reset(&mut app, options);
+        reset(&mut benchmark, options);
+        reset(&mut original, options);
+        let actual = super::super::tests::sample(&device, &queue, &mut app, &frame, 4);
+        let expected = super::super::tests::sample(&device, &queue, &mut benchmark, &frame, 4);
+        assert_eq!(actual, expected, "app and benchmark disagree in {name}");
+        assert!(actual.iter().flatten().all(|v| v.is_finite() && *v >= 0.0));
+        if name == "atacama-night" {
+            let baseline = super::super::tests::sample(&device, &queue, &mut original, &frame, 4);
+            assert_ne!(
+                actual, baseline,
+                "preview must activate the different sampler"
+            );
+        }
+    }
 }
 
 #[test]
