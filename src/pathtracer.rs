@@ -175,6 +175,7 @@ pub struct PathTracer {
     sky_light: wgpu::ComputePipeline,
     terrain_geometry: wgpu::ComputePipeline,
     terrain_radius: Option<u32>,
+    terrain_theme: crate::ground::Theme,
     display: wgpu::RenderPipeline,
     trace_layout: wgpu::BindGroupLayout,
     display_layout: wgpu::BindGroupLayout,
@@ -541,6 +542,7 @@ impl PathTracer {
             sky_light,
             terrain_geometry,
             terrain_radius: None,
+            terrain_theme: crate::ground::Theme::Forest,
             display,
             trace_layout,
             display_layout,
@@ -742,6 +744,21 @@ impl PathTracer {
                 queue.write_buffer(&self.ground, 0, bytemuck::cast_slice(&frame.ground));
             }
             let radius = frame.globals.ground_up[3].to_bits();
+            let theme = if frame.globals.ground_counts[2] == 1 {
+                crate::ground::Theme::Desert
+            } else {
+                crate::ground::Theme::Forest
+            };
+            if frame.globals.ground_counts[1] != 0 && self.terrain_theme != theme {
+                let offset = (crate::ground::CAPACITY * 12 + crate::ground::SKY_TEXELS * 4) * 4;
+                queue.write_buffer(
+                    &self.ground,
+                    offset as u64,
+                    bytemuck::cast_slice(&crate::terrain::for_theme(theme).data),
+                );
+                self.terrain_theme = theme;
+                self.terrain_radius = None;
+            }
             if frame.globals.ground_counts[1] != 0 && self.terrain_radius != Some(radius) {
                 let mut pass = encoder.begin_compute_pass(&wgpu::ComputePassDescriptor {
                     label: Some("terrain-geometry-cache"),

@@ -4,13 +4,105 @@ use bytemuck::{Pod, Zeroable};
 
 pub const CAPACITY: usize = 256;
 pub const SKY_TEXELS: usize = 128;
+/// Faceted rock with three packed 8-bit Euler angles in extent.w.
+pub const TUMBLED_ROCK: f32 = 2.25;
+
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, serde::Deserialize)]
+#[serde(rename_all = "snake_case")]
+#[repr(u32)]
+pub enum Theme {
+    #[default]
+    Forest = 0,
+    Desert = 1,
+}
+
+pub fn landscape_for_theme(radius_m: f64, density: u32, theme: Theme) -> Vec<Primitive> {
+    if theme == Theme::Forest {
+        return landscape_with_density(radius_m, density);
+    }
+    let mut rocks = Vec::new();
+    let scale = crate::terrain::scale(radius_m);
+    let mut seed = 0xa7ac_a4a1_u32;
+    let mut random = || {
+        seed ^= seed << 13;
+        seed ^= seed >> 17;
+        seed ^= seed << 5;
+        (seed >> 8) as f32 / 16_777_216.0
+    };
+    for i in 0..28 {
+        let n = i as f32;
+        let side = if i % 2 == 0 { -1.0 } else { 1.0 };
+        let z = -9.0 + n * 6.5 + (random() - 0.5) * 5.0;
+        let x = side * (9.0 + (n * 2.4).sin().abs() * 24.0);
+        let h = 0.09 + 0.70 * random().powi(2);
+        // Slabs, elongated fragments, squat stones and chunky boulders.
+        let proportions = match i % 4 {
+            0 => [1.8, 0.45, 1.1],
+            1 => [0.7, 0.75, 1.9],
+            2 => [1.05, 0.8, 0.9],
+            _ => [0.9, 1.25, 1.15],
+        };
+        let extent = proportions.map(|v| v * h * (0.75 + random() * 0.5));
+        let angles = [random(), random(), random()].map(|v| (v * 256.0) as u32);
+        let orientation = (angles[0] | (angles[1] << 8) | (angles[2] << 16)) as f32;
+        let tint = match i % 4 {
+            0 => [0.36, 0.25, 0.15],
+            1 => [0.19, 0.17, 0.14],
+            2 => [0.43, 0.36, 0.26],
+            _ => [0.27, 0.13, 0.065],
+        };
+        let shade = 0.75 + random() * 0.45;
+        let d2 = f64::from(x * x + z * z);
+        let curve = -d2 / (radius_m + (radius_m * radius_m - d2).max(0.0).sqrt());
+        let y = crate::terrain::for_theme(theme).height(x / scale, z / scale) * scale;
+        let mut rock = material(
+            shape(
+                [x, y + curve as f32, z],
+                extent,
+                tint.map(|v| v * shade),
+                TUMBLED_ROCK,
+                orientation,
+            ),
+            2.0,
+        );
+        // Embed the bottom in the terrain using the rotated vertical extent.
+        rock.center[1] += rock.world_extent().y * (0.12 + random() * 0.24);
+        rocks.push(rock);
+    }
+    let mut out = Vec::new();
+    cluster(&mut out, rocks);
+    out
+}
 
 #[repr(C)]
 #[derive(Clone, Copy, Pod, Zeroable)]
 pub struct Primitive {
-    pub center: [f32; 4], // xyz in metres, w: 0 box, 1 ellipsoid, 2 rock, 3 conifer, 4 grass, 5 log; negative = group child count
-    pub extent: [f32; 4], // half extents; w = rotation around local north
+    pub center: [f32; 4], // xyz in metres, w: 0 box, 1 ellipsoid, 2 rock, 2.25 tumbled rock, 3 conifer, 4 grass, 5 log; negative = group child count
+    pub extent: [f32; 4], // half extents; w = north rotation, or packed xyz Euler angles for tumbled rocks
     pub albedo: [f32; 4], // rgb; w: 0 solid, 1 terrain, 2 stone, 3 foliage, 4 bark, 5 grass
+}
+
+impl Primitive {
+    fn rotation(&self) -> glam::Mat3 {
+        if self.center[3] != TUMBLED_ROCK {
+            return glam::Mat3::from_rotation_z(self.extent[3]);
+        }
+        let bits = self.extent[3] as u32;
+        let radians = std::f32::consts::TAU / 256.0;
+        let x = (bits & 255) as f32 * radians;
+        let y = ((bits >> 8) & 255) as f32 * radians;
+        let z = ((bits >> 16) & 255) as f32 * radians;
+        glam::Mat3::from_rotation_z(z)
+            * glam::Mat3::from_rotation_y(y)
+            * glam::Mat3::from_rotation_x(x)
+    }
+
+    fn world_extent(&self) -> glam::Vec3 {
+        let r = self.rotation();
+        r.x_axis.abs() * self.extent[0]
+            + r.y_axis.abs() * self.extent[1]
+            + r.z_axis.abs() * self.extent[2]
+    }
 }
 
 fn shape(center: [f32; 3], extent: [f32; 3], albedo: [f32; 3], kind: f32, angle: f32) -> Primitive {
@@ -30,12 +122,7 @@ fn cluster(out: &mut Vec<Primitive>, children: Vec<Primitive>) {
     let mut lo = glam::Vec3::splat(f32::INFINITY);
     let mut hi = glam::Vec3::splat(f32::NEG_INFINITY);
     for object in &children {
-        let (s, c) = object.extent[3].sin_cos();
-        let e = glam::Vec3::new(
-            c.abs() * object.extent[0] + s.abs() * object.extent[1],
-            s.abs() * object.extent[0] + c.abs() * object.extent[1],
-            object.extent[2],
-        );
+        let e = object.world_extent();
         let center = glam::Vec3::from_array(object.center[..3].try_into().unwrap());
         lo = lo.min(center - e);
         hi = hi.max(center + e);
@@ -283,39 +370,45 @@ mod tests {
     #[test]
     fn bounds_enclose_descendants_and_landscape_stays_within_buffer_capacity() {
         for radius in [5_000.0, 1_500_000.0, 6_371_000.0, 60_000_000.0] {
-            let objects = landscape(radius);
-            assert!(objects.len() <= CAPACITY);
-            assert_eq!(
-                bytemuck::cast_slice::<_, u8>(&objects),
-                bytemuck::cast_slice::<_, u8>(&landscape(radius))
-            );
-            for (i, object) in objects.iter().enumerate() {
-                assert!(
-                    object
-                        .center
-                        .iter()
-                        .chain(&object.extent)
-                        .chain(&object.albedo)
-                        .all(|x| x.is_finite())
+            for theme in [Theme::Forest, Theme::Desert] {
+                let objects = landscape_for_theme(radius, 100, theme);
+                assert!(objects.len() <= CAPACITY);
+                assert_eq!(
+                    bytemuck::cast_slice::<_, u8>(&objects),
+                    bytemuck::cast_slice::<_, u8>(&landscape_for_theme(radius, 100, theme))
                 );
-                assert!(object.extent[..3].iter().all(|x| *x > 0.0));
-                if object.center[3] >= 0.0 {
-                    continue;
-                }
-                let end = i + 1 + (-object.center[3]) as usize;
-                assert!(end <= objects.len());
-                for child in &objects[i + 1..end] {
-                    let (s, c) = child.extent[3].sin_cos();
-                    let extents = [
-                        c.abs() * child.extent[0] + s.abs() * child.extent[1],
-                        s.abs() * child.extent[0] + c.abs() * child.extent[1],
-                        child.extent[2],
-                    ];
-                    for (axis, extent) in extents.into_iter().enumerate() {
-                        assert!(
-                            (child.center[axis] - object.center[axis]).abs() + extent
-                                <= object.extent[axis] + 0.01
-                        );
+                for (i, object) in objects.iter().enumerate() {
+                    assert!(
+                        object
+                            .center
+                            .iter()
+                            .chain(&object.extent)
+                            .chain(&object.albedo)
+                            .all(|x| x.is_finite())
+                    );
+                    assert!(object.extent[..3].iter().all(|x| *x > 0.0));
+                    if object.center[3] >= 0.0 {
+                        continue;
+                    }
+                    let end = i + 1 + (-object.center[3]) as usize;
+                    assert!(end <= objects.len());
+                    for child in &objects[i + 1..end] {
+                        // Check all transformed corners, independently of the
+                        // abs-matrix shortcut used to build the hierarchy.
+                        for bits in 0..8 {
+                            let corner = glam::Vec3::from_array(std::array::from_fn(|axis| {
+                                child.extent[axis]
+                                    * if bits & (1 << axis) == 0 { -1.0 } else { 1.0 }
+                            }));
+                            let rotated = child.rotation() * corner;
+                            for axis in 0..3 {
+                                assert!(
+                                    (child.center[axis] + rotated[axis] - object.center[axis])
+                                        .abs()
+                                        <= object.extent[axis] + 0.01
+                                );
+                            }
+                        }
                     }
                 }
             }

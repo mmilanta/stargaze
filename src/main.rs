@@ -801,7 +801,11 @@ impl State {
             })
             .unwrap_or(true);
         let ground = if ground_enabled {
-            ground::landscape_with_density(host.radius * sim::AU_KM * 1000.0, density)
+            ground::landscape_for_theme(
+                host.radius * sim::AU_KM * 1000.0,
+                density,
+                self.scene.ground,
+            )
         } else {
             Vec::new()
         };
@@ -843,7 +847,12 @@ impl State {
                     0.0
                 },
             ],
-            ground_counts: [ground.len() as u32, u32::from(ground_enabled), 0, 0],
+            ground_counts: [
+                ground.len() as u32,
+                u32::from(ground_enabled),
+                self.scene.ground as u32,
+                0,
+            ],
         };
 
         // Screen-space anchors for the optional name labels.

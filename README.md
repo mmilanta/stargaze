@@ -139,6 +139,11 @@ compute-capable Metal, Vulkan or DX12 device is sufficient.
 
 ### Rocky lookout
 
+The **Desert road** level adds Atacama-inspired gravel, ochre hills and a tiny
+off-road two-track trail on the freely rotating middle moon of a ringed gas giant. Select it from
+Levels, or run `cargo run --release -- --config configs/atacama.yaml`.
+See the [scene preview, orbital layout and night-view instructions](docs/atacama.md).
+
 Left-drag to look toward the ground; `Home` returns to the configured observing
 view. The scenery uses real stellar lighting, so choose daylight to see it
 clearly and pause for convergence. A continuous heightfield forms connected
@@ -252,6 +257,9 @@ and FOV. `rotation: {mode: tidal_lock}` synchronizes a body's spin with its
 orbit. Optional `time_days` fixes the starting time; otherwise Stargaze
 searches for a suitable night view. Unknown fields and invalid references or
 geometry produce contextual errors.
+
+Optional `camera.ground` selects `forest` (the default) or `desert`. The preset
+changes terrain, props and surface materials only for that scene.
 
 See the [complete format and example](skills/define-solar-system/references/config-format.md).
 The repository also includes the [define-solar-system skill](skills/define-solar-system/SKILL.md),

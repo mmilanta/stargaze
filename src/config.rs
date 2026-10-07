@@ -32,6 +32,8 @@ struct Camera {
     #[serde(default)]
     atmosphere: Option<AtmosphereDef>,
     #[serde(default)]
+    ground: crate::ground::Theme,
+    #[serde(default)]
     direction: Option<Direction>,
 }
 #[derive(Deserialize)]
@@ -300,6 +302,7 @@ impl System {
                 AtmosphereDef::Earthlike => Atmosphere::earthlike(),
                 AtmosphereDef::Dense => Atmosphere::dense(),
             }),
+            ground: c.ground,
             default_fov_deg: c.fov_deg,
             initial_direction_deg: c.direction.map(|d| [d.azimuth_deg, d.altitude_deg]),
             observer_lat_deg: c.latitude_deg,
@@ -471,6 +474,88 @@ mod tests {
     use super::*;
     const HALO: &str = include_str!("../configs/halo.yaml");
     const SOLAR: &str = include_str!("../configs/solar-system.yaml");
+    #[test]
+    fn desert_level_has_middle_free_moon_submoon_and_visible_wanderers() {
+        let scene = parse(include_str!("../configs/atacama.yaml")).unwrap();
+        assert_eq!(scene.ground, crate::ground::Theme::Desert);
+        assert_eq!(parse(HALO).unwrap().ground, crate::ground::Theme::Forest);
+        assert!(
+            parse(&HALO.replace(
+                "  atmosphere: earthlike",
+                "  ground: unknown\n  atmosphere: earthlike"
+            ))
+            .is_err()
+        );
+        let host = scene.body(scene.host);
+        assert!(!host.tidally_locked);
+        assert_ne!(host.spin_period, host.period_days);
+        let giant = host.parent.unwrap();
+        let mut moons: Vec<_> = scene
+            .bodies
+            .iter()
+            .enumerate()
+            .filter(|(_, b)| b.parent == Some(giant))
+            .collect();
+        moons.sort_by(|a, b| a.1.elements.a.total_cmp(&b.1.elements.a));
+        assert_eq!(moons.len(), 3);
+        assert_eq!(moons[1].0, scene.host);
+        let ring = scene.body(giant).rings.unwrap();
+        assert!(ring.outer_radius < 1.5);
+        assert!(
+            ring.outer_radius * scene.body(giant).radius
+                < moons[0].1.elements.a - moons[0].1.radius
+        );
+        let submoons: Vec<_> = scene
+            .bodies
+            .iter()
+            .filter(|b| b.parent == Some(scene.host))
+            .collect();
+        assert_eq!(submoons.len(), 1);
+        assert!(submoons[0].radius < host.radius * 0.1);
+        let others: Vec<_> = scene
+            .bodies
+            .iter()
+            .enumerate()
+            .filter(|(i, b)| *i != giant && b.kind == BodyKind::Planet)
+            .collect();
+        assert_eq!(others.len(), 3);
+        assert_eq!(
+            others
+                .iter()
+                .filter(|(_, b)| b.elements.a < scene.body(giant).elements.a)
+                .count(),
+            1
+        );
+        let s = crate::State::with_scene(scene);
+        let positions = s.scene.positions(s.sim_time);
+        let view = s.observer.frame(&s.scene, s.sim_time, &positions);
+        assert!(
+            (0.2..0.4).contains(&view.sun_altitude),
+            "morning light should reveal the road"
+        );
+        for (i, b) in s
+            .scene
+            .bodies
+            .iter()
+            .enumerate()
+            .filter(|(i, b)| *i != giant && b.kind == BodyKind::Planet)
+        {
+            assert!(
+                (positions[i] - view.position).normalize().dot(view.zenith) > 0.2,
+                "{} below arrival horizon",
+                b.name
+            );
+            assert_eq!(b.luminosity, 0.0);
+        }
+        let frame = s.build_frame(960, 540);
+        assert_eq!(frame.globals.ground_counts[2], 1);
+        assert!(
+            frame
+                .ground
+                .iter()
+                .all(|p| p.center[3] < 0.0 || p.center[3] == crate::ground::TUMBLED_ROCK)
+        );
+    }
     fn definition() -> System {
         serde_saphyr::from_str(HALO).unwrap()
     }

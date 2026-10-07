@@ -36,6 +36,30 @@ fn rotate_north(p: vec3<f32>, angle: f32) -> vec3<f32> {
     return vec3<f32>(c * p.x - s * p.y, s * p.x + c * p.y, p.z);
 }
 
+// Tumbled-rock angles occupy 24 integer bits, exactly representable in f32.
+// The order matches Primitive::rotation: Rz * Ry * Rx.
+fn rock_angles(packed: f32) -> vec3<f32> {
+    let bits = u32(packed);
+    return vec3<f32>(f32(bits & 255u), f32((bits >> 8u) & 255u), f32((bits >> 16u) & 255u))
+        * (TAU / 256.0);
+}
+fn rotate_east(p: vec3<f32>, angle: f32) -> vec3<f32> {
+    let c = cos(angle);
+    let s = sin(angle);
+    return vec3<f32>(p.x, c*p.y-s*p.z, s*p.y+c*p.z);
+}
+fn rotate_up(p: vec3<f32>, angle: f32) -> vec3<f32> {
+    let c = cos(angle);
+    let s = sin(angle);
+    return vec3<f32>(c*p.x+s*p.z, p.y, -s*p.x+c*p.z);
+}
+fn rock_to_local(p: vec3<f32>, angles: vec3<f32>) -> vec3<f32> {
+    return rotate_east(rotate_up(rotate_north(p,-angles.z),-angles.y),-angles.x);
+}
+fn rock_from_local(p: vec3<f32>, angles: vec3<f32>) -> vec3<f32> {
+    return rotate_north(rotate_up(rotate_east(p,angles.x),angles.y),angles.z);
+}
+
 // Slabs with explicit parallel-ray handling: never form 0 * infinity.
 fn box_interval(p: vec3<f32>, d: vec3<f32>, extent: vec3<f32>) -> vec2<f32> {
     var near = -1.0e30;
@@ -148,8 +172,17 @@ fn landscape_query(ray: Ray, limit: f32, occlusion: bool) -> Hit {
             }
             continue;
         }
-        let p = rotate_north(o - object.center.xyz, -object.extent.w);
-        let v = rotate_north(d, -object.extent.w);
+        var p = o - object.center.xyz;
+        var v = d;
+        var angles = vec3<f32>(0.0);
+        if (object.center.w == 2.25) {
+            angles = rock_angles(object.extent.w);
+            p = rock_to_local(p, angles);
+            v = rock_to_local(v, angles);
+        } else {
+            p = rotate_north(p, -object.extent.w);
+            v = rotate_north(v, -object.extent.w);
+        }
         let e = object.extent.xyz;
         var distance = 1.0e30;
         var n = vec3<f32>(0.0);
@@ -196,8 +229,9 @@ fn landscape_query(ray: Ray, limit: f32, occlusion: bool) -> Hit {
         }
         if (distance > 0.001 && distance < 1.0e29 && distance / METRES_PER_AU < closest.distance) {
             if (occlusion) { return Hit(distance / METRES_PER_AU, LOCAL_BASE + 1u + i, vec3<f32>(0.0)); }
-            closest = Hit(distance / METRES_PER_AU, LOCAL_BASE + 1u + i,
-                from_ground(rotate_north(n, object.extent.w)));
+            if (object.center.w == 2.25) { n = rock_from_local(n, angles); }
+            else { n = rotate_north(n, object.extent.w); }
+            closest = Hit(distance / METRES_PER_AU, LOCAL_BASE + 1u + i, from_ground(n));
         }
     }
     return closest;
@@ -232,11 +266,36 @@ fn forest_floor(p: vec3<f32>, distance: f32, normal: vec3<f32>) -> vec3<f32> {
     let gravel = mix(vec3<f32>(0.12,0.095,0.062),vec3<f32>(0.26,0.23,0.17),grain*detail+0.5*(1.0-detail));
     return mix(color,gravel,path*0.85);
 }
+fn desert_floor(p: vec3<f32>, distance: f32, normal: vec3<f32>) -> vec3<f32> {
+    let broad = vnoise(p * 0.007 + vec3<f32>(19.0, 2.0, 4.0));
+    let gravel = vnoise(p * 2.8);
+    let footprint = distance * 2.0 * settings.g.cam_forward.w / max(settings.g.viewport.y, 1.0);
+    let detail = 1.0 - smoothstep(0.025, 0.2, footprint);
+    let sand = mix(vec3<f32>(0.31, 0.21, 0.125), vec3<f32>(0.53, 0.40, 0.26), broad);
+    let rock = mix(vec3<f32>(0.18, 0.10, 0.055), vec3<f32>(0.38, 0.245, 0.145), broad);
+    var color = mix(sand, rock, smoothstep(0.08, 0.4, 1.0 - max(normal.y, 0.0)));
+    color *= 1.0 + (gravel - 0.5) * 0.32 * detail;
+    // A small, meandering off-road trail: two worn tyre tracks with desert
+    // between them. Soft irregular edges blend directly into the gravel.
+    let center = 2.8 + 0.55 * sin(p.z / 38.0) + 1.4 * sin(p.z / 210.0);
+    let edge = abs(p.x - center);
+    let aa = max(0.015, footprint * 0.5);
+    let fade = (1.0 - smoothstep(0.25, 0.9, footprint))
+        * (1.0 - smoothstep(1000.0, 2200.0, abs(p.z)))
+        * (1.0 - smoothstep(0.12, 0.35, 1.0 - max(normal.y, 0.0)));
+    let worn = 1.0 - smoothstep(0.8, 1.2, edge);
+    let rut_edge = abs(edge - 0.68) + (gravel - 0.5) * 0.1 * detail;
+    let tracks = 1.0 - smoothstep(0.12 - aa, 0.23 + aa, rut_edge);
+    let packed = sand * (0.72 + 0.10 * gravel * detail);
+    color = mix(color, sand * 0.93, worn * fade * 0.35);
+    return mix(color, packed, tracks * fade * 0.8);
+}
 fn landscape_albedo(ray: Ray, hit: Hit) -> vec3<f32> {
     let p = landscape_point(ray, hit);
     let distance = hit.distance * METRES_PER_AU;
     let n = to_ground(hit.normal);
     if (hit.index == LOCAL_BASE || hit.index == TERRAIN_ID) {
+        if (settings.g.ground_counts.z == 1u) { return desert_floor(p,distance,n); }
         return forest_floor(p,distance,n);
     }
     let object = ground_data.objects[hit.index - LOCAL_BASE - 1u];
@@ -257,6 +316,7 @@ fn landscape_albedo(ray: Ray, hit: Hit) -> vec3<f32> {
     let strata = sin(p.y*8.0+2.5*middle);
     let lichen = smoothstep(0.52,0.76,middle)*max(n.y,0.0);
     let stone = tint*(0.7+0.45*fine+0.07*strata);
+    if (settings.g.ground_counts.z == 1u) { return stone; }
     return mix(stone,vec3<f32>(0.11,0.145,0.037),lichen*0.65);
 }
 fn landscape_shading_normal(ray: Ray, hit: Hit) -> vec3<f32> {
