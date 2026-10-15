@@ -1,0 +1,206 @@
+{
+  "baseline": "/Users/marcomilanta/Documents/personal/stargaze/target/mac-rerun/m4-original-new",
+  "candidate": "/Users/marcomilanta/Documents/personal/stargaze/target/mac-rerun/m4-current-new2",
+  "baseline_variant": "reference",
+  "candidate_variant": "guided-ground",
+  "timings": [
+    {
+      "case": "twilight-afterglow",
+      "mode": "paused",
+      "baseline": {
+        "gpu_median_ms": 7.252625,
+        "gpu_p95_ms": 108.1274648,
+        "wall_median_ms": 101.14824999999999,
+        "repeat_medians_ms": [
+          7.1026665,
+          8.838417,
+          51.8064375
+        ],
+        "count": 48
+      },
+      "candidate": {
+        "gpu_median_ms": 0.7416035000000001,
+        "gpu_p95_ms": 1.2424231499999998,
+        "wall_median_ms": 15.989896,
+        "repeat_medians_ms": [
+          0.7359165,
+          0.7463744999999999,
+          0.7378955
+        ],
+        "count": 48
+      },
+      "speedup": 9.779653143492444
+    },
+    {
+      "case": "twilight-afterglow",
+      "mode": "advancing",
+      "baseline": {
+        "gpu_median_ms": 0.0379375,
+        "gpu_p95_ms": 0.09172105,
+        "wall_median_ms": 104.836625,
+        "repeat_medians_ms": [
+          0.039792,
+          0.0374165,
+          0.0376875
+        ],
+        "count": 48
+      },
+      "candidate": {
+        "gpu_median_ms": 0.0286665,
+        "gpu_p95_ms": 0.05065175,
+        "wall_median_ms": 16.136874999999996,
+        "repeat_medians_ms": [
+          0.0286665,
+          0.031146,
+          0.0236875
+        ],
+        "count": 48
+      },
+      "speedup": 1.3234088570282385
+    },
+    {
+      "case": "eclipse-totality",
+      "mode": "paused",
+      "baseline": {
+        "gpu_median_ms": 0.29325,
+        "gpu_p95_ms": 2.34034165,
+        "wall_median_ms": 3.4540415,
+        "repeat_medians_ms": [
+          0.28774999999999995,
+          0.29374999999999996,
+          0.299083
+        ],
+        "count": 48
+      },
+      "candidate": {
+        "gpu_median_ms": 0.13137500000000002,
+        "gpu_p95_ms": 1.1106329,
+        "wall_median_ms": 1.7053954999999998,
+        "repeat_medians_ms": [
+          0.1338745,
+          0.1260835,
+          0.13360450000000001
+        ],
+        "count": 48
+      },
+      "speedup": 2.232159847764034
+    },
+    {
+      "case": "eclipse-totality",
+      "mode": "advancing",
+      "baseline": {
+        "gpu_median_ms": 0.29910400000000004,
+        "gpu_p95_ms": 2.3392084499999997,
+        "wall_median_ms": 3.3587295,
+        "repeat_medians_ms": [
+          0.2965835,
+          0.302958,
+          0.29893749999999997
+        ],
+        "count": 48
+      },
+      "candidate": {
+        "gpu_median_ms": 0.1364375,
+        "gpu_p95_ms": 1.1826584499999997,
+        "wall_median_ms": 1.7180835,
+        "repeat_medians_ms": [
+          0.1363125,
+          0.1368955,
+          0.1360625
+        ],
+        "count": 48
+      },
+      "speedup": 2.192241868987632
+    }
+  ],
+  "images": [
+    {
+      "name": "twilight-afterglow-spp1",
+      "display_mae_255": 1.0006409143518518,
+      "display_rmse_255": 1.9635789673733806,
+      "display_max_255": 57,
+      "display_psnr_db": 42.26983617742743,
+      "pixels_changed_over_1_255_percent": 32.10243055555556,
+      "linear_rgb_rmse": 0.00034557068774786464,
+      "linear_rgb_relative_rmse": 0.05228876383816211,
+      "log1p_rgb_rmse": 0.0003043643403050016
+    },
+    {
+      "name": "twilight-afterglow-spp32",
+      "display_mae_255": 0.5553721788194445,
+      "display_rmse_255": 1.0391941141233931,
+      "display_max_255": 16,
+      "display_psnr_db": 47.796870043125836,
+      "pixels_changed_over_1_255_percent": 14.301106770833332,
+      "linear_rgb_rmse": 0.00016855426236116127,
+      "linear_rgb_relative_rmse": 0.03297956072181959,
+      "log1p_rgb_rmse": 0.0001456485826914466
+    },
+    {
+      "name": "twilight-afterglow-moving-8",
+      "display_mae_255": 0.9825065104166667,
+      "display_rmse_255": 1.936364474594652,
+      "display_max_255": 56,
+      "display_psnr_db": 42.39106148304135,
+      "pixels_changed_over_1_255_percent": 31.570421006944443,
+      "linear_rgb_rmse": 0.000345487060426273,
+      "linear_rgb_relative_rmse": 0.05367261322706263,
+      "log1p_rgb_rmse": 0.0003001810019937635
+    },
+    {
+      "name": "twilight-afterglow-moving-15",
+      "display_mae_255": 0.9670091869212963,
+      "display_rmse_255": 1.9136879593869993,
+      "display_max_255": 55,
+      "display_psnr_db": 42.49338112130785,
+      "pixels_changed_over_1_255_percent": 31.105034722222225,
+      "linear_rgb_rmse": 0.0003330057636248328,
+      "linear_rgb_relative_rmse": 0.05350138778800191,
+      "log1p_rgb_rmse": 0.0002921824429235488
+    },
+    {
+      "name": "eclipse-totality-spp1",
+      "display_mae_255": 19.22871853298611,
+      "display_rmse_255": 42.42733526690211,
+      "display_max_255": 255,
+      "display_psnr_db": 15.577888490774077,
+      "pixels_changed_over_1_255_percent": 40.85167100694444,
+      "linear_rgb_rmse": 0.0058665876721044515,
+      "linear_rgb_relative_rmse": 0.8540023386197783,
+      "log1p_rgb_rmse": 0.005391118566162
+    },
+    {
+      "name": "eclipse-totality-spp32",
+      "display_mae_255": 6.916223234953704,
+      "display_rmse_255": 16.187110744461847,
+      "display_max_255": 234,
+      "display_psnr_db": 23.947416849441897,
+      "pixels_changed_over_1_255_percent": 43.28211805555556,
+      "linear_rgb_rmse": 0.0010740272818350002,
+      "linear_rgb_relative_rmse": 0.21465025094245313,
+      "log1p_rgb_rmse": 0.0010621124371642332
+    },
+    {
+      "name": "eclipse-totality-moving-8",
+      "display_mae_255": 19.253529369212963,
+      "display_rmse_255": 42.460785634460436,
+      "display_max_255": 255,
+      "display_psnr_db": 15.571043099147602,
+      "pixels_changed_over_1_255_percent": 40.84657118055556,
+      "linear_rgb_rmse": 0.0057756563641024475,
+      "linear_rgb_relative_rmse": 0.8433351320245116,
+      "log1p_rgb_rmse": 0.0053134170329827
+    },
+    {
+      "name": "eclipse-totality-moving-15",
+      "display_mae_255": 19.425310691550926,
+      "display_rmse_255": 42.7640841107264,
+      "display_max_255": 255,
+      "display_psnr_db": 15.509220107293292,
+      "pixels_changed_over_1_255_percent": 40.88454861111111,
+      "linear_rgb_rmse": 0.0060248617217852915,
+      "linear_rgb_relative_rmse": 0.8759714448701975,
+      "log1p_rgb_rmse": 0.005531707671044269
+    }
+  ]
+}

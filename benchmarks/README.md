@@ -1,5 +1,9 @@
 # Renderer performance and image comparisons
 
+**Browse everything:** open [index.html](index.html) locally for every implementation,
+its overall speedup and all screenshots. Regenerate it with
+`python3 scripts/benchmark_dashboard.py` after adding results.
+
 **Current app default:** guided ground sampling. For reproducibility, benchmark
 `reference` retains the original unguided sampler with 8/4 atmosphere integration;
 use `--variant guided-ground` to measure the accepted app default. Existing
@@ -104,6 +108,8 @@ inputs, define a new fixture/version instead of silently comparing unlike work.
 | `dual-eclipse` | Synthetic ringed sphere, two finite suns and two aligned occluders | Overlapping soft eclipse shadows, colored lighting, ring transmission, indirect light without atmosphere |
 | `moonlit-air` (optional) | Synthetic large moon illuminated by a sun below the observer horizon | Reflected atmospheric glow |
 | `eclipse-umbra-edge` (optional) | Nearly point-like sun, observer just inside totality, transverse shadow motion | Sharp atmospheric illumination boundary: bright sky to the left, dark sky to the right and dark ground |
+| `twilight-afterglow` (optional) | Earth, day 1.0525; sun about 5° below the horizon, view 25° left of it, altitude 12°, FOV 70° | Civil twilight: sunward glow and still-sunlit upper air on the right, darker sky on the left, terrain silhouette |
+| `eclipse-totality` (optional) | Synthetic Earth; Sun-sized, Sun-bright star 60° up, covered by an occultor giving a ~40 km umbra and ~990 km penumbra; view altitude 5°, FOV 80° | Deep totality: black ground and zenith, distant low air lit by a partial sun around the whole horizon; noisy partial-disc sampling |
 
 Advancing mode uses **one simulated second per sequence frame**, not elapsed
 wall time. Each repetition replays the same sequence. Telescope cases track their

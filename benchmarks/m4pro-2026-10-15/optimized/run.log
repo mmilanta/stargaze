@@ -1,0 +1,162 @@
+   Compiling proc-macro2 v1.0.107
+   Compiling unicode-ident v1.0.26
+   Compiling quote v1.0.47
+   Compiling bitflags v2.13.2
+   Compiling cfg-if v1.0.5
+   Compiling cfg_aliases v0.2.2
+   Compiling objc2-encode v4.1.0
+   Compiling libm v0.2.16
+   Compiling objc2 v0.6.4
+   Compiling equivalent v1.0.2
+   Compiling libc v0.2.189
+   Compiling autocfg v1.5.1
+   Compiling foldhash v0.2.0
+   Compiling thiserror v2.0.20
+   Compiling log v0.4.34
+   Compiling scopeguard v1.2.0
+   Compiling unicode-width v0.2.2
+   Compiling hashbrown v0.17.1
+   Compiling zerocopy v0.8.57
+   Compiling allocator-api2 v0.2.21
+   Compiling rustc-hash v1.1.0
+   Compiling smallvec v1.16.1
+   Compiling num-traits v0.2.19
+   Compiling naga v30.0.1
+   Compiling bit-vec v0.9.1
+   Compiling objc-sys v0.3.5
+   Compiling rustversion v1.0.23
+   Compiling ash v0.38.0+1.3.281
+   Compiling parking_lot_core v0.9.12
+   Compiling indexmap v2.14.2
+   Compiling raw-window-handle v0.6.2
+   Compiling bit-set v0.10.0
+   Compiling codespan-reporting v0.13.1
+   Compiling spirv v0.4.0+sdk-1.4.341.0
+   Compiling libloading v0.8.9
+   Compiling memchr v2.8.3
+   Compiling static_assertions v1.1.0
+   Compiling arrayvec v0.7.8
+   Compiling once_cell v1.21.4
+   Compiling hashbrown v0.16.1
+   Compiling lock_api v0.4.14
+   Compiling wgpu-hal v30.0.1
+   Compiling serde_core v1.0.229
+   Compiling simd-adler32 v0.3.10
+   Compiling presser v0.3.1
+   Compiling aho-corasick v1.1.5
+   Compiling objc2 v0.5.2
+   Compiling adler2 v2.0.1
+   Compiling zmij v1.0.23
+   Compiling syn v3.0.6
+   Compiling syn v2.0.119
+   Compiling parking_lot v0.12.5
+   Compiling encoding_rs v0.8.41
+   Compiling renderdoc-sys v1.1.0
+   Compiling core-foundation-sys v0.8.7
+   Compiling objc2-core-foundation v0.3.2
+   Compiling block2 v0.6.2
+   Compiling crc32fast v1.5.2
+   Compiling ordered-float v5.5.0
+   Compiling profiling v1.0.18
+   Compiling anstyle v1.0.14
+   Compiling regex-syntax v0.8.11
+   Compiling block2 v0.5.1
+   Compiling core-foundation v0.9.4
+   Compiling wgpu-core v30.0.1
+   Compiling simdutf8 v0.1.5
+   Compiling objc2-foundation v0.3.2
+   Compiling objc2-core-graphics v0.3.2
+   Compiling multiversion_no_op v1.0.0
+   Compiling dispatch v0.2.0
+   Compiling litrs v1.0.0
+   Compiling utf8parse v0.2.2
+   Compiling foreign-types-shared v0.3.1
+   Compiling bitflags v1.3.2
+   Compiling objc2-foundation v0.2.2
+   Compiling anstyle-parse v1.0.0
+   Compiling document-features v0.2.12
+   Compiling core-graphics-types v0.1.3
+   Compiling regex-automata v0.4.18
+   Compiling core_maths v0.1.1
+   Compiling miniz_oxide v0.9.1
+   Compiling winit v0.30.13
+   Compiling wgpu v30.0.1
+   Compiling foldhash v0.1.5
+   Compiling zerocopy-derive v0.8.57
+   Compiling is_terminal_polyfill v1.70.2
+   Compiling thiserror-impl v2.0.20
+   Compiling bytemuck_derive v1.12.1
+   Compiling foreign-types-macros v0.2.4
+   Compiling tracing-core v0.1.36
+   Compiling colorchoice v1.0.5
+   Compiling serde v1.0.229
+   Compiling objc2-metal v0.3.2
+   Compiling arraydeque v0.5.1
+   Compiling anyhow v1.0.104
+   Compiling pin-project-lite v0.2.17
+   Compiling foreign-types v0.5.0
+   Compiling serde_json v1.0.151
+   Compiling regex v1.13.1
+   Compiling bytemuck v1.25.2
+   Compiling anstyle-query v1.1.5
+   Compiling jiff-core v0.1.1
+   Compiling objc2-app-kit v0.2.2
+   Compiling naga-types v30.0.1
+   Compiling anstream v1.0.0
+   Compiling env_filter v2.0.0
+   Compiling core-graphics v0.23.2
+   Compiling wgpu-types v30.0.1
+   Compiling tracing v0.1.44
+   Compiling granit-parser v1.3.0
+   Compiling encoding_rs_io v0.1.8
+   Compiling hashbrown v0.15.5
+   Compiling serde_derive v1.0.229
+   Compiling flate2 v1.1.10
+   Compiling jiff v0.2.37
+   Compiling ttf-parser v0.25.1
+   Compiling annotate-snippets v0.12.16
+   Compiling miniz_oxide v0.8.9
+   Compiling fdeflate v0.3.7
+   Compiling cursor-icon v1.2.0
+   Compiling dpi v0.1.2
+   Compiling itoa v1.0.18
+   Compiling nohash-hasher v0.2.0
+   Compiling base64 v0.23.1
+   Compiling objc2-quartz-core v0.3.2
+   Compiling smol_str v0.2.2
+   Compiling raw-window-metal v1.1.0
+   Compiling fontdue v0.9.4
+   Compiling serde-saphyr v1.3.0
+   Compiling png v0.18.1
+   Compiling half v2.7.1
+   Compiling gpu-allocator v0.28.0
+   Compiling env_logger v0.11.11
+   Compiling glam v0.33.8
+   Compiling pollster v1.0.1
+   Compiling wgpu-naga-bridge v30.0.1
+   Compiling wgpu-core-deps-apple v30.0.1
+   Compiling stargaze v0.1.0 (/Users/marcomilanta/Documents/personal/stargaze/target/mac-rerun/optimized)
+    Finished `release` profile [optimized] target(s) in 37.97s
+     Running unittests src/main.rs (target/release/deps/stargaze-e6171e26e1757c5d)
+
+running 1 test
+test pathtracer::benchmark::render_benchmark ... Available adapters: [AdapterInfo { name: "Apple M4 Pro", vendor: 4203, device: 452985353, device_type: IntegratedGpu, device_pci_bus_id: "", driver: "MoltenVK", driver_info: "1.4.2", backend: Vulkan, subgroup_min_size: 4, subgroup_max_size: 32, transient_saves_memory: Some(true), limit_bucket: None }]
+Benchmark GPU: AdapterInfo { name: "Apple M4 Pro", vendor: 4203, device: 452985353, device_type: IntegratedGpu, device_pci_bus_id: "", driver: "MoltenVK", driver_info: "1.4.2", backend: Vulkan, subgroup_min_size: 4, subgroup_max_size: 32, transient_saves_memory: Some(true), limit_bucket: None }
+halo-rings           paused   : 3.088 ms GPU median
+halo-rings           advancing: 0.045 ms GPU median
+earth-daylight       paused   : 8.193 ms GPU median
+earth-daylight       advancing: 0.044 ms GPU median
+earth-twilight       paused   : 2.649 ms GPU median
+earth-twilight       advancing: 0.046 ms GPU median
+median-dense         paused   : 2.684 ms GPU median
+median-dense         advancing: 0.050 ms GPU median
+vantus-eclipse       paused   : 2.899 ms GPU median
+vantus-eclipse       advancing: 0.041 ms GPU median
+vantus-airless       paused   : 0.184 ms GPU median
+vantus-airless       advancing: 0.186 ms GPU median
+dual-eclipse         paused   : 0.200 ms GPU median
+dual-eclipse         advancing: 0.439 ms GPU median
+ok
+
+test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 148 filtered out; finished in 54.12s
+

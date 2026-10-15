@@ -1,0 +1,24 @@
+    Finished `release` profile [optimized] target(s) in 0.22s
+     Running unittests src/main.rs (target/release/deps/stargaze-e6171e26e1757c5d)
+
+running 1 test
+test pathtracer::benchmark::render_benchmark ... Available adapters: [AdapterInfo { name: "Apple M4 Pro", vendor: 4203, device: 452985353, device_type: IntegratedGpu, device_pci_bus_id: "", driver: "MoltenVK", driver_info: "1.4.2", backend: Vulkan, subgroup_min_size: 4, subgroup_max_size: 32, transient_saves_memory: Some(true), limit_bucket: None }]
+Benchmark GPU: AdapterInfo { name: "Apple M4 Pro", vendor: 4203, device: 452985353, device_type: IntegratedGpu, device_pci_bus_id: "", driver: "MoltenVK", driver_info: "1.4.2", backend: Vulkan, subgroup_min_size: 4, subgroup_max_size: 32, transient_saves_memory: Some(true), limit_bucket: None }
+halo-rings           paused   : 9.868 ms GPU median
+halo-rings           advancing: 0.048 ms GPU median
+earth-daylight       paused   : 11.550 ms GPU median
+earth-daylight       advancing: 0.041 ms GPU median
+earth-twilight       paused   : 123.504 ms GPU median
+earth-twilight       advancing: 0.041 ms GPU median
+median-dense         paused   : 13.549 ms GPU median
+median-dense         advancing: 0.042 ms GPU median
+vantus-eclipse       paused   : 10.526 ms GPU median
+vantus-eclipse       advancing: 0.048 ms GPU median
+vantus-airless       paused   : 0.266 ms GPU median
+vantus-airless       advancing: 0.265 ms GPU median
+dual-eclipse         paused   : 0.189 ms GPU median
+dual-eclipse         advancing: 0.208 ms GPU median
+ok
+
+test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 147 filtered out; finished in 100.24s
+

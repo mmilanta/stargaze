@@ -1,0 +1,15 @@
+   Compiling stargaze v0.1.0 (/Users/marcomilanta/Documents/personal/stargaze/target/mac-rerun/original)
+    Finished `release` profile [optimized] target(s) in 8.30s
+     Running unittests src/main.rs (target/release/deps/stargaze-e6171e26e1757c5d)
+
+running 1 test
+test pathtracer::benchmark::render_benchmark ... Available adapters: [AdapterInfo { name: "Apple M4 Pro", vendor: 4203, device: 452985353, device_type: IntegratedGpu, device_pci_bus_id: "", driver: "MoltenVK", driver_info: "1.4.2", backend: Vulkan, subgroup_min_size: 4, subgroup_max_size: 32, transient_saves_memory: Some(true), limit_bucket: None }]
+Benchmark GPU: AdapterInfo { name: "Apple M4 Pro", vendor: 4203, device: 452985353, device_type: IntegratedGpu, device_pci_bus_id: "", driver: "MoltenVK", driver_info: "1.4.2", backend: Vulkan, subgroup_min_size: 4, subgroup_max_size: 32, transient_saves_memory: Some(true), limit_bucket: None }
+twilight-afterglow   paused   : 7.270 ms GPU median
+twilight-afterglow   advancing: 0.038 ms GPU median
+eclipse-totality     paused   : 0.293 ms GPU median
+eclipse-totality     advancing: 0.300 ms GPU median
+ok
+
+test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 147 filtered out; finished in 18.37s
+

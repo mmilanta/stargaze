@@ -21,7 +21,8 @@ import zlib
 ROOT = Path(__file__).resolve().parents[1]
 CASES = ["halo-rings", "earth-daylight", "earth-twilight", "median-dense",
          "vantus-eclipse", "vantus-airless", "dual-eclipse"]
-EXTRA_CASES = ["moonlit-air", "eclipse-umbra-edge", "atacama-day", "atacama-night"]
+EXTRA_CASES = ["moonlit-air", "eclipse-umbra-edge", "twilight-afterglow", "eclipse-totality",
+               "atacama-day", "atacama-night"]
 QUALITY_VARIANTS = ["reference", "sun6", "view12", "balanced", "fast", "planetshine-quarter", "no-planetshine"]
 OPTIMIZATION_VARIANTS = ["sky-any-hit", "dark-reflection", "raw-combined", "view6-sun4",
                          "view8-sun2", "reflect-half", "guided-ground", "guided-raw"]
@@ -111,7 +112,7 @@ def record_provenance(output, invocation=None):
                 "git_commit": command("git", "rev-parse", "HEAD"), "git_status": command("git", "status", "--short"),
                 "git_diff_stat": command("git", "diff", "--stat"), "os": platform.platform(),
                 "rustc": command("rustc", "--version"), "cargo": command("cargo", "--version"),
-                "cpu": next((line.split(":", 1)[1].strip() for line in Path("/proc/cpuinfo").read_text().splitlines() if line.startswith("model name")), "unknown"),
+                "cpu": next((line.split(":", 1)[1].strip() for line in Path("/proc/cpuinfo").read_text().splitlines() if line.startswith("model name")), "unknown") if Path("/proc/cpuinfo").exists() else command("sysctl", "-n", "machdep.cpu.brand_string"),
                 "source_sha256": {str(p.relative_to(ROOT)): hashlib.sha256(p.read_bytes()).hexdigest() for p in files},
                 "invocation": invocation if invocation is not None else sys.argv, "note": "Uncapped serial offscreen renderer benchmark, not presented application FPS."}
     write_json(output / "manifest.json", manifest)

@@ -21,6 +21,8 @@ const CASES: &[&str] = &[
     "dual-eclipse",
     "moonlit-air",
     "eclipse-umbra-edge",
+    "twilight-afterglow",
+    "eclipse-totality",
     "atacama-day",
     "atacama-night",
 ];
@@ -255,6 +257,56 @@ fn sphere(center: [f32; 3], radius: f32, color: [f32; 3], emissive: f32) -> Sphe
     }
 }
 
+// The Sun as seen from Earth in the solar-system scene (AU, radiance).
+const SUN_DISTANCE: f32 = 0.9833;
+const SUN_RADIUS: f32 = 4.6547456e-3;
+const SUN_RADIANCE: [f32; 3] = [115384.68, 109615.445, 101538.516];
+
+/// Camera 2 m above an Earth-size host with Earth-like air, looking
+/// `altitude` degrees above the horizon with a `half_fov` vertical half-angle.
+/// Returns globals, the host centre and a local direction from
+/// (degrees right of the view azimuth, degrees above the horizon).
+fn synthetic_earth(
+    cfg: &Config,
+    altitude: f32,
+    half_fov: f32,
+) -> (Globals, glam::Vec3, impl Fn(f32, f32) -> glam::Vec3) {
+    let km = (1.0 / crate::sim::AU_KM) as f32;
+    let radius_m = 6_371_000.0_f32;
+    let altitude = altitude.to_radians();
+    let up = glam::Vec3::new(0.0, altitude.cos(), -altitude.sin());
+    let north = glam::Vec3::new(0.0, altitude.sin(), altitude.cos());
+    let center = -up * ((6371.0 + 0.002) * km);
+    let air = crate::sim::Atmosphere::earthlike();
+    let mut g = Globals::zeroed();
+    g.cam_right = [1.0, 0.0, 0.0, 0.0];
+    g.cam_up = [0.0, 1.0, 0.0, 0.0];
+    g.cam_forward = [0.0, 0.0, -1.0, half_fov.to_radians().tan()];
+    g.viewport = [cfg.width as f32, cfg.height as f32, 1.0, 0.0];
+    g.atmo_center = [center.x, center.y, center.z, 6371.0 * km];
+    g.atmo_rayleigh = [
+        air.rayleigh[0] as f32,
+        air.rayleigh[1] as f32,
+        air.rayleigh[2] as f32,
+        air.mie as f32,
+    ];
+    g.atmo_params = [
+        air.mie_g as f32,
+        air.scale_height as f32,
+        air.thickness as f32,
+        1.0,
+    ];
+    g.ground_east = [1.0, 0.0, 0.0, 2.0];
+    g.ground_up = [up.x, up.y, up.z, radius_m];
+    g.ground_north = [north.x, north.y, north.z, 1.0];
+    let ahead = -north;
+    let local = move |azimuth: f32, elevation: f32| {
+        let (a, e) = (azimuth.to_radians(), elevation.to_radians());
+        (ahead * a.cos() + glam::Vec3::X * a.sin()) * e.cos() + up * e.sin()
+    };
+    (g, center, local)
+}
+
 fn fixture(name: &str, step: u32, cfg: &Config) -> Frame {
     // Advancing sequence: fixed one simulated second per frame, independent of GPU speed.
     let dt = f64::from(step) / 86400.0;
@@ -289,33 +341,7 @@ fn fixture(name: &str, step: u32, cfg: &Config) -> Frame {
         // right: the observer is just inside totality, while air to the left
         // still sees the sun. Motion carries the shadow farther left.
         let km = (1.0 / crate::sim::AU_KM) as f32;
-        let radius_m = 6_371_000.0_f32;
-        let altitude = 12_f32.to_radians();
-        let up = glam::Vec3::new(0.0, altitude.cos(), -altitude.sin());
-        let north = glam::Vec3::new(0.0, altitude.sin(), altitude.cos());
-        let center = -up * ((6371.0 + 0.002) * km);
-        let air = crate::sim::Atmosphere::earthlike();
-        let mut g = Globals::zeroed();
-        g.cam_right = [1.0, 0.0, 0.0, 0.0];
-        g.cam_up = [0.0, 1.0, 0.0, 0.0];
-        g.cam_forward = [0.0, 0.0, -1.0, 30_f32.to_radians().tan()];
-        g.viewport = [cfg.width as f32, cfg.height as f32, 1.0, 0.0];
-        g.atmo_center = [center.x, center.y, center.z, 6371.0 * km];
-        g.atmo_rayleigh = [
-            air.rayleigh[0] as f32,
-            air.rayleigh[1] as f32,
-            air.rayleigh[2] as f32,
-            air.mie as f32,
-        ];
-        g.atmo_params = [
-            air.mie_g as f32,
-            air.scale_height as f32,
-            air.thickness as f32,
-            1.0,
-        ];
-        g.ground_east = [1.0, 0.0, 0.0, 2.0];
-        g.ground_up = [up.x, up.y, up.z, radius_m];
-        g.ground_north = [north.x, north.y, north.z, 1.0];
+        let (g, center, _) = synthetic_earth(cfg, 12.0, 30.0);
         return Frame {
             globals: g,
             bodies: vec![
@@ -324,6 +350,39 @@ fn fixture(name: &str, step: u32, cfg: &Config) -> Frame {
                 sphere(
                     [(998.0 - step as f32 * 0.1) * km, 0.0, -100_000.0 * km],
                     1000.0 * km,
+                    [0.0; 3],
+                    0.0,
+                ),
+            ],
+            ground: vec![],
+            scene_time: dt,
+            labels: vec![],
+        };
+    }
+    if name == "eclipse-totality" {
+        // Deep inside a total eclipse: Sun-sized, Sun-bright star 60 degrees
+        // up and ahead (above the frame), covered by a 513 km occultor
+        // 100,000 km away. Its umbra is ~40 km wide around the observer and
+        // the penumbra reaches ~990 km, so nearby air and ground are dark
+        // while distant low air on every side sees a partial sun. The shadow
+        // drifts 0.5 km per frame; the observer stays in totality.
+        let km = (1.0 / crate::sim::AU_KM) as f32;
+        let (g, center, local) = synthetic_earth(cfg, 5.0, 40.0);
+        let sun = local(0.0, 60.0);
+        let drift = local(90.0, 0.0) * (step as f32 * 0.5 * km);
+        return Frame {
+            globals: g,
+            bodies: vec![
+                sphere(center.to_array(), 6371.0 * km, [0.2; 3], 0.0),
+                sphere(
+                    (sun * SUN_DISTANCE).to_array(),
+                    SUN_RADIUS,
+                    SUN_RADIANCE,
+                    1.0,
+                ),
+                sphere(
+                    (sun * 100_000.0 * km + drift).to_array(),
+                    513.0 * km,
                     [0.0; 3],
                     0.0,
                 ),
@@ -378,6 +437,8 @@ fn fixture(name: &str, step: u32, cfg: &Config) -> Frame {
         "halo-rings" => state(crate::sim::halo_scene(), dt),
         "earth-daylight" => state(crate::sim::default_scene(), 0.599 + dt),
         "earth-twilight" => state(crate::sim::default_scene(), 1.04 + dt),
+        // Sun about 5 degrees below the horizon: civil twilight.
+        "twilight-afterglow" => state(crate::sim::default_scene(), 1.0525 + dt),
         "median-dense" => state(
             crate::config::parse(include_str!("../configs/median-resonance.yaml")).unwrap(),
             0.25 + dt,
@@ -396,6 +457,19 @@ fn fixture(name: &str, step: u32, cfg: &Config) -> Frame {
             s.ground_view();
             s.observer.alt = 3_f64.to_radians();
             s.observer.fov_y = 55_f64.to_radians();
+        }
+        "twilight-afterglow" => {
+            // Face 25 degrees left of the set sun: the sunward glow and the
+            // still-lit upper air fill the right, darker sky the left.
+            let sun = s
+                .scene
+                .bodies
+                .iter()
+                .position(|b| b.luminosity > 0.0)
+                .unwrap();
+            s.point_at_fov(sun, 70_f64.to_radians());
+            s.observer.az -= 25_f64.to_radians();
+            s.observer.alt = 12_f64.to_radians();
         }
         "median-dense" => {
             s.observer.az = 0.0;
@@ -738,6 +812,8 @@ fn run_benchmark(cfg: &Config) -> Result<()> {
         let exposure = match name.as_str() {
             "vantus-eclipse" | "vantus-airless" => 8.0,
             "moonlit-air" => 64.0,
+            "twilight-afterglow" => 16.0,
+            "eclipse-totality" => 64.0,
             _ => 1.0,
         };
         let image_options = Options {
@@ -899,6 +975,72 @@ fn benchmark_fixtures_are_deterministic_and_cover_requested_workloads() {
                 (5.0 * km..20.0 * km).contains(&height),
                 "sunlit sample must be in dense atmosphere"
             );
+        }
+        if name == "twilight-afterglow" {
+            let up = glam::Vec3::from_array(a.globals.ground_up[..3].try_into().unwrap());
+            let sun = a.bodies.iter().find(|b| b.emissive > 0.5).unwrap();
+            let sun = glam::Vec3::from(sun.center).normalize();
+            let altitude = sun.dot(up).asin().to_degrees();
+            assert!(
+                (-6.0..-4.0).contains(&altitude),
+                "civil twilight: {altitude}"
+            );
+            // The set sun's azimuth lies in the right half of the frame
+            // (bodies are in camera space: right +X, forward -Z).
+            let (right, forward) = (glam::Vec3::X, glam::Vec3::NEG_Z);
+            let flat = |v: glam::Vec3| (v - up * v.dot(up)).normalize();
+            let offset = flat(sun)
+                .dot(flat(right))
+                .atan2(flat(sun).dot(flat(forward)));
+            assert!(
+                (20.0..30.0).contains(&offset.to_degrees()),
+                "sun offset {}",
+                offset.to_degrees()
+            );
+            assert!(!a.ground.is_empty());
+        }
+        if name == "eclipse-totality" {
+            use glam::DVec3;
+            let km = 1.0 / crate::sim::AU_KM;
+            let up =
+                glam::Vec3::from_array(a.globals.ground_up[..3].try_into().unwrap()).as_dvec3();
+            // Fraction of the sun's disc radius left uncovered, by angular separation.
+            let exposure = |frame: &Frame, point: DVec3| {
+                let sun = DVec3::from_array(frame.bodies[1].center.map(f64::from)) - point;
+                let moon = DVec3::from_array(frame.bodies[2].center.map(f64::from)) - point;
+                let separation = sun.normalize().cross(moon.normalize()).length().asin();
+                let sun_radius = (f64::from(frame.bodies[1].radius) / sun.length()).asin();
+                let moon_radius = (f64::from(frame.bodies[2].radius) / moon.length()).asin();
+                (separation, sun_radius, moon_radius)
+            };
+            let sun = DVec3::from_array(a.bodies[1].center.map(f64::from)).normalize();
+            assert!((sun.dot(up).asin().to_degrees() - 60.0).abs() < 1e-3);
+            for step in [0, 8, 15] {
+                let f = fixture(name, step, &cfg);
+                // Observer, and air 20 km away in any direction, are in totality.
+                for point in [
+                    DVec3::ZERO,
+                    DVec3::new(20.0, 0.0, 0.0) * km,
+                    DVec3::new(-20.0, 0.0, 0.0) * km,
+                ] {
+                    let (separation, sun, moon) = exposure(&f, point);
+                    assert!(separation + sun < moon, "step {step}: must be in totality");
+                }
+                // Low air 300 km away on every side sees part of the sun, but not all.
+                for azimuth in [0.0_f64, 90.0, 180.0, 270.0] {
+                    let a = azimuth.to_radians();
+                    let p = DVec3::new(a.sin(), 0.0, -a.cos()) * (300.0 * km) + up * (5.0 * km);
+                    let (separation, sun, moon) = exposure(&f, p);
+                    assert!(
+                        separation + sun > moon,
+                        "air at {azimuth} deg must see the sun"
+                    );
+                    assert!(
+                        separation < sun + moon,
+                        "air at {azimuth} deg is in the penumbra"
+                    );
+                }
+            }
         }
         if name == "dual-eclipse" {
             assert_eq!(a.bodies.iter().filter(|b| b.emissive > 0.5).count(), 2);

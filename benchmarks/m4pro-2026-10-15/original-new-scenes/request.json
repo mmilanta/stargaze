@@ -1,0 +1,17 @@
+{
+  "width": 1280,
+  "height": 720,
+  "scale": 75,
+  "bounces": 4,
+  "vegetation": 70,
+  "warmup": 8,
+  "frames": 16,
+  "repeats": 3,
+  "image_samples": 32,
+  "output": "/Users/marcomilanta/Documents/personal/stargaze/target/mac-rerun/m4-original-new",
+  "adapter": "M4",
+  "cases": [
+    "twilight-afterglow",
+    "eclipse-totality"
+  ]
+}
