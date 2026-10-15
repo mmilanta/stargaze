@@ -131,6 +131,10 @@ fn landscape_query(ray: Ray, limit: f32, occlusion: bool) -> Hit {
     if (dot(o, o) > 4.0 * radius * radius) {
         return sphere_hit(ray, u32(settings.g.ground_north.w) - 1u);
     }
+    // The host sphere lies below the observer's tangent plane (y <= 0), and
+    // every prop and terrain vertex below `landscape_top`. A ray leaving
+    // upwards from above all of them cannot hit anything here.
+    if (d.y >= 0.0 && o.y > landscape_top()) { return closest; }
     // Host sphere in a surface frame. Expanding c avoids subtracting two
     // squared planetary radii to recover a height of a few centimetres.
     let a = dot(d, d);
@@ -237,6 +241,14 @@ fn landscape_query(ray: Ray, limit: f32, occlusion: bool) -> Hit {
     return closest;
 }
 
+fn landscape_top() -> f32 {
+    var top = bitcast<f32>(settings.g.ground_counts.w);
+    if (settings.g.ground_counts.y != 0u) {
+        // Root quadtree bound: highest terrain vertex plus margin.
+        top = max(top, ground_data.terrain[TERRAIN_CACHE + 4u]);
+    }
+    return top;
+}
 fn landscape_point(ray: Ray, hit: Hit) -> vec3<f32> {
     return ground_origin(ray) + to_ground(ray.direction) * (hit.distance * METRES_PER_AU);
 }

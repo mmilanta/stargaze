@@ -29,43 +29,11 @@ pub fn source(variant: &str) -> String {
     } else {
         TRACE_SHADER.to_owned()
     };
-    if matches!(variant, "sky-any-hit" | "raw-combined" | "guided-raw") {
-        // The sky lookup needs a boolean, not the closest surface, its normal,
-        // or a sorted traversal beyond the first opaque blocker. Rings remain
-        // in the existing, separate transmission loop.
-        s.push_str(
-            r#"
-fn sky_blocked(ray: Ray) -> bool {
-    for (var i = 0u; i < settings.counts.x; i += 1u) {
-        if (settings.g.ground_north.w == f32(i + 1u)) { continue; }
-        let hit = sphere_hit(ray, i);
-        if (hit.index != MISS && hit.distance < 1.0e30) { return true; }
-    }
-    let local = landscape_query(ray, 1.0e30, true);
-    return local.index != MISS && local.distance < 1.0e30;
-}
-"#,
-        );
-        replace(
-            &mut s,
-            "if (closest_hit(ray).index != MISS) { return vec3<f32>(0.0); }",
-            "if (sky_blocked(ray)) { return vec3<f32>(0.0); }",
-        );
-    }
-    if matches!(variant, "dark-reflection" | "raw-combined" | "guided-raw") {
-        // Keep every random draw and visibility query. Only skip deterministic
-        // attenuation/phase math when this sample contributes exactly zero.
-        replace(
-            &mut s,
-            "let light_t = exp(-beta_ext * density_integral(p, light.direction, ATMO_SUN_STEPS));",
-            "if (any(incident != vec3<f32>(0.0))) {\n                let light_t = exp(-beta_ext * density_integral(p, light.direction, ATMO_SUN_STEPS));",
-        );
-        replace(
-            &mut s,
-            "inscatter += t_view * segment * beta_phase * incident * light_t;",
-            "inscatter += t_view * segment * beta_phase * incident * light_t;\n                }",
-        );
-    }
+    // sky-any-hit (boolean sky visibility) is now part of the production
+    // shader as well; those variant names match their siblings.
+    // dark-reflection (skip planetshine work for an unlit reflector sample)
+    // is now part of the production shader; the variant names remain so
+    // earlier study commands still run, and match their non-dark siblings.
     if variant == "view6-sun4" {
         replace(
             &mut s,
@@ -94,13 +62,13 @@ fn sky_blocked(ray: Ray) -> bool {
         );
         replace(
             &mut s,
-            "if (reflector.index != MISS) {",
-            "if (reflector.index != MISS && i % 2u == reflected_parity) {",
+            "if (planetshine) {",
+            "if (planetshine && i % 2u == reflected_parity) {",
         );
         replace(
             &mut s,
-            "* (visibility * reflector.inverse_probability / light.pdf);",
-            "* (2.0 * visibility * reflector.inverse_probability / light.pdf);",
+            "* reflected * (visibility * light_t);",
+            "* reflected * (2.0 * visibility * light_t);",
         );
     }
     s

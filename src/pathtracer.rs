@@ -706,6 +706,13 @@ impl PathTracer {
         globals.viewport[0] = self.dimensions.0 as f32;
         globals.viewport[1] = self.dimensions.1 as f32;
         globals.viewport[2] = self.options.exposure;
+        // Conservative highest point of every prop, in surface-frame metres.
+        // Rays leaving upwards from above it (and the terrain) skip the scene.
+        let prop_top = frame.ground.iter().fold(0.0_f32, |top, p| {
+            let e = glam::Vec3::from_slice(&p.extent[..3]);
+            top.max(p.center[1] + e.length())
+        });
+        globals.ground_counts[3] = prop_top.to_bits();
         let mut lights = [0_u32; 4];
         for (index, body) in frame.bodies.iter().enumerate() {
             if body.emissive >= 0.5 {

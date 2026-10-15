@@ -129,7 +129,9 @@ def implementations():
                       'report': f'{QUALITY}/data/full/{variant}/comparison.md', 'shots': shots})
     m4 = [('original', 'Original renderer', 'Commit c3dad2d: the original renderer with the benchmark suite.'),
           ('optimized', 'Optimized renderer', 'Commit 058f4a5: first optimization pass.'),
-          ('current', 'Current renderer', 'Current main with the app default guided-ground sampler.')]
+          ('current', 'Current renderer', 'Current main with the app default guided-ground sampler.'),
+          ('faster', 'Faster renderer', 'Planetshine sampled once per camera ray, adaptive atmosphere steps, '
+           'shared sky/bounce ray and cheaper shadow tests. Compared with the current renderer.')]
     # The original renderer ran the two newest scenes separately, with the fixtures backported.
     original_runs = [f'{M4}/original', f'{M4}/original-new-scenes']
     for version, name, description in m4:
@@ -152,8 +154,12 @@ def implementations():
                     diff = f'{M4}/comparisons/{d}/{key}-diff.png'
                     if (BENCH/diff).exists():
                         shot['diff'] = diff
-            rows = wall_rows([f'{run}/summary.json' for run in original_runs], [f'{M4}/{version}/summary.json'])
-            impl.update(speedup=geomean(r['speedup'] for r in rows), versus='m4-original', timings=rows,
+            # Each version is compared with the original, except the newest
+            # optimizations, which are compared with the renderer they improve.
+            baseline = 'current' if version == 'faster' else 'original'
+            baseline_runs = [f'{M4}/current'] if version == 'faster' else original_runs
+            rows = wall_rows([f'{run}/summary.json' for run in baseline_runs], [f'{M4}/{version}/summary.json'])
+            impl.update(speedup=geomean(r['speedup'] for r in rows), versus=f'm4-{baseline}', timings=rows,
                         images=image_summary(images), shots=shots)
         impls.append(impl)
     for variant, description in FOLLOWUP_VARIANTS.items():

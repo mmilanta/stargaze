@@ -458,6 +458,21 @@ fn reflected_radiance(ray: Ray, index: u32, rng: ptr<function, u32>) -> vec3<f32
     return radiance;
 }
 
+// Largest unoccluded irradiance (max channel) from a star above the
+// observer's horizon, or 0 when every star has set.
+fn brightest_risen_light(origin: vec3<f32>) -> f32 {
+    let ray = Ray(origin, vec3<f32>(0.0, 0.0, -1.0), MISS);
+    var brightest = 0.0;
+    for (var light_slot = 0u; light_slot < light_count(); light_slot += 1u) {
+        let b = light_index(light_slot);
+        if (bodies[b].material.w < 0.5) { continue; }
+        if (dot(normalize(relative_center(ray, b)), settings.g.ground_up.xyz) <= 0.0) { continue; }
+        let radiance = bodies[b].material.rgb;
+        brightest = max(brightest, max(radiance.r, max(radiance.g, radiance.b)) * TAU * cone_width(ray, b));
+    }
+    return brightest;
+}
+
 // Single scattering along a camera ray, up to `limit` (a surface hit) or the
 // top of the shell. Returns the view transmittance and the in-scattered light
 // accumulated in front of whatever the ray reaches.
@@ -476,16 +491,57 @@ fn atmosphere(origin: vec3<f32>, dir: vec3<f32>, limit: f32, rng: ptr<function, 
     let beta_ext = beta_r + vec3<f32>(beta_m);
     let g = settings.g.atmo_params.x;
     let r = host_radius();
-    let dt = t_max / f32(ATMO_VIEW_STEPS);
+    // Short segments (camera rays that end on nearby terrain or props) cross
+    // nearly uniform air: cap each step at a quarter scale height instead of
+    // always paying for ATMO_VIEW_STEPS shadow rays. Long sky rays keep all.
+    let steps = clamp(u32(ceil(t_max / (0.25 * atmo_scale_height()))), 2u, ATMO_VIEW_STEPS);
+    let dt = t_max / f32(steps);
+    // Jitter shortened segments per camera ray: a few fixed midpoints would
+    // systematically miss thin shadowed air (e.g. in front of a slope). Full
+    // sky rays keep the reviewed midpoint rule.
+    var jitter_rng = hash(*rng ^ 0x3c6ef372u);
+    let jitter = select(0.5, random(&jitter_rng), steps < ATMO_VIEW_STEPS);
 
     // Separate random stream keeps direct starlight sampling unchanged.
     var reflected_rng = hash(*rng ^ 0xa511e9b3u);
     let reflector = sample_reflector(origin, &reflected_rng);
+    // Planetshine: sample one point on the reflector per camera ray and reuse
+    // its outgoing radiance along the column. The reflector is far beyond the
+    // column, so the direction barely changes; visibility (eclipses, horizon)
+    // and extinction are still evaluated at every step. An unlit sample skips
+    // the per-step shadow rays entirely.
+    var reflected = vec3<f32>(0.0);
+    var reflected_direction = dir;
+    var reflected_phase = vec3<f32>(0.0);
+    if (reflector.index != MISS) {
+        var reflected_ray = Ray(origin, dir, MISS);
+        let light = sample_light(reflected_ray, reflector.index, &reflected_rng);
+        reflected_ray.direction = light.direction;
+        reflected = reflected_radiance(reflected_ray, reflector.index, &reflected_rng)
+            * (reflector.inverse_probability / light.pdf);
+        reflected_direction = light.direction;
+        let cos_theta = dot(dir, light.direction);
+        reflected_phase = beta_r * rayleigh_phase(cos_theta)
+            + vec3<f32>(beta_m) * mie_phase(cos_theta, g);
+    }
+    // In daylight, planetshine is a vanishing fraction of the sky (moonlight
+    // is ~1e-6 of sunlight). Russian roulette keeps it unbiased while rarely
+    // paying for its per-step shadow rays. At night or twilight (no sun above
+    // the observer's horizon) it is always evaluated.
+    if (any(reflected > vec3<f32>(0.0))) {
+        let sun = brightest_risen_light(origin);
+        if (sun > 0.0) {
+            let ratio = max(reflected.r, max(reflected.g, reflected.b)) / sun;
+            let keep = clamp(ratio * 1.0e3, 1.0 / 64.0, 1.0);
+            reflected = select(vec3<f32>(0.0), reflected / keep, random(&reflected_rng) < keep);
+        }
+    }
+    let planetshine = any(reflected > vec3<f32>(0.0));
 
     var t_view = vec3<f32>(1.0);
     var inscatter = vec3<f32>(0.0);
-    for (var i = 0u; i < ATMO_VIEW_STEPS; i += 1u) {
-        let p = origin + dir * ((f32(i) + 0.5) * dt);
+    for (var i = 0u; i < steps; i += 1u) {
+        let p = origin + dir * ((f32(i) + jitter) * dt);
         let to_center = p - settings.g.atmo_center.xyz;
         let altitude = max(length(to_center) - r, 0.0);
         let density = exp(-altitude / atmo_scale_height());
@@ -509,7 +565,7 @@ fn atmosphere(origin: vec3<f32>, dir: vec3<f32>, limit: f32, rng: ptr<function, 
             var light_ray = Ray(p, dir, MISS);
             let light = sample_light(light_ray, b, rng);
             light_ray.direction = light.direction;
-            let visibility = light_visibility(light_ray, b);
+            let visibility = air_light_visibility(light_ray, b);
             if (visibility == 0.0) {
                 continue;
             }
@@ -520,19 +576,11 @@ fn atmosphere(origin: vec3<f32>, dir: vec3<f32>, limit: f32, rng: ptr<function, 
                 + vec3<f32>(beta_m) * mie_phase(cos_theta, g);
             inscatter += t_view * segment * beta_phase * e_sun * sun_t;
         }
-        if (reflector.index != MISS) {
-            var reflected_ray = Ray(p, dir, MISS);
-            let light = sample_light(reflected_ray, reflector.index, &reflected_rng);
-            reflected_ray.direction = light.direction;
-            let visibility = light_visibility(reflected_ray, reflector.index);
+        if (planetshine) {
+            let visibility = air_light_visibility(Ray(p, reflected_direction, MISS), reflector.index);
             if (visibility > 0.0) {
-                let incident = reflected_radiance(reflected_ray, reflector.index, &reflected_rng)
-                    * (visibility * reflector.inverse_probability / light.pdf);
-                let light_t = exp(-beta_ext * density_integral(p, light.direction, ATMO_SUN_STEPS));
-                let cos_theta = dot(dir, light.direction);
-                let beta_phase = beta_r * rayleigh_phase(cos_theta)
-                    + vec3<f32>(beta_m) * mie_phase(cos_theta, g);
-                inscatter += t_view * segment * beta_phase * incident * light_t;
+                let light_t = exp(-beta_ext * density_integral(p, reflected_direction, ATMO_SUN_STEPS));
+                inscatter += t_view * segment * reflected_phase * reflected * (visibility * light_t);
             }
         }
         t_view *= step_t;
@@ -560,6 +608,9 @@ fn trace(initial: Ray, rng: ptr<function, u32>, backdrop: ptr<function, vec3<f32
     // the sky cache; extinction is applied once the continuation leaves the
     // local scene (metre-scale hops between props see negligible air).
     var in_air = false;
+    // The previous vertex was a local surface whose sky light is carried by
+    // its continuation ray: add the sky cache if that ray escapes.
+    var sky_on_escape = false;
     loop {
         let hit = closest_hit(ray);
         let ring = closest_ring(ray, hit.distance);
@@ -639,6 +690,7 @@ fn trace(initial: Ray, rng: ptr<function, u32>, backdrop: ptr<function, vec3<f32
             let direction = basis_direction(n, radial * cos(phi), radial * sin(phi), z);
             throughput *= ring_bsdf(optics, mu_out, z) * (abs(z) / bsdf_pdf);
             previous_pdf = bsdf_pdf;
+            sky_on_escape = false;
             ray = ring_origin(ring, direction);
             previous_vertex = ray;
             depth += 1u;
@@ -656,6 +708,9 @@ fn trace(initial: Ray, rng: ptr<function, u32>, backdrop: ptr<function, vec3<f32
             // Background stars are visible along unscattered camera paths,
             // including straight-through ring crossings.
             radiance += throughput * environment(ray.direction, depth == 0u) * catalogue_visibility;
+            if (sky_on_escape) {
+                radiance += throughput * surface_sky_lookup(ray.direction);
+            }
             if (depth == 0u && milky_way_visibility > 0.0) {
                 // A colored visual layer, attenuated by the atmosphere
                 // and unscattered ring crossings. Never feed it into bounces.
@@ -716,9 +771,11 @@ fn trace(initial: Ray, rng: ptr<function, u32>, backdrop: ptr<function, vec3<f32
                     * (bsdf_pdf * weight * visibility / sample.pdf);
             }
         }
-        if (local && settings.g.ground_counts.y != 0u && settings.g.atmo_params.w > 0.5) {
-            // Explicit atmosphere lighting. Continuation rays do not also
-            // add this cache on escape, avoiding double-counted sky energy.
+        let sky_lit = local && settings.g.ground_counts.y != 0u && settings.g.atmo_params.w > 0.5;
+        if (sky_lit && last_vertex) {
+            // Atmosphere lighting. With no continuation at the depth limit,
+            // trace an explicit sky sample; otherwise the cosine-distributed
+            // continuation doubles as the sky sample (added on escape).
             radiance += throughput * albedo * surface_sky(outgoing, normal, rng);
         }
         if (last_vertex) {
@@ -740,6 +797,7 @@ fn trace(initial: Ray, rng: ptr<function, u32>, backdrop: ptr<function, vec3<f32
         ray = outgoing;
         previous_vertex = outgoing;
         in_air = inside_air(outgoing);
+        sky_on_escape = sky_lit;
         depth += 1u;
         null_crossings = 0u;
     }

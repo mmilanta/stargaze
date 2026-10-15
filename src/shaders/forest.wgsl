@@ -28,6 +28,14 @@ fn surface_sky_lookup(dir: vec3<f32>) -> vec3<f32> {
     return mix(mix(surface_sky_texel(cell.x, cell.y), surface_sky_texel(cell.x+1, cell.y), f.x),
         mix(surface_sky_texel(cell.x, cell.y+1), surface_sky_texel(cell.x+1, cell.y+1), f.x), f.y);
 }
+// Any opaque blocker hides the sky sample: no closest hit, normal or sorting.
+fn sky_blocked(ray: Ray) -> bool {
+    for (var i = 0u; i < settings.counts.x; i += 1u) {
+        if (settings.g.ground_north.w == f32(i + 1u)) { continue; }
+        if (sphere_hit(ray, i).index != MISS) { return true; }
+    }
+    return landscape_query(ray, 1.0e30, true).index != MISS;
+}
 fn surface_sky(origin: Ray, normal: vec3<f32>, rng: ptr<function, u32>) -> vec3<f32> {
     let u = random(rng);
     let phi = TAU * random(rng);
@@ -35,7 +43,7 @@ fn surface_sky(origin: Ray, normal: vec3<f32>, rng: ptr<function, u32>) -> vec3<
     let light = surface_sky_lookup(dir);
     if (max(light.r, max(light.g, light.b)) <= 0.0) { return vec3<f32>(0.0); }
     let ray = Ray(origin.offset, dir, origin.anchor);
-    if (closest_hit(ray).index != MISS) { return vec3<f32>(0.0); }
+    if (sky_blocked(ray)) { return vec3<f32>(0.0); }
     var transmission = 1.0;
     for (var i = 0u; i < settings.counts.x; i += 1u) {
         let hit = ring_hit(ray, i);
