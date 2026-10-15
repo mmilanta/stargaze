@@ -82,16 +82,16 @@ pub fn source(variant: &str) -> String {
     // those cells by four, preserving the expected discrete integral at the
     // expense of variance. The direct-light RNG is untouched.
     var phase_rng = hash(*rng ^ 0x9e3779b9u);
-    let reflected_phase = u32(random(&phase_rng) * 4.0);
+    let reflected_cell = u32(random(&phase_rng) * 4.0);
 "#,
         );
         replace(
-            "if (reflector.index != MISS) {",
-            "if (reflector.index != MISS && i % 4u == reflected_phase) {",
+            "if (planetshine) {",
+            "if (planetshine && i % 4u == reflected_cell) {",
         );
         replace(
-            "* (visibility * reflector.inverse_probability / light.pdf);",
-            "* (4.0 * visibility * reflector.inverse_probability / light.pdf);",
+            "* reflected * (visibility * light_t);",
+            "* reflected * (4.0 * visibility * light_t);",
         );
     }
     source

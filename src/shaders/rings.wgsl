@@ -114,6 +114,32 @@ fn light_visibility(ray: Ray, light: u32) -> f32 {
     return transmission;
 }
 
+// Visibility from an air sample. Above every landscape feature, only planets,
+// moons and rings can shadow it: rays that climb cannot reach the landscape,
+// and light from below the horizon reaches lit air far from the local
+// terrain. Samples among the terrain keep the full test (valley shadows).
+fn air_light_visibility(ray: Ray, light: u32) -> f32 {
+    if (settings.g.ground_north.w == 0.0 || ground_origin(ray).y <= landscape_top()) {
+        return light_visibility(ray, light);
+    }
+    let surface = sphere_hit(ray, light);
+    if (surface.index == MISS) { return 0.0; }
+    for (var i = 0u; i < settings.counts.x; i += 1u) {
+        if (i == light) { continue; }
+        let hit = sphere_hit(ray, i);
+        if (hit.index != MISS && (hit.distance < surface.distance
+            || (hit.distance == surface.distance && i < light))) { return 0.0; }
+    }
+    var transmission = 1.0;
+    for (var i = 0u; i < settings.counts.x; i += 1u) {
+        let hit = ring_hit(ray, i);
+        if (hit.index != MISS && hit.distance < surface.distance) {
+            transmission *= ring_transmission(ray, hit);
+        }
+    }
+    return transmission;
+}
+
 fn one_minus_exp(x: f32) -> f32 {
     return select(1.0 - exp(-x), x * (1.0 - 0.5 * x), x < 1.0e-3);
 }
