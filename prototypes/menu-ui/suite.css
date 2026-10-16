@@ -433,8 +433,10 @@ body:not(.rail-closed) .notes{left:calc(var(--rail) + 30px)}
 
 /* First bar section: same width in the level HUD and the theory editor */
 .hud .grp.nav{flex:none}
-.hb.tab{width:112px;justify-content:space-between}
-.hud .grp.nav .hb:first-child{width:84px;justify-content:space-between}
+.hud .grp.nav .hb{justify-content:space-between}
+.hud .grp.nav .nav-menu{width:84px}
+.hud .grp.nav .nav-set{width:52px}
+.hb.tab{width:112px}
 .hud .grp.hide{padding:0 6px}
 
 /* Toolbar keycaps share one size and baseline, including Auto, orientation and EV. */
@@ -442,3 +444,45 @@ body:not(.rail-closed) .notes{left:calc(var(--rail) + 30px)}
 .hud .hb svg,.hud .check i{flex:none}
 .hud .grp.nav{flex-shrink:0}
 .hud .grp.hide{flex-shrink:0;margin-left:auto}
+
+/* ---------------------------------------------------------------- polish pass
+   One call to action at a time, quieter chrome, nothing that has to scroll to be reached. */
+
+/* Title: the menu hangs under the wordmark; Quit is set apart and smaller. */
+.titem{padding:10px 18px}
+.titem.sel{background:linear-gradient(90deg,#f0f4ff1c,#f0f4ff05);border-color:transparent}
+.titem small{transition:color .15s}
+.titem.sel small{color:var(--text)}
+.titem.t-quit{margin-top:14px}
+.titem.t-quit b{font-size:19px;color:var(--muted)}
+.titem.t-quit.sel b{color:var(--warn)}
+.titem.t-quit .caret{color:var(--warn)}
+.tmenu{border-top:1px solid var(--line-soft);padding-top:22px;margin-top:44px}
+
+/* Lists: only the selected row carries the yellow button and Discard; the rest stay quiet. */
+.lrow{background:#11329acc;padding:14px 18px}
+.lrow:hover:not(.sel){background:#1a3fb2d8;border-color:var(--line)}
+.lrow:not(.sel) .gbtn.play{background:transparent;color:var(--muted);border-color:var(--line-soft);box-shadow:none}
+.lrow:not(.sel):hover .gbtn.play{color:var(--text);border-color:var(--line)}
+.lrow:not(.sel) .gbtn.discard{visibility:hidden}
+.lrow:not(.sel):hover .gbtn.discard:not([disabled]){visibility:visible}
+.lrow.sel .gbtn.discard[disabled]{visibility:hidden}
+.lsub{display:flex;gap:0;flex-wrap:wrap;margin-top:6px;font-size:10.5px;color:var(--muted)}
+.lsub span+span::before{content:'·';margin:0 9px;color:var(--faint)}
+.lsub .file{color:var(--faint)}
+.lrow.sel .lsub{color:var(--text)}
+
+/* Settings: tighter rows, and Back / Apply pinned to the bottom so they are never off-screen. */
+.gsettings{gap:22px}
+.setting-sec>p{margin-bottom:10px}
+.gscreen .setting{padding:12px 14px}
+/* Back / Apply live in a footer outside the scrolling body, aligned to the settings column. */
+.gfoot{width:min(1000px,100%);margin:0 auto;padding:0 64px 26px;flex:none;animation:g-in .4s both .2s}
+.gfoot .set-actions{max-width:760px;padding:14px 14px 0}
+
+/* Bar: labels sit next to their icon, keycaps on the right edge of each fixed slot. */
+.hud .grp.nav .hb{justify-content:flex-start}
+.hud .grp.nav .hb kbd{margin-left:auto}
+/* The footer follows the rows when they fit and pins to the bottom when they scroll. */
+.gbody:has(+ .gfoot){flex:0 1 auto;padding-bottom:8px}
+.clock small{white-space:nowrap}

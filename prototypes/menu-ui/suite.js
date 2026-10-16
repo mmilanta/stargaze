@@ -32,6 +32,8 @@ const ICON = {
   sun: '<svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="4"/><path d="M12 2v2M12 20v2M2 12h2M20 12h2M4.9 4.9l1.4 1.4M17.7 17.7l1.4 1.4M4.9 19.1l1.4-1.4M17.7 6.3l1.4-1.4"/></svg>',
   eye: '<svg viewBox="0 0 24 24"><path d="M2 12s3.6-7 10-7 10 7 10 7-3.6 7-10 7S2 12 2 12z"/><circle cx="12" cy="12" r="3"/></svg>',
   menu: '<svg viewBox="0 0 24 24"><path d="M4 7h16M4 12h16M4 17h16"/></svg>',
+  tag: '<svg viewBox="0 0 24 24"><path d="M3 12V4h8l10 10-8 8z"/><circle cx="7.5" cy="8.5" r="1.4"/></svg>',
+  gear: '<svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="3.2"/><path d="M12 2.5v3M12 18.5v3M2.5 12h3M18.5 12h3M5.3 5.3l2.1 2.1M16.6 16.6l2.1 2.1M5.3 18.7l2.1-2.1M16.6 7.4l2.1-2.1"/><circle cx="12" cy="12" r="6.5"/></svg>',
   target: '<svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="8"/><circle cx="12" cy="12" r="2"/><path d="M12 2v4M12 18v4M2 12h4M18 12h4"/></svg>',
 };
 
@@ -158,7 +160,7 @@ const NOTES = {
   systems: { t: 'Explore list', now: ['"STARGAZE / Choose a solar system" and Resume [Esc].', 'Rows [1]–[9] with the system name and filename; PgUp/PgDn paging.', 'Refreshes configs/ every time it opens; invalid YAML stays listed and shows its error.'],
     add: ['One column, one yellow Explore button per system, nothing else.', 'Invalid configs stay in the list with their error and a disabled button.'], src: 'src/menu.rs · build(), discover()' },
   observe: { t: 'Observation HUD', now: ['Bottom bar: [M]enu, [L]abels, Time ← speed →, Stop [Spc], -1d [PgDn], +1d [PgUp], minute clock.', 'Lock indicator: "Locked [U]" + target, or "Unlocked [U] / click sky".', '[S]tars orientation (proposed: [R], reset moves to Home), EV slider [,][.], Auto [A].', 'Right-click locks a body or a fixed sky direction; left-click releases it.', 'H hides the HUD; Menu and the lock stay visible.', 'E/T search eclipses/transits; F1–F9 aim; R resets; scroll zooms.'],
-    add: ['Decade speed steps: 1, 10, 100, 1000 min/s, with the minute clock next to the speed (idea.md feat1).', 'Every control shows its key (feat2).', 'Orientation while following an object, next to the lock (feat5): Horizon level (ground flat, stars turn) or Stars fixed (constellations still, horizon turns). Each has an icon: the solid part stays put, the dashed part with ↻ turns.', 'Targets panel [G] lists the F-keys and event searches.', 'Samples-per-pixel meter; grain clears as the image converges while time is stopped.'], src: 'src/ui.rs · layout_mode(), build_bar(), build_lock()' },
+    add: ['Decade speed steps: 1, 10, 100, 1000 min/s, with the minute clock next to the speed (idea.md feat1).', 'Every control shows its key (feat2).', 'Orientation while following an object, next to the lock (feat5): Horizon level (ground flat, stars turn) or Stars fixed (constellations still, horizon turns). Each has an icon: the solid part stays put, the dashed part with ↻ turns.', 'Fixed-width first section, the same in every gameplay bar: Menu [M], Settings [F11], then Labels [L] here or Theory / Observe [Tab] in a level.', 'Targets panel [G] lists the F-keys and event searches.', 'Samples-per-pixel meter; grain clears as the image converges while time is stopped.'], src: 'src/ui.rs · layout_mode(), build_bar(), build_lock()' },
   maps: { t: 'Levels', now: ['"MAPS / Choose a map to start a new puzzle", spoiler-free titles, "Start a fresh theory".', 'Choosing a map clears the one theory you have.'],
     add: ['Levels in a column: title, progress bar, status, best score and objects drawn.', 'Yellow Play / Resume per level; progress is kept per level.', 'Discard progress [D] on the side, behind a confirmation.'], src: 'src/menu.rs · Entry::puzzle_title()' },
   pobserve: { t: 'Level HUD', now: ['Top-left status: "STOPPED | +0.0 min/s | View locked" (proposed: removed, the bar already shows play state, speed and lock).', 'The Labels button becomes Draw [Tab].', 'The lock shows only Star, Planet / moon or Background sky.', 'L, E, T and F1–F9 are disabled; R returns to the initial view.'],
@@ -263,21 +265,21 @@ const foot = keys => `<div class="foot"><span>■ ${esc(keys[0])}</span><div cla
 // cursor, no bottom key bar. Only rects, lines and text, so they port to src/ui.rs.
 const pad = n => String(n).padStart(2, '0');
 const skyBg = id => `<canvas class="menu-sky" data-sky="${id}" data-wide="1"></canvas><div class="menu-veil"></div>`;
-function gameScreen({ title, sub, body }) {
+function gameScreen({ title, sub, body, foot }) {
   return `<div class="gscreen">${skyBg(S.obs.sys)}
     <header class="ghead"><div><div class="eyebrow">${sub}</div><h1>${title}</h1></div></header>
-    <div class="gbody">${body}</div></div>`;
+    <div class="gbody">${body}</div>${foot ? `<footer class="gfoot">${foot}</footer>` : ''}</div>`;
 }
 // Moving the cursor only moves the highlight; re-rendering would restart the sky and entrance animations.
 function setSel(key, i) { S[key] = i; document.querySelectorAll('[data-row]').forEach(r => r.classList.toggle('sel', +r.dataset.row === i)); }
 function moveSel(key, n, dir) { setSel(key, (S[key] + dir + n) % n); }
 
 /* ---------------------------------------------------------------- 00 title */
-const TITLE_ITEMS = [['play', 'Play', 'Your levels'], ['explore', 'Explore', 'Any system, freely'], ['settings', 'Settings', 'Rendering, HUD scale'], ['quit', 'Quit', '']];
+const TITLE_ITEMS = [['play', 'Play', 'Reconstruct unknown skies'], ['explore', 'Explore', 'Any system, freely'], ['settings', 'Settings', 'Rendering, HUD scale'], ['quit', 'Quit', '']];
 function vTitle() {
   return `<div class="gscreen title">${skyBg(S.obs.sys)}
     <h1 class="wordmark">${ICON.logo}stargaze<span>.</span></h1>
-    <nav class="tmenu">${TITLE_ITEMS.map(([, l, d], i) => `<button class="titem ${S.titleSel === i ? 'sel' : ''}" data-title="${i}" data-row="${i}" style="--i:${i}"><span class="caret">▸</span><b>${l}</b>${d ? `<small>${d}</small>` : ''}</button>`).join('')}</nav></div>`;
+    <nav class="tmenu">${TITLE_ITEMS.map(([, l, d], i) => `<button class="titem ${S.titleSel === i ? 'sel' : ''} t-${TITLE_ITEMS[i][0]}" data-title="${i}" data-row="${i}" style="--i:${i}"><span class="caret">▸</span><b>${l}</b>${d ? `<small>${d}</small>` : ''}</button>`).join('')}</nav></div>`;
 }
 function titleAction(i) {
   S.titleSel = i;
@@ -295,7 +297,7 @@ function vSystems() {
     ? `<div class="gempty"><b>No systems found</b>Add a .yaml file to configs/, then reopen this menu.</div>`
     : `<div class="list">${list.map((x, i) => `<div class="lrow ${i === S.sel ? 'sel' : ''} ${x.broken ? 'bad' : ''}" data-row="${i}" style="--i:${i}">
         <span class="lnum">${pad(i + 1)}</span>
-        <div class="linfo"><b>${esc(x.short)}</b>${x.broken ? `<div class="err">${esc(x.error.split('\n').slice(1, 2).join(''))}</div>` : `<div class="lsub">${esc(x.file)}</div>`}</div>
+        <div class="linfo"><b>${esc(x.short)}</b>${x.broken ? `<div class="err">${esc(x.error.split('\n').slice(1, 2).join(''))}</div>` : `<div class="lsub"><span>From ${esc(x.host)} · ${esc(x.lat)}</span><span>${x.bodies} bodies · ${x.stars} ${x.stars === 1 ? 'star' : 'stars'}</span><span class="file">${esc(x.file)}</span></div>`}</div>
         <button class="gbtn play" data-explore="${i}" ${x.broken ? 'disabled' : ''}>${x.broken ? 'Invalid' : 'Explore'}${kb('Enter')}</button></div>`).join('')}</div>`;
   return gameScreen({ title: 'Explore', sub: 'Any system · labels and targets on', body });
 }
@@ -376,7 +378,7 @@ function renderHud() {
   }
   const steps = SPEEDS.map((v, i) => `<i class="${i === o.speed ? 'on' : ''}" style="height:${4 + Math.abs(i - STOP) * 2.5}px"></i>`).join('');
   el.innerHTML = `<div class="hud" data-stop>
-    ${o.puzzle ? navGroup('observe') : `<div class="grp nav"><button class="hb" data-act="menu">${ICON.menu}Menu ${kb('M')}</button><button class="hb tab ${o.labels ? 'on' : ''}" data-act="labels">Labels ${kb('L')}</button></div>`}
+    ${navGroup(o.puzzle ? 'level' : 'explore')}
     <div class="grp"><span class="label">TIME</span><button class="hb icon" data-act="slower" title="Slower [←]">${ICON.left}</button>
       <div class="speed"><span id="speedtxt">${sp === 0 ? '0' : (sp > 0 ? '+' : '−') + Math.abs(sp).toLocaleString()} min/s</span><small><span class="steps-ind">${steps}</span></small></div>
       <button class="hb icon" data-act="faster" title="Faster [→]">${ICON.right}</button>
@@ -664,11 +666,16 @@ function traitBtn(k, n, compact) {
   return `<button class="${compact ? 'trait-row' : 'hb'} trait ${k} ${on ? 'on' : ''}" data-act="${x.act}" data-trait="${k}" role="switch" aria-checked="${on}" ${n ? '' : 'disabled'}>
     ${ICON[x.icon]}<span class="tl">${x.label}${compact ? `<small>${on ? x.on : x.off}</small>` : ''}</span><i class="sw"></i>${compact ? '' : kb(x.key)}</button>`;
 }
-// First bar section, identical in the level HUD and the theory editor so nothing shifts when Tab switches:
-// Maps, then one fixed-width button that names the other view.
+// First bar section, identical in every gameplay bar (explore, level, theory) so nothing shifts:
+// Menu, Settings, then one fixed-width slot that is Labels in explore and names the other view in a level.
 function navGroup(here) {
-  const to = here === 'theory' ? ['observe-p', ICON.eye, 'Observe'] : ['theory', ICON.diagram, 'Theory'];
-  return `<div class="grp nav"><button class="hb" data-act="menu">${ICON.menu}Maps ${kb('M')}</button><button class="hb tab" data-act="${to[0]}">${to[1]}${to[2]} ${kb('Tab')}</button></div>`;
+  const o = obs();
+  const tab = here === 'explore'
+    ? `<button class="hb tab ${o.labels ? 'on' : ''}" data-act="labels">${ICON.tag}Labels ${kb('L')}</button>`
+    : here === 'theory'
+      ? `<button class="hb tab" data-act="observe-p">${ICON.eye}Observe ${kb('Tab')}</button>`
+      : `<button class="hb tab" data-act="theory">${ICON.diagram}Theory ${kb('Tab')}</button>`;
+  return `<div class="grp nav"><button class="hb nav-menu" data-act="menu">${ICON.menu}${here === 'explore' ? 'Menu' : 'Maps'} ${kb('M')}</button><button class="hb nav-set" data-act="settings" title="Settings [F11]">${ICON.gear}${kb('F11')}</button>${tab}</div>`;
 }
 function renderTheory() {
   const t = T(), svg = $('#tsvg'); if (!svg) return;
@@ -824,13 +831,13 @@ const SET_ACT = SETTINGS.length + 1, SET_ROWS = SETTINGS.length + 2;
 const dirty = () => SETTINGS.some(x => S.draft[x.k] !== S.settings[x.k]);
 function vSettings() {
   const st = S.draft, p = presetOf(st), sel = i => S.setSel === i ? 'sel' : '';
-  const row = (x, i) => `<div class="setting ${sel(i + 1)}" data-row="${i + 1}"><div><b>${x.label}</b><small>${x.desc}</small><code>${x.env}</code></div><div class="ctl"><input type="range" data-set="${i}" min="${x.min}" max="${x.max}" step="${x.step}" value="${st[x.k]}" tabindex="-1"><span class="val">${x.f(st[x.k])}</span></div></div>`;
-  const preset = `<div class="setting ${sel(0)}" data-row="0"><div><b>Quality preset</b><small>Sets resolution, samples and bounces at once. Changing any of them makes it Custom.</small><code>graphics · presets</code></div>
+  const row = (x, i) => `<div class="setting ${sel(i + 1)}" data-row="${i + 1}" title="${x.env}"><div><b>${x.label}</b><small>${x.desc}</small></div><div class="ctl"><input type="range" data-set="${i}" min="${x.min}" max="${x.max}" step="${x.step}" value="${st[x.k]}" tabindex="-1"><span class="val">${x.f(st[x.k])}</span></div></div>`;
+  const preset = `<div class="setting ${sel(0)}" data-row="0"><div><b>Quality preset</b><small>Sets resolution, samples and bounces at once. Changing any of them makes it Custom.</small></div>
     <div class="ctl"><div class="seg">${PRESETS.map(([l], i) => `<button data-preset="${i}" class="${p === i ? 'on' : ''}">${l}</button>`).join('')}<span class="seg-custom ${p < 0 ? 'on' : ''}">Custom</span></div></div></div>`;
   const body = Object.entries(SET_SECS).map(([sec, text]) => `<section class="setting-sec"><h3>${sec}</h3><p>${text}</p>${sec === 'Rendering' ? preset : ''}${SETTINGS.map((x, i) => x.sec === sec ? row(x, i) : '').join('')}</section>`).join('');
   const actions = `<div class="set-actions ${sel(SET_ACT)}" data-row="${SET_ACT}"><span class="dirty">${dirty() ? 'Unsaved changes' : ''}</span>
     <button class="gbtn ${S.setAct === 1 ? 'focus' : ''}" data-act="back" data-sa="1">Back${kb('Esc')}</button><button class="gbtn play ${S.setAct === 0 ? 'focus' : ''}" data-act="apply" data-sa="0">Apply${kb('Enter')}</button></div>`;
-  return gameScreen({ title: 'Settings', sub: 'Calibrate the telescope', body: `<div class="gsettings">${body}${actions}</div>` });
+  return gameScreen({ title: 'Settings', sub: 'Calibrate the telescope', body: `<div class="gsettings">${body}</div>`, foot: actions });
 }
 // Updates the page in place so the selection brackets and entrance animations do not replay.
 function refreshSettings() {
@@ -895,7 +902,7 @@ function act(a) {
     title: () => go('title'), 'back-title': () => go('title'), resume: () => go(S.screen === 'maps' ? 'pobserve' : 'observe'), open: openSystem, 'to-maps': () => go('maps'), 'to-systems': () => go('systems'),
     'start-map': () => startMap(), back: () => go(S.back || 'title'), apply: applySettings,
     menu: () => go(S.screen === 'observe' ? 'systems' : 'maps'), labels: () => { o.labels = !o.labels; renderHud(); }, hud: () => { o.hud = !o.hud; render(); },
-    theory: () => go('theory'), 'observe-p': () => go('pobserve'), 'hide-obj': () => { o.objective = false; render(); },
+    settings: () => go('settings'), theory: () => go('theory'), 'observe-p': () => go('pobserve'), 'hide-obj': () => { o.objective = false; render(); },
     slower: () => changeSpeed(-1), faster: () => changeSpeed(1), stop: toggleStop, prevday: () => stepDay(-1), nextday: () => stepDay(1),
     unlock: () => { if (o.lock) { o.lock = null; renderHud(); } else toast('Right-click a body or the sky to lock the view.', { ms: 1800 }); },
     auto: () => { o.auto = !o.auto; if (o.auto) o.ev = 0; renderHud(); }, targets: () => { o.targets = !o.targets; render(); },
@@ -940,6 +947,7 @@ document.addEventListener('keydown', e => {
   } else if (scr === 'observe' || scr === 'pobserve') {
     const o = obs(), puzzle = o.puzzle;
     const F = /^F([1-9])$/.exec(k);
+    if (k === 'F11') { e.preventDefault(); go('settings'); return; }
     if (F) { e.preventDefault(); aim(+F[1] - 1); return; }
     const m = {
       Escape: () => act('menu'), m: () => act('menu'), ArrowLeft: () => changeSpeed(-1), ArrowRight: () => changeSpeed(1), ' ': toggleStop,
@@ -953,6 +961,7 @@ document.addEventListener('keydown', e => {
   } else if (scr === 'theory') {
     const m = { s: 't-star', r: 't-rings', v: 't-viewer', Delete: 't-del', Backspace: 't-del', z: 't-undo', y: 't-redo', x: 't-clear', Enter: 't-check' }[lower];
     if (m) { e.preventDefault(); tAct(m); }
+    else if (k === 'F11') { e.preventDefault(); go('settings'); }
     else if (k === 'Tab') { e.preventDefault(); go('pobserve'); }
     else if (k === 'Escape' || lower === 'm') go('maps');
   } else if (scr === 'settings') {
