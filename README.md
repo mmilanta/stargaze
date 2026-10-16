@@ -452,6 +452,8 @@ sequence is deterministic for a given pixel and sample index.
 | `T` | search for a moon transit (e.g. Phobos/Mars or Io/Jupiter) |
 | `Home` | reset view |
 | `G` | show / hide the target panel in Explore |
+| `B` | cycle the ground in Explore: Atacama, airless craters, snowy alpine, volcanic basalt, dune sea |
+| `J` | open the atmosphere panel in Explore: density (off to 4×) and sky colour |
 | `F10` | main menu; puzzles offer keep / discard first |
 | `,` `.` | exposure compensation down / up by 0.25 EV |
 | `A` | toggle automatic exposure metering (on by default) |

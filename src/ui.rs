@@ -83,7 +83,16 @@ pub struct HudState<'a> {
     pub steady_stars: bool,
     pub minutes_per_second: f64,
     pub targets_open: bool,
+    /// Current ground name, shown on the explore ground switcher.
+    pub ground: &'a str,
+    pub air_open: bool,
 }
+
+const AIR_LABEL: &str = "Air [J]";
+
+/// The widest ground switcher label sizes the button, so cycling grounds
+/// never moves the rest of the bar (names share a monospace face).
+const GROUND_LABEL_WIDEST: &str = "Ground: Atacama [B]";
 
 pub struct Layout {
     pub bar: Rect,
@@ -96,6 +105,8 @@ pub struct Layout {
     pub horizon: Rect,
     pub stars: Rect,
     pub targets: Rect,
+    pub ground: Rect,
+    pub air: Rect,
     pub settings: Rect,
     pub hide: Rect,
     pub draw: Rect,
@@ -169,8 +180,14 @@ pub(crate) struct ToolbarStyle {
 
 impl ToolbarStyle {
     pub fn new(w: f32, h: f32, requested: f32) -> Self {
+        Self::fitting(w, h, requested, 0.0)
+    }
+
+    /// As `new`, reserving `extra` logical pixels (e.g. explore-only controls).
+    fn fitting(w: f32, h: f32, requested: f32, extra: f32) -> Self {
         let keys = w / requested > 1300.0;
-        let minimum = 217.0
+        let minimum = extra
+            + 217.0
             + time_group_width(keys)
             + lock_group_width(keys)
             + exposure_group_width(keys)
@@ -270,7 +287,18 @@ fn exposure_group_width(keys: bool) -> f32 {
 }
 
 fn layout_mode(w: f32, h: f32, scale: f32, puzzle: bool) -> Layout {
-    let style = ToolbarStyle::new(w, h, scale);
+    let ground_width = |keys| toolbar_width(GROUND_LABEL_WIDEST, keys);
+    let style = if puzzle {
+        ToolbarStyle::new(w, h, scale)
+    } else {
+        let keys = w / scale > 1300.0;
+        ToolbarStyle::fitting(
+            w,
+            h,
+            scale,
+            ground_width(keys) + 8.0 + toolbar_width(AIR_LABEL, keys) + 8.0,
+        )
+    };
     let s = style.scale;
     let bar = style.bar(w, h);
     let [home, toggle] = style.nav(bar);
@@ -319,10 +347,20 @@ fn layout_mode(w: f32, h: f32, scale: f32, puzzle: bool) -> Layout {
         settings_start - (8.0 + toolbar_width("Targets [G]", style.keys)) * s,
         toolbar_width("Targets [G]", style.keys),
     );
+    let air = style.control(
+        bar,
+        targets.x - (8.0 + toolbar_width(AIR_LABEL, style.keys)) * s,
+        toolbar_width(AIR_LABEL, style.keys),
+    );
+    let ground = style.control(
+        bar,
+        air.x - (8.0 + ground_width(style.keys)) * s,
+        ground_width(style.keys),
+    );
     let auto_right = if puzzle {
         settings_start - 8.0 * s
     } else {
-        targets.x - 4.0 * s
+        ground.x - 4.0 * s
     };
     let auto = style.control(bar, auto_right - auto_width() * s, auto_width());
     let exposure_right = auto.x - 4.0 * s;
@@ -347,6 +385,8 @@ fn layout_mode(w: f32, h: f32, scale: f32, puzzle: bool) -> Layout {
         exposure,
         auto,
         targets,
+        ground,
+        air,
         settings,
         hide,
         scale: s,
@@ -1852,6 +1892,8 @@ fn build_bar(v: &mut Vec<UiVertex>, l: &Layout, w: f32, h: f32, state: HudState<
         vp,
     );
     if !l.puzzle {
+        b(v, l.ground, &format!("Ground: {} [B]", state.ground), false);
+        b(v, l.air, AIR_LABEL, state.air_open);
         b(v, l.targets, "Targets [G]", state.targets_open);
     }
     b(v, l.settings, "Settings [F11]", false);
@@ -1957,6 +1999,8 @@ mod tests {
                         h,
                         HudState {
                             targets_open: false,
+                            ground: "Atacama",
+                            air_open: false,
                             labels: LabelOptions::default(),
                             lock_label: Some(&"Long name ".repeat(20)),
                             sim_time: time,
@@ -2012,6 +2056,8 @@ mod tests {
                 l.stars,
                 l.exposure,
                 l.auto,
+                l.ground,
+                l.air,
                 l.targets,
                 l.settings,
                 l.hide,

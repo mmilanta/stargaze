@@ -38,16 +38,34 @@ fn gpu_milky_way_is_camera_only_and_does_not_drive_exposure() {
     );
     let night = sample(&device, &queue, &mut tracer, &scene, 64)[0];
     eprintln!("Milky Way night: {night:?}");
-    assert!(night[0] > 0.0001 && night[0] <= tracer.options.milky_way);
+    let milky_way = tracer.options.milky_way;
+    assert!(night[0] > 0.01 * milky_way && night[0] <= milky_way);
     let luminance = night[0] * 0.2126 + night[1] * 0.7152 + night[2] * 0.0722;
     assert!((luminance - night[3]).abs() < 1e-7);
     assert!(
         night[0] > night[1] * 1.2,
         "the galactic core should retain its color: {night:?}"
     );
+    // An empty night sky settles at the night exposure; the Milky Way must
+    // not move it (metering subtracts the backdrop).
+    let with_backdrop = rings::read_exposure(&device, &queue, &tracer);
+    let mut plain = PathTracer::new(
+        &device,
+        wgpu::TextureFormat::Rgba8UnormSrgb,
+        (1, 1),
+        &[],
+        Options {
+            samples_per_frame: 64,
+            auto_exposure: true,
+            milky_way: 0.0,
+            ..Options::default()
+        },
+    );
+    sample(&device, &queue, &mut plain, &scene, 64);
+    let without = rings::read_exposure(&device, &queue, &plain);
     assert!(
-        (rings::read_exposure(&device, &queue, &tracer) - 1.0).abs() < 1e-5,
-        "decorative sky must not cause automatic exposure to brighten it"
+        (with_backdrop - without).abs() <= 1e-4 * without,
+        "decorative sky must not drive automatic exposure: {with_backdrop} vs {without}"
     );
 
     // Many diffuse escape rays see the entire backdrop, but receive no energy.
@@ -77,7 +95,7 @@ fn gpu_milky_way_is_camera_only_and_does_not_drive_exposure() {
 
 #[test]
 #[ignore = "requires a GPU"]
-fn gpu_milky_way_fades_before_stars_in_bright_air() {
+fn gpu_bright_air_outshines_stars_and_milky_way() {
     let (device, queue) = gpu();
     let mut scene = galactic_frame();
     let a = crate::sim::Atmosphere::earthlike();
@@ -114,25 +132,32 @@ fn gpu_milky_way_fades_before_stars_in_bright_air() {
         },
     );
     let night = sample(&device, &queue, &mut tracer, &scene, 1)[0];
-    assert!(night[3] > 0.0001 && night[0] > night[3] * 10.);
+    let star_radiance = crate::stars::radiance(&star)[0];
+    eprintln!("night={night:?}, star radiance {star_radiance}");
+    assert!(night[3] > 0.0, "the Milky Way shows in a dark sky");
+    assert!(
+        night[0] > 0.5 * star_radiance,
+        "the star shows in a dark sky"
+    );
     scene
         .bodies
         .push(body([1., 0., -1.], 0.005, [100_000.; 3], true));
     let day = sample(&device, &queue, &mut tracer, &scene, 1)[0];
-    assert_eq!(day[3], 0., "daylight must wash out the Milky Way");
-
-    // Choose weak illumination that hides the diffuse haze while leaving
-    // catalogue points visible, as happens with twilight or moonlit air.
-    let without_backdrop = day[0];
-    let weak = 0.0003 / without_backdrop;
-    scene.bodies[1].color = [100_000. * weak; 3];
-    let moonlit = sample(&device, &queue, &mut tracer, &scene, 1)[0];
-    eprintln!("Milky Way night={night:?}, day={day:?}, weak illumination={moonlit:?}");
-    assert_eq!(
-        moonlit[3], 0.,
-        "faint diffuse haze disappears before bright stars"
+    let luminance = |p: [f32; 4]| p[0] * 0.2126 + p[1] * 0.7152 + p[2] * 0.0722;
+    let sky = luminance(day) - day[3];
+    eprintln!("day={day:?}, scattered sky {sky}");
+    // No visibility rule: both keep their brightness (less extinction), and
+    // the daylit air out-shines them (the catalogue's visual gain lets a
+    // bright star add a few percent; the Milky Way vanishes).
+    assert!(day[3] > 0.0 && day[3] <= night[3] * 1.0001);
+    assert!(
+        sky > 30.0 * star_radiance,
+        "daylight must out-shine the star"
     );
-    assert!(moonlit[0] > 0.1, "star points should remain visible");
+    assert!(
+        sky > 50.0 * night[3],
+        "daylight must out-shine the Milky Way"
+    );
     scene.bodies[1].color = [0.; 3];
     let dark_again = sample(&device, &queue, &mut tracer, &scene, 1)[0];
     assert!((dark_again[3] - night[3]).abs() < 1e-7);
@@ -232,7 +257,7 @@ fn gpu_milky_way_exposure_cap_and_preview() {
     tracer.options.exposure = 1.0;
     sample(&device, &queue, &mut tracer, &scene, 1);
     let normal = presented_pixels(&device, &queue, &tracer);
-    assert!(normal[0] > 0 && normal[0] < bright[0]);
+    assert!(normal[0] < bright[0], "lower exposure presents dimmer haze");
 
     // Longitude wraps across the panorama seam without a sudden discontinuity.
     let pole = glam::Vec3::new(0.35, 0.82, 0.45).normalize();

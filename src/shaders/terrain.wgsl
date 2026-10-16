@@ -1,20 +1,30 @@
 // Cached heightfield; no noise generation or erosion in the rendering loop.
 // Layout matches terrain.rs: heights, derivatives, min/max quadtree,
 // then host-local cached bounds and interleaved vertices/normals.
-const TERRAIN_CELLS: u32 = 512u;
-const TERRAIN_WIDTH: u32 = 513u;
-const TERRAIN_VERTICES: u32 = 263169u;
-const TERRAIN_BOUNDS: u32 = 789507u;
-const TERRAIN_NODES: u32 = 87381u;
-const TERRAIN_CACHE: u32 = TERRAIN_BOUNDS + 2u * TERRAIN_NODES;
-const TERRAIN_VERTEX_CACHE: u32 = TERRAIN_CACHE + 6u * TERRAIN_NODES;
+// The grid size varies per ground: PathTracer packs log2(cells per side)
+// above the theme byte in ground_counts.z (512 cells if unset).
+fn terrain_cells() -> u32 {
+    let log2 = settings.g.ground_counts.z >> 8u;
+    return select(512u, 1u << log2, log2 != 0u);
+}
+fn terrain_width() -> u32 { return terrain_cells() + 1u; }
+fn terrain_vertices() -> u32 { return terrain_width() * terrain_width(); }
+fn terrain_nodes() -> u32 {
+    let leaves = terrain_cells() / 2u;
+    return (4u * leaves * leaves - 1u) / 3u;
+}
+fn terrain_bounds() -> u32 { return 3u * terrain_vertices(); }
+fn terrain_cache() -> u32 { return terrain_bounds() + 2u * terrain_nodes(); }
+fn terrain_vertex_cache() -> u32 { return terrain_cache() + 6u * terrain_nodes(); }
+/// Ground theme id (0 forest, 1 desert, 2 craters, 3 alpine, 4 basalt, 5 dunes).
+fn ground_theme() -> u32 { return settings.g.ground_counts.z & 255u; }
 const TERRAIN_ID: u32 = 0x80100000u;
 
 fn terrain_scale() -> f32 {
     return clamp(settings.g.ground_up.w / 200000.0, 0.0001, 1.0);
 }
 fn terrain_coordinate(i: u32) -> f32 {
-    let u = 2.0 * f32(i) / f32(TERRAIN_CELLS) - 1.0;
+    let u = 2.0 * f32(i) / f32(terrain_cells()) - 1.0;
     return u * abs(u) * 16000.0 * terrain_scale();
 }
 fn terrain_curvature(p: vec2<f32>) -> f32 {
@@ -24,17 +34,17 @@ fn terrain_curvature(p: vec2<f32>) -> f32 {
 }
 fn terrain_vertex_uncached(x: u32, z: u32) -> vec3<f32> {
     let p = vec2<f32>(terrain_coordinate(x), terrain_coordinate(z));
-    return vec3<f32>(p.x, ground_data.terrain[z * TERRAIN_WIDTH + x] * terrain_scale()
+    return vec3<f32>(p.x, ground_data.terrain[z * terrain_width() + x] * terrain_scale()
         + terrain_curvature(p), p.y);
 }
 fn terrain_normal_uncached(x: u32, z: u32) -> vec3<f32> {
-    let index = z * TERRAIN_WIDTH + x;
+    let index = z * terrain_width() + x;
     let p = vec2<f32>(terrain_coordinate(x), terrain_coordinate(z));
     let r = settings.g.ground_up.w;
     let curve_gradient = p / sqrt(max(r * r - dot(p, p), 1.0));
     return normalize(vec3<f32>(
-        -ground_data.terrain[TERRAIN_VERTICES + index] + curve_gradient.x, 1.0,
-        -ground_data.terrain[2u * TERRAIN_VERTICES + index] + curve_gradient.y));
+        -ground_data.terrain[terrain_vertices() + index] + curve_gradient.x, 1.0,
+        -ground_data.terrain[2u * terrain_vertices() + index] + curve_gradient.y));
 }
 
 // Returns barycentric weights (b,c) and distance. All leaves share vertices,
@@ -64,25 +74,25 @@ fn terrain_bounds_uncached(node: vec4<u32>) -> TerrainBounds {
     let hi = vec2<f32>(terrain_coordinate(node.y + node.w), terrain_coordinate(node.z + node.w));
     let near = clamp(vec2<f32>(0.0), lo, hi);
     let far = max(abs(lo), abs(hi));
-    let lower = ground_data.terrain[TERRAIN_BOUNDS + node.x * 2u] * terrain_scale()
+    let lower = ground_data.terrain[terrain_bounds() + node.x * 2u] * terrain_scale()
         + terrain_curvature(far) - 0.02;
-    let upper = ground_data.terrain[TERRAIN_BOUNDS + node.x * 2u + 1u] * terrain_scale()
+    let upper = ground_data.terrain[terrain_bounds() + node.x * 2u + 1u] * terrain_scale()
         + terrain_curvature(near) + 0.02;
     return TerrainBounds(vec3<f32>(lo.x, lower, lo.y), vec3<f32>(hi.x, upper, hi.y));
 }
 
 fn terrain_vertex(x: u32, z: u32) -> vec3<f32> {
-    let i = TERRAIN_VERTEX_CACHE + (z * TERRAIN_WIDTH + x) * 6u;
+    let i = terrain_vertex_cache() + (z * terrain_width() + x) * 6u;
     return vec3<f32>(ground_data.terrain[i], ground_data.terrain[i + 1u], ground_data.terrain[i + 2u]);
 }
 fn terrain_normal(x: u32, z: u32) -> vec3<f32> {
-    let i = TERRAIN_VERTEX_CACHE + (z * TERRAIN_WIDTH + x) * 6u + 3u;
+    let i = terrain_vertex_cache() + (z * terrain_width() + x) * 6u + 3u;
     return vec3<f32>(ground_data.terrain[i], ground_data.terrain[i + 1u], ground_data.terrain[i + 2u]);
 }
 
 // Node is (heap index, first x, first z, number of cells along one edge).
 fn terrain_interval(o: vec3<f32>, inverse: vec3<f32>, node: vec4<u32>) -> vec2<f32> {
-    let i = TERRAIN_CACHE + node.x * 6u;
+    let i = terrain_cache() + node.x * 6u;
     let low = vec3<f32>(ground_data.terrain[i], ground_data.terrain[i + 1u], ground_data.terrain[i + 2u]);
     let high = vec3<f32>(ground_data.terrain[i + 3u], ground_data.terrain[i + 4u], ground_data.terrain[i + 5u]);
     let parallel = abs(inverse) >= vec3<f32>(1.0e29);
@@ -95,11 +105,23 @@ fn terrain_interval(o: vec3<f32>, inverse: vec3<f32>, node: vec4<u32>) -> vec2<f
     return vec2<f32>(max(entry.x, max(entry.y, entry.z)), min(exit.x, min(exit.y, exit.z)));
 }
 
+// De-interleave one axis of a Morton code (every other bit), up to 16 bits
+// per axis: grids finer than 512 cells need more than 8.
 fn terrain_compact_bits(value: u32) -> u32 {
-    var x = value & 0x5555u;
-    x = (x | (x >> 1u)) & 0x3333u;
-    x = (x | (x >> 2u)) & 0x0f0fu;
-    return (x | (x >> 4u)) & 0x00ffu;
+    var x = value & 0x55555555u;
+    x = (x | (x >> 1u)) & 0x33333333u;
+    x = (x | (x >> 2u)) & 0x0f0f0f0fu;
+    x = (x | (x >> 4u)) & 0x00ff00ffu;
+    return (x | (x >> 8u)) & 0x0000ffffu;
+}
+
+// Smooth vertex normals melt coarse, distant rock into rounded blobs. On the
+// alpine ground, steep triangles shade with their own flat face instead.
+fn terrain_shading(smooth_normal: vec3<f32>, a: vec3<f32>, b: vec3<f32>, c: vec3<f32>) -> vec3<f32> {
+    if (ground_theme() != 3u) { return smooth_normal; }
+    var face = normalize(cross(b - a, c - a));
+    if (face.y < 0.0) { face = -face; }
+    return normalize(mix(smooth_normal, face, smoothstep(0.25, 0.5, 1.0 - face.y)));
 }
 
 // Occlusion queries stop at any triangle before the light and need no normals.
@@ -108,7 +130,7 @@ fn terrain_query(o: vec3<f32>, d: vec3<f32>, initial_limit: f32, occlusion: bool
     var limit = initial_limit;
     let inverse = select(vec3<f32>(-1.0), vec3<f32>(1.0), d >= vec3<f32>(0.0))
         / max(abs(d), vec3<f32>(1.0e-30));
-    let root = terrain_interval(o, inverse, vec4<u32>(0u, 0u, 0u, TERRAIN_CELLS));
+    let root = terrain_interval(o, inverse, vec4<u32>(0u, 0u, 0u, terrain_cells()));
     if (root.x > root.y || root.y <= 0.001 || root.x >= limit) { return result; }
     // The heap index determines level, tile coordinates and size. Keeping only
     // index + entry distance cuts the traversal stack from 640 to 256 bytes/ray.
@@ -121,7 +143,7 @@ fn terrain_query(o: vec3<f32>, d: vec3<f32>, initial_limit: f32, occlusion: bool
         let pending = stack[count];
         if (bitcast<f32>(pending.y) >= limit) { continue; }
         let level = firstLeadingBit(3u * pending.x + 1u) / 2u;
-        let size = TERRAIN_CELLS >> level;
+        let size = terrain_cells() >> level;
         let morton = pending.x - ((1u << (2u * level)) - 1u) / 3u;
         let node = vec4<u32>(pending.x, terrain_compact_bits(morton) * size,
             terrain_compact_bits(morton >> 1u) * size, size);
@@ -136,15 +158,15 @@ fn terrain_query(o: vec3<f32>, d: vec3<f32>, initial_limit: f32, occlusion: bool
                     let second = terrain_triangle(o, d, e, b, c);
                     if (first.z < limit) {
                         if (occlusion) { return vec4<f32>(0.0, 0.0, 0.0, first.z); }
-                        let n = normalize(terrain_normal(x, z) * (1.0 - first.x - first.y)
-                            + terrain_normal(x, z + 1u) * first.x + terrain_normal(x + 1u, z) * first.y);
+                        let n = terrain_shading(normalize(terrain_normal(x, z) * (1.0 - first.x - first.y)
+                            + terrain_normal(x, z + 1u) * first.x + terrain_normal(x + 1u, z) * first.y), a, c, b);
                         result = vec4<f32>(n, first.z);
                         limit = first.z;
                     }
                     if (second.z < limit) {
                         if (occlusion) { return vec4<f32>(0.0, 0.0, 0.0, second.z); }
-                        let n = normalize(terrain_normal(x + 1u, z + 1u) * (1.0 - second.x - second.y)
-                            + terrain_normal(x + 1u, z) * second.x + terrain_normal(x, z + 1u) * second.y);
+                        let n = terrain_shading(normalize(terrain_normal(x + 1u, z + 1u) * (1.0 - second.x - second.y)
+                            + terrain_normal(x + 1u, z) * second.x + terrain_normal(x, z + 1u) * second.y), e, b, c);
                         result = vec4<f32>(n, second.z);
                         limit = second.z;
                     }
@@ -178,7 +200,7 @@ fn terrain_query(o: vec3<f32>, d: vec3<f32>, initial_limit: f32, occlusion: bool
             }
             for (var i = 0u; i < 4u; i += 1u) {
                 if (distances[i] < limit) {
-                    // Eight internal levels need at most 3*8+1 = 25 slots.
+                    // Nine internal levels (1024 cells) need at most 3*9+1 = 28 slots.
                     stack[count] = vec2<u32>(children[i], bitcast<u32>(distances[i])); count += 1u;
                 }
             }
@@ -196,14 +218,14 @@ fn terrain_hit(o: vec3<f32>, d: vec3<f32>, limit: f32) -> vec4<f32> {
 @compute @workgroup_size(64)
 fn cache_terrain_geometry(@builtin(global_invocation_id) id: vec3<u32>) {
     let index = id.x;
-    if (index < TERRAIN_NODES) {
+    if (index < terrain_nodes()) {
         let level = firstLeadingBit(3u * index + 1u) / 2u;
-        let size = TERRAIN_CELLS >> level;
+        let size = terrain_cells() >> level;
         let morton = index - ((1u << (2u * level)) - 1u) / 3u;
         let node = vec4<u32>(index, terrain_compact_bits(morton) * size,
             terrain_compact_bits(morton >> 1u) * size, size);
         let bounds = terrain_bounds_uncached(node);
-        let i = TERRAIN_CACHE + index * 6u;
+        let i = terrain_cache() + index * 6u;
         ground_data.terrain[i] = bounds.low.x;
         ground_data.terrain[i + 1u] = bounds.low.y;
         ground_data.terrain[i + 2u] = bounds.low.z;
@@ -211,12 +233,12 @@ fn cache_terrain_geometry(@builtin(global_invocation_id) id: vec3<u32>) {
         ground_data.terrain[i + 4u] = bounds.high.y;
         ground_data.terrain[i + 5u] = bounds.high.z;
     }
-    if (index < TERRAIN_VERTICES) {
-        let x = index % TERRAIN_WIDTH;
-        let z = index / TERRAIN_WIDTH;
+    if (index < terrain_vertices()) {
+        let x = index % terrain_width();
+        let z = index / terrain_width();
         let vertex = terrain_vertex_uncached(x, z);
         let normal = terrain_normal_uncached(x, z);
-        let i = TERRAIN_VERTEX_CACHE + index * 6u;
+        let i = terrain_vertex_cache() + index * 6u;
         ground_data.terrain[i] = vertex.x;
         ground_data.terrain[i + 1u] = vertex.y;
         ground_data.terrain[i + 2u] = vertex.z;

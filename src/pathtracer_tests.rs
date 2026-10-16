@@ -643,7 +643,13 @@ fn gpu_scene_smoke() {
         let frame = state.build_frame(320, 180);
         let pixels = sample(&device, &queue, &mut tracer, &frame, 16);
         assert!(pixels.iter().flatten().all(|c| c.is_finite() && *c >= 0.0));
-        let lit = pixels.iter().filter(|p| p[0] + p[1] + p[2] > 0.01).count();
+        // Catalogue stars are physically faint now, so a dim but correct view
+        // (Saturn's distant sunlight) can stay below 0.01 everywhere; only a
+        // truly black frame should fail.
+        let lit = pixels
+            .iter()
+            .filter(|p| p[0] + p[1] + p[2] > 1.0e-4)
+            .count();
         // The night-horizon scene has legitimately black ground. Its old
         // bright-pixel count included catalogue fireflies; only the visible
         // sky must contain light. Geometry is checked by gpu_surface_observer.
@@ -831,17 +837,20 @@ fn gpu_atmosphere() {
         // of widening the old 24-cell test's tolerance to continuous extinction.
         let x = (a.thickness - 0.002 / crate::sim::AU_KM) / (8.0 * a.scale_height);
         let midpoint_column = column * x / (2.0 * (x * 0.5).sinh());
-        let expected = (-(a.rayleigh[channel] + a.mie) * midpoint_column).exp() as f32;
+        let expected = (-(a.rayleigh[channel] + a.mie) * midpoint_column).exp() as f32
+            * crate::stars::radiance(&background)[channel];
         assert!(
-            (actual - expected).abs() < 0.001,
+            (actual - expected).abs() < 0.001 * expected,
             "extinction: {actual} vs {expected}"
         );
     }
     scene.globals.atmo_params[3] = 0.0;
-    assert_eq!(
-        sample(&device, &queue, &mut tracer, &scene, 1)[0],
-        [1.0, 1.0, 1.0, 0.0]
-    );
+    let unattenuated = sample(&device, &queue, &mut tracer, &scene, 1)[0];
+    let star = crate::stars::radiance(&background);
+    for channel in 0..3 {
+        assert!((unattenuated[channel] - star[channel]).abs() <= 1e-5 * star[channel]);
+    }
+    assert_eq!(unattenuated[3], 0.0);
     scene.globals.atmo_params[3] = 1.0;
 
     // No catalogue: any light in this zenith ray must come from scattering.
@@ -897,7 +906,15 @@ fn gpu_atmosphere() {
         options,
     );
     let night = sample(&device, &queue, &mut with_stars, &scene, 4)[0];
-    assert!(night[0] > 0.1, "night stars must remain visible: {night:?}");
+    // Physical catalogue: no visibility rule, only extinction and contrast.
+    let star = crate::stars::radiance(&CatalogueStar {
+        bright: 1.62,
+        ..background
+    });
+    assert!(
+        night[0] > 0.3 * star[0],
+        "night stars must remain visible: {night:?}"
+    );
     // Similar irradiance to Lumen at Median: luminosity 8 at about 6 AU.
     scene.bodies[1] = body([1.0, 0.0, -1.0], 0.005, [44_444.0; 3], true);
     let sky = sample(&device, &queue, &mut tracer, &scene, 4)[0];
@@ -905,8 +922,8 @@ fn gpu_atmosphere() {
     eprintln!("dense atmosphere: night {night:?}, day sky {sky:?}, day stars {day_stars:?}");
     for c in 0..3 {
         assert!(
-            (day_stars[c] - sky[c]).abs() < 0.001,
-            "daytime catalogue should disappear: {day_stars:?} vs {sky:?}"
+            (day_stars[c] - sky[c]).abs() < 0.03 * sky[c],
+            "daytime air should out-shine the catalogue: {day_stars:?} vs {sky:?}"
         );
     }
     scene
@@ -915,7 +932,7 @@ fn gpu_atmosphere() {
     let eclipse = sample(&device, &queue, &mut with_stars, &scene, 4)[0];
     for c in 0..3 {
         assert!(
-            (eclipse[c] - night[c]).abs() < 0.001,
+            (eclipse[c] - night[c]).abs() < 0.01 * night[c] + 1e-9,
             "eclipse should restore star visibility: {eclipse:?} vs {night:?}"
         );
     }
@@ -1098,16 +1115,29 @@ fn gpu_dense_level_daylight() {
         let sky = sample(&device, &queue, &mut sky_tracer, &frame, 4)[0];
         let stars = sample(&device, &queue, &mut star_tracer, &frame, 4)[0];
         let contrast = (stars[0] - sky[0]).abs();
+        // No visibility rule: the star always adds its (extinguished)
+        // physical radiance. Whether it shows is its ratio to the sky.
+        let ratio = contrast / sky[0].max(1e-30);
         eprintln!(
-            "Median t={time:.2} alt={altitude} az={azimuth}: sky={sky:?}, star contrast={contrast}"
+            "Median t={time:.2} alt={altitude} az={azimuth}: sky={sky:?}, star contrast={contrast}, ratio {ratio}"
         );
+        assert!(
+            contrast > 0.3 * crate::stars::radiance(&star)[0],
+            "the star is never removed by a rule"
+        );
+        // The catalogue carries a visual gain, so even this bright star adds
+        // at most a few percent to daylight (faintly visible in the darker
+        // part of the daytime sky), but stands out on the faint side.
         if time == noon {
             assert!(
-                contrast < 0.001,
-                "daytime stars should disappear across the sky"
+                ratio < 0.06,
+                "daylight should out-shine stars across the sky"
             );
         } else {
-            assert!(contrast > 0.1, "stars should return on the faint-sun side");
+            assert!(
+                ratio > 0.06,
+                "stars should stand out more on the faint-sun side"
+            );
         }
     }
 }

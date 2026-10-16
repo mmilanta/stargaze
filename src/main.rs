@@ -170,14 +170,52 @@ struct State {
     view_lock: Option<ViewLock>,
     /// Cursor position where the current left-button press began (sky only).
     press: Option<(f64, f64)>,
+    /// Explore-mode tuning of the host atmosphere.
+    air: AirTuning,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum AirSlider {
+    Density,
+    Colour,
+}
+
+/// Explore-mode atmosphere controls: density multiplier and, if set, the
+/// hue of the scattered sky colour (None keeps the scene's own colour).
+#[derive(Clone, Copy, Debug, PartialEq)]
+struct AirTuning {
+    density: f64,
+    hue: Option<f32>,
+}
+
+impl Default for AirTuning {
+    fn default() -> Self {
+        Self {
+            density: 1.0,
+            hue: None,
+        }
+    }
+}
+
+/// Terrain height under the observer for the scene's ground (metres). The
+/// eye stands this far above its configured height, e.g. on a dune crest.
+fn lookout_height(scene: &Scene) -> f64 {
+    let radius = scene.body(scene.host).radius * sim::AU_KM * 1000.0;
+    terrain::lookout_height(scene.ground, radius)
 }
 
 impl State {
+    /// Change the ground at the current site, keeping the eye on the surface.
+    fn set_ground(&mut self, theme: ground::Theme) {
+        self.scene.ground = theme;
+        self.observer.height_m = self.scene.observer_height_m + lookout_height(&self.scene);
+    }
+
     fn with_scene(scene: Scene) -> Self {
         let mut observer = Observer::new(scene.host);
         observer.lat = scene.observer_lat_deg.to_radians();
         observer.lon = scene.observer_lon_deg.to_radians();
-        observer.height_m = scene.observer_height_m;
+        observer.height_m = scene.observer_height_m + lookout_height(&scene);
         let mut state = Self {
             scene,
             observer,
@@ -190,6 +228,7 @@ impl State {
             last_cursor: None,
             view_lock: None,
             press: None,
+            air: AirTuning::default(),
         };
         if let Some(t) = state.scene.initial_time_days {
             state.sim_time = t;
@@ -777,7 +816,24 @@ impl State {
         // high/low split.
         let host = self.scene.body(self.scene.host);
         let host_view = vf.world_to_view(positions[self.scene.host] - vf.position);
-        let (atmo_center, atmo_rayleigh, atmo_params) = match self.scene.atmosphere {
+        let ground_enabled = std::env::var("STARGAZE_GROUND")
+            .map(|v| {
+                !matches!(
+                    v.trim().to_ascii_lowercase().as_str(),
+                    "0" | "off" | "false"
+                )
+            })
+            .unwrap_or(true);
+        // An airless ground (the crater field) removes the host's air; the
+        // explore controls scale its density and turn its colour. Air tuned
+        // to nothing is skipped entirely, as on an airless body.
+        let atmosphere = self
+            .scene
+            .atmosphere
+            .filter(|_| !(ground_enabled && self.scene.ground.airless()))
+            .filter(|_| self.air.density > 0.005)
+            .map(|a| a.tuned(self.air.density, self.air.hue));
+        let (atmo_center, atmo_rayleigh, atmo_params) = match atmosphere {
             Some(a) => (
                 [
                     host_view.x as f32,
@@ -801,14 +857,6 @@ impl State {
             None => ([0.0; 4], [0.0; 4], [0.0; 4]),
         };
 
-        let ground_enabled = std::env::var("STARGAZE_GROUND")
-            .map(|v| {
-                !matches!(
-                    v.trim().to_ascii_lowercase().as_str(),
-                    "0" | "off" | "false"
-                )
-            })
-            .unwrap_or(true);
         let ground = if ground_enabled {
             ground::landscape_for_theme(
                 host.radius * sim::AU_KM * 1000.0,
@@ -953,6 +1001,9 @@ struct App {
     discard: Option<std::path::PathBuf>,
     controls_back: menu::Page,
     targets_open: bool,
+    /// Explore-mode atmosphere panel, and the slider being dragged in it.
+    air_open: bool,
+    air_drag: Option<AirSlider>,
     toast: Option<(String, Instant)>,
 }
 
@@ -1056,6 +1107,8 @@ impl App {
                     h as f32,
                     ui::HudState {
                         targets_open: self.targets_open,
+                        ground: self.state.scene.ground.name(),
+                        air_open: self.air_open,
                         labels: ui::LabelOptions {
                             show: self.show_labels && self.game.is_none(),
                             locked: self.state.locked_body(),
@@ -1320,6 +1373,21 @@ impl App {
         true
     }
 
+    /// Explore mode offers only the explore grounds: the forest clearing
+    /// (still used by levels and benchmarks) opens as Atacama.
+    fn explore_ground(&mut self) {
+        if self.game.is_none() && !ground::Theme::EXPLORE.contains(&self.state.scene.ground) {
+            self.state.set_ground(ground::Theme::Desert);
+        }
+    }
+
+    fn cycle_ground(&mut self) {
+        if self.game.is_none() {
+            let next = self.state.scene.ground.next_explore();
+            self.state.set_ground(next);
+        }
+    }
+
     fn select_map(&mut self, path: &std::path::Path) {
         match config::load(path) {
             Ok(scene) => {
@@ -1335,6 +1403,7 @@ impl App {
                 } else {
                     None
                 };
+                self.explore_ground();
                 if puzzle
                     && let Some(saved) = self
                         .progress
@@ -1385,6 +1454,8 @@ impl App {
                 self.show_hud = true;
                 self.sync_exposure();
                 self.targets_open = false;
+                self.air_open = false;
+                self.air_drag = None;
                 self.toast = Some((
                     if puzzle {
                         "Field study ready. Observe, then draw your theory.".into()
@@ -1561,6 +1632,11 @@ impl App {
             }
         } else if self.game.is_none() && layout.targets.contains(x, y) {
             self.targets_open = !self.targets_open;
+        } else if self.game.is_none() && layout.ground.contains(x, y) {
+            self.cycle_ground();
+        } else if self.game.is_none() && layout.air.contains(x, y) {
+            self.air_open = !self.air_open;
+            self.air_drag = None;
         } else if layout.slower.contains(x, y) {
             self.state.change_speed(false);
         } else if layout.faster.contains(x, y) {
@@ -1831,7 +1907,7 @@ impl ApplicationHandler for App {
                             self.title_action(i, Some(event_loop));
                             return;
                         }
-                        if self.targets_click() {
+                        if self.air_click() || self.targets_click() {
                             self.state.end_sky_press();
                             return;
                         }
@@ -1865,6 +1941,7 @@ impl ApplicationHandler for App {
                         }
                         self.graphics.dragging = None;
                         self.exposure_dragging = false;
+                        self.air_drag = None;
                         self.state.end_sky_press();
                     }
                 }
@@ -1901,7 +1978,9 @@ impl ApplicationHandler for App {
                     );
                     return;
                 }
-                if self.exposure_dragging {
+                if self.air_drag.is_some() {
+                    self.air_drag_to(position.x);
+                } else if self.exposure_dragging {
                     if let Some(layout) = self.ui_layout() {
                         self.adjust_exposure(&layout, position.x);
                     }
@@ -1922,6 +2001,7 @@ impl ApplicationHandler for App {
                 }
                 // A release outside the window may never reach us.
                 self.exposure_dragging = false;
+                self.air_drag = None;
                 self.state.end_sky_press();
             }
             WindowEvent::MouseWheel { delta, .. } => {
@@ -2122,6 +2202,13 @@ impl ApplicationHandler for App {
                     PhysicalKey::Code(KeyCode::KeyG) if self.game.is_none() => {
                         self.targets_open = !self.targets_open
                     }
+                    PhysicalKey::Code(KeyCode::KeyB) if self.game.is_none() && !event.repeat => {
+                        self.cycle_ground()
+                    }
+                    PhysicalKey::Code(KeyCode::KeyJ) if self.game.is_none() && !event.repeat => {
+                        self.air_open = !self.air_open;
+                        self.air_drag = None;
+                    }
                     PhysicalKey::Code(KeyCode::KeyE) => self.find_event(false),
                     PhysicalKey::Code(KeyCode::KeyT) => self.find_event(true),
                     PhysicalKey::Code(KeyCode::KeyH) => {
@@ -2263,6 +2350,8 @@ fn main() -> Result<()> {
         discard: None,
         controls_back: menu::Page::Title,
         targets_open: false,
+        air_open: false,
+        air_drag: None,
         toast: None,
     };
 
@@ -2319,6 +2408,7 @@ fn main() -> Result<()> {
         }
     }
 
+    app.explore_ground();
     event_loop.run_app(&mut app)?;
     Ok(())
 }
@@ -2357,6 +2447,8 @@ mod app_tests {
             discard: None,
             controls_back: menu::Page::Title,
             targets_open: false,
+            air_open: false,
+            air_drag: None,
             toast: None,
         }
     }

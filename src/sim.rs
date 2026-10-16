@@ -170,6 +170,30 @@ pub struct Atmosphere {
 }
 
 impl Atmosphere {
+    /// Hue (degrees) of the light this air scatters most: the hue of its
+    /// Rayleigh coefficients, which sets the colour of a clear sky.
+    pub fn hue(&self) -> f32 {
+        hsv(self.rayleigh.map(|b| b as f32))[0]
+    }
+
+    /// The air scaled by `density` (Rayleigh and Mie), with its scattering
+    /// colour turned to `hue` if given. Saturation and luminance are kept, so
+    /// the scene's own hue reproduces it exactly; direct sunlight and sunsets
+    /// take the complementary colour automatically.
+    pub fn tuned(mut self, density: f64, hue: Option<f32>) -> Self {
+        if let Some(hue) = hue {
+            let original = self.rayleigh.map(|b| b as f32);
+            let [_, saturation, value] = hsv(original);
+            let turned = rgb([hue, saturation, value]);
+            let luminance = |c: [f32; 3]| 0.2126 * c[0] + 0.7152 * c[1] + 0.0722 * c[2];
+            let gain = luminance(original) / luminance(turned).max(1e-30);
+            self.rayleigh = turned.map(|c| f64::from(c * gain));
+        }
+        self.rayleigh = self.rayleigh.map(|b| b * density);
+        self.mie *= density;
+        self
+    }
+
     /// A denser fictional atmosphere for a hazy observing level.
     pub fn dense() -> Self {
         let mut atmosphere = Self::earthlike();
@@ -1018,5 +1042,61 @@ mod tests {
             .count();
         assert_eq!(planets, 3);
         assert_eq!(moon_count, 6);
+    }
+}
+
+/// RGB to [hue degrees, saturation, value].
+fn hsv(c: [f32; 3]) -> [f32; 3] {
+    let max = c[0].max(c[1]).max(c[2]);
+    let min = c[0].min(c[1]).min(c[2]);
+    let delta = max - min;
+    let hue = if delta <= 0.0 {
+        0.0
+    } else if max == c[0] {
+        60.0 * ((c[1] - c[2]) / delta).rem_euclid(6.0)
+    } else if max == c[1] {
+        60.0 * ((c[2] - c[0]) / delta + 2.0)
+    } else {
+        60.0 * ((c[0] - c[1]) / delta + 4.0)
+    };
+    [hue, if max > 0.0 { delta / max } else { 0.0 }, max]
+}
+
+/// [hue degrees, saturation, value] to RGB.
+pub(crate) fn rgb([hue, saturation, value]: [f32; 3]) -> [f32; 3] {
+    let c = value * saturation;
+    let h = hue.rem_euclid(360.0) / 60.0;
+    let x = c * (1.0 - (h % 2.0 - 1.0).abs());
+    let (r, g, b) = match h as u32 {
+        0 => (c, x, 0.0),
+        1 => (x, c, 0.0),
+        2 => (0.0, c, x),
+        3 => (0.0, x, c),
+        4 => (x, 0.0, c),
+        _ => (c, 0.0, x),
+    };
+    let m = value - c;
+    [r + m, g + m, b + m]
+}
+
+#[cfg(test)]
+mod air_tuning_tests {
+    use super::*;
+    #[test]
+    fn own_hue_and_unit_density_reproduce_the_air() {
+        let air = Atmosphere::earthlike();
+        let same = air.tuned(1.0, Some(air.hue()));
+        for (a, b) in air.rayleigh.iter().zip(same.rayleigh) {
+            assert!((a - b).abs() <= 1e-5 * a, "{a} vs {b}");
+        }
+        assert!(
+            (200.0..240.0).contains(&air.hue()),
+            "Earth's sky is blue: {}",
+            air.hue()
+        );
+        // A red-scattering sky keeps the same luminance-weighted strength.
+        let red = air.tuned(2.0, Some(0.0));
+        assert!(red.rayleigh[0] > red.rayleigh[2]);
+        assert_eq!(red.mie, air.mie * 2.0);
     }
 }

@@ -95,6 +95,8 @@ impl Default for Options {
             ev_bias: 0.0,
             auto_key: 0.25,
             auto_percentile: 0.9,
+            // About 1% of a daylight sky, which therefore hides it; it
+            // emerges in deep twilight and dark, moonless nights.
             milky_way: 0.01,
         }
     }
@@ -713,6 +715,10 @@ impl PathTracer {
             top.max(p.center[1] + e.length())
         });
         globals.ground_counts[3] = prop_top.to_bits();
+        // The shader reads the theme from the low byte and the terrain grid
+        // (log2 of cells per side) from the next.
+        let theme = crate::ground::Theme::from_index(frame.globals.ground_counts[2]);
+        globals.ground_counts[2] |= crate::terrain::cells(theme).trailing_zeros() << 8;
         let mut lights = [0_u32; 4];
         for (index, body) in frame.bodies.iter().enumerate() {
             if body.emissive >= 0.5 {
@@ -771,11 +777,7 @@ impl PathTracer {
                 queue.write_buffer(&self.ground, 0, bytemuck::cast_slice(&frame.ground));
             }
             let radius = frame.globals.ground_up[3].to_bits();
-            let theme = if frame.globals.ground_counts[2] == 1 {
-                crate::ground::Theme::Desert
-            } else {
-                crate::ground::Theme::Forest
-            };
+            let theme = crate::ground::Theme::from_index(frame.globals.ground_counts[2]);
             if frame.globals.ground_counts[1] != 0 && self.terrain_theme != theme {
                 let offset = (crate::ground::CAPACITY * 12 + crate::ground::SKY_TEXELS * 4) * 4;
                 queue.write_buffer(
@@ -793,7 +795,8 @@ impl PathTracer {
                 });
                 pass.set_pipeline(&self.terrain_geometry);
                 pass.set_bind_group(0, &self.trace_group, &[]);
-                pass.dispatch_workgroups((crate::terrain::WIDTH as u32).pow(2).div_ceil(64), 1, 1);
+                let width = crate::terrain::cells(theme) as u32 + 1;
+                pass.dispatch_workgroups(width.pow(2).div_ceil(64), 1, 1);
                 self.terrain_radius = Some(radius);
             }
             if self.history.samples == 0 {

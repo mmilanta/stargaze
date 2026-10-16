@@ -263,7 +263,11 @@ fn gpu_ground_sky_visibility() {
     scene.ground = crate::ground::landscape(6_371_000.0);
     scene.globals.ground_counts[0] = scene.ground.len() as u32;
     let sky = sample(&device, &queue, &mut tracer, &scene, 1)[0][0];
-    assert!(sky > 0.1, "landscape must not hide background sky: {sky}");
+    let expected = crate::stars::radiance(&star)[0];
+    assert!(
+        sky > 0.5 * expected,
+        "landscape must not hide background sky: {sky} (star {expected})"
+    );
 }
 
 #[test]

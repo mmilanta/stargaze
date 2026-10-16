@@ -481,7 +481,8 @@ fn atmosphere(origin: vec3<f32>, dir: vec3<f32>, limit: f32, rng: ptr<function, 
     if (settings.g.atmo_params.w < 0.5) {
         return result;
     }
-    let t_max = min(limit, shell_exit(origin, dir));
+    let exit = shell_exit(origin, dir);
+    let t_max = min(limit, exit);
     if (t_max <= 0.0) {
         return result;
     }
@@ -496,11 +497,13 @@ fn atmosphere(origin: vec3<f32>, dir: vec3<f32>, limit: f32, rng: ptr<function, 
     // always paying for ATMO_VIEW_STEPS shadow rays. Long sky rays keep all.
     let steps = clamp(u32(ceil(t_max / (0.25 * atmo_scale_height()))), 2u, ATMO_VIEW_STEPS);
     let dt = t_max / f32(steps);
-    // Jitter shortened segments per camera ray: a few fixed midpoints would
-    // systematically miss thin shadowed air (e.g. in front of a slope). Full
-    // sky rays keep the reviewed midpoint rule.
+    // Jitter per camera ray wherever the air may hold terrain shadows: on
+    // shortened segments, fixed midpoints miss thin shadowed air in front of
+    // a slope; on any ray ending on the ground, a midpoint crossing a
+    // mountain's shadow volume from one pixel row to the next makes bands in
+    // the haze. Full sky rays keep the reviewed midpoint rule.
     var jitter_rng = hash(*rng ^ 0x3c6ef372u);
-    let jitter = select(0.5, random(&jitter_rng), steps < ATMO_VIEW_STEPS);
+    let jitter = select(0.5, random(&jitter_rng), steps < ATMO_VIEW_STEPS || limit < exit);
 
     // Separate random stream keeps direct starlight sampling unchanged.
     var reflected_rng = hash(*rng ^ 0xa511e9b3u);
@@ -601,8 +604,6 @@ fn trace(initial: Ray, rng: ptr<function, u32>, backdrop: ptr<function, vec3<f32
     var previous_vertex = initial;
     var depth = 0u;
     var camera_segment = true;
-    var catalogue_visibility = 1.0;
-    var milky_way_visibility = 1.0;
     var null_crossings = 0u;
     // The previous vertex lies inside the host air. Its in-scatter comes from
     // the sky cache; extinction is applied once the continuation leaves the
@@ -635,16 +636,9 @@ fn trace(initial: Ray, rng: ptr<function, u32>, backdrop: ptr<function, vec3<f32
             let atmo = atmosphere(ray.offset, ray.direction, limit, rng);
             radiance += throughput * atmo.inscatter;
             throughput *= atmo.transmittance;
-            // The decorative catalogue is boosted for night observing. Model
-            // its loss of contrast against illuminated air separately from
-            // physical extinction. Actual in-scatter includes twilight and
-            // eclipses, so stars return as the sky darkens. Finite suns and
-            // reflected bodies retain their normal light transport.
-            let sky_luminance = dot(atmo.inscatter, vec3<f32>(0.2126, 0.7152, 0.0722));
-            catalogue_visibility = 1.0 - smoothstep(0.001, 0.01, sky_luminance);
-            // Diffuse galactic haze loses contrast much earlier than star
-            // points. Use actual scattered light, including reflected moonlight.
-            milky_way_visibility = 1.0 - smoothstep(0.00001, 0.0001, sky_luminance);
+            // No visibility rule for the catalogue or Milky Way: both carry
+            // physical brightness, so illuminated air (day, twilight, thick
+            // air, moonlight) out-shines them under the adapted exposure.
         }
         if (ring.index != MISS) {
             let n = bodies[ring.index].ring_plane.xyz;
@@ -707,14 +701,14 @@ fn trace(initial: Ray, rng: ptr<function, u32>, backdrop: ptr<function, vec3<f32
         if (hit.index == MISS) {
             // Background stars are visible along unscattered camera paths,
             // including straight-through ring crossings.
-            radiance += throughput * environment(ray.direction, depth == 0u) * catalogue_visibility;
+            radiance += throughput * environment(ray.direction, depth == 0u);
             if (sky_on_escape) {
                 radiance += throughput * surface_sky_lookup(ray.direction);
             }
-            if (depth == 0u && milky_way_visibility > 0.0) {
+            if (depth == 0u) {
                 // A colored visual layer, attenuated by the atmosphere
                 // and unscattered ring crossings. Never feed it into bounces.
-                *backdrop = milky_way(ray.direction) * milky_way_visibility * throughput;
+                *backdrop = milky_way(ray.direction) * throughput;
                 radiance += *backdrop;
             }
             break;

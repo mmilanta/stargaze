@@ -245,7 +245,7 @@ fn landscape_top() -> f32 {
     var top = bitcast<f32>(settings.g.ground_counts.w);
     if (settings.g.ground_counts.y != 0u) {
         // Root quadtree bound: highest terrain vertex plus margin.
-        top = max(top, ground_data.terrain[TERRAIN_CACHE + 4u]);
+        top = max(top, ground_data.terrain[terrain_cache() + 4u]);
     }
     return top;
 }
@@ -302,13 +302,73 @@ fn desert_floor(p: vec3<f32>, distance: f32, normal: vec3<f32>) -> vec3<f32> {
     color = mix(color, sand * 0.93, worn * fade * 0.35);
     return mix(color, packed, tracks * fade * 0.8);
 }
+// Grey lunar regolith: broad mottling, brighter fresh ejecta, fine grain.
+fn crater_floor(p: vec3<f32>, distance: f32, normal: vec3<f32>) -> vec3<f32> {
+    let broad = vnoise(p * 0.004 + vec3<f32>(3.0, 0.0, 8.0));
+    let middle = vnoise(p * 0.09);
+    let grain = vnoise(p * 3.1);
+    let footprint = distance * 2.0 * settings.g.cam_forward.w / max(settings.g.viewport.y, 1.0);
+    let detail = 1.0 - smoothstep(0.025, 0.2, footprint);
+    var tone = mix(0.11, 0.21, broad) * (0.86 + 0.28 * middle);
+    // Steep crater walls expose brighter, less weathered material.
+    tone *= 1.0 + 0.35 * smoothstep(0.15, 0.5, 1.0 - max(normal.y, 0.0));
+    tone *= 1.0 + (grain - 0.5) * 0.3 * detail;
+    return vec3<f32>(tone, tone * 0.97, tone * 0.93);
+}
+// Patagonian ice field: blue-white glacier ice and snow wherever it can
+// hold, dark granite on the near-vertical spires.
+fn alpine_floor(p: vec3<f32>, distance: f32, normal: vec3<f32>) -> vec3<f32> {
+    let broad = vnoise(p * 0.004 + vec3<f32>(11.0, 4.0, 1.0));
+    let middle = vnoise(p * 0.2);
+    let grain = vnoise(p * 4.0);
+    let footprint = distance * 2.0 * settings.g.cam_forward.w / max(settings.g.viewport.y, 1.0);
+    let detail = 1.0 - smoothstep(0.025, 0.2, footprint);
+    let slope = 1.0 - max(normal.y, 0.0);
+    let ice = mix(vec3<f32>(0.70, 0.77, 0.85), vec3<f32>(0.82, 0.86, 0.90), middle);
+    let granite = mix(vec3<f32>(0.09, 0.085, 0.08), vec3<f32>(0.22, 0.20, 0.18), broad);
+    // Snow and rime cling to ledges and summits up to ~45 degrees.
+    let cover = 1.0 - smoothstep(0.22, 0.4, slope + (broad - 0.5) * 0.18 + (middle - 0.5) * 0.08);
+    var color = mix(granite, ice, cover);
+    color *= 1.0 + (grain - 0.5) * 0.1 * detail;
+    return color;
+}
+// Black basaltic sand and rough lava, with rusty oxidised patches.
+fn basalt_floor(p: vec3<f32>, distance: f32, normal: vec3<f32>) -> vec3<f32> {
+    let broad = vnoise(p * 0.003 + vec3<f32>(5.0, 9.0, 2.0));
+    let middle = vnoise(p * 0.12);
+    let grain = vnoise(p * 5.0);
+    let footprint = distance * 2.0 * settings.g.cam_forward.w / max(settings.g.viewport.y, 1.0);
+    let detail = 1.0 - smoothstep(0.025, 0.2, footprint);
+    let sand = vec3<f32>(0.030, 0.029, 0.029) * (0.85 + 0.3 * middle);
+    let rust = vec3<f32>(0.075, 0.04, 0.028);
+    var color = mix(sand, rust, smoothstep(0.8, 0.95, broad) * 0.25);
+    // Glassy, rougher flows on steeper ground read slightly lighter.
+    color *= 1.0 + 0.4 * smoothstep(0.1, 0.4, 1.0 - max(normal.y, 0.0));
+    color *= 1.0 + (grain - 0.5) * 0.4 * detail;
+    return color;
+}
+// Namib sand: deep apricot-red iron-stained grains with gentle mottling.
+// No painted ripples: a regular pattern reads as stripes up close. The flat
+// pans share the sand colour.
+fn dune_floor(p: vec3<f32>, distance: f32, normal: vec3<f32>) -> vec3<f32> {
+    let broad = vnoise(p * 0.0015 + vec3<f32>(1.0, 7.0, 3.0));
+    let middle = vnoise(p * 0.05);
+    let sand = mix(vec3<f32>(0.36, 0.12, 0.045), vec3<f32>(0.44, 0.17, 0.065), broad);
+    return sand * (0.94 + 0.06 * middle);
+}
 fn landscape_albedo(ray: Ray, hit: Hit) -> vec3<f32> {
     let p = landscape_point(ray, hit);
     let distance = hit.distance * METRES_PER_AU;
     let n = to_ground(hit.normal);
     if (hit.index == LOCAL_BASE || hit.index == TERRAIN_ID) {
-        if (settings.g.ground_counts.z == 1u) { return desert_floor(p,distance,n); }
-        return forest_floor(p,distance,n);
+        switch ground_theme() {
+            case 1u: { return desert_floor(p, distance, n); }
+            case 2u: { return crater_floor(p, distance, n); }
+            case 3u: { return alpine_floor(p, distance, n); }
+            case 4u: { return basalt_floor(p, distance, n); }
+            case 5u: { return dune_floor(p, distance, n); }
+            default: { return forest_floor(p, distance, n); }
+        }
     }
     let object = ground_data.objects[hit.index - LOCAL_BASE - 1u];
     let tint = object.albedo.rgb;
@@ -328,7 +388,8 @@ fn landscape_albedo(ray: Ray, hit: Hit) -> vec3<f32> {
     let strata = sin(p.y*8.0+2.5*middle);
     let lichen = smoothstep(0.52,0.76,middle)*max(n.y,0.0);
     let stone = tint*(0.7+0.45*fine+0.07*strata);
-    if (settings.g.ground_counts.z == 1u) { return stone; }
+    // Only the forest's rocks carry moss and lichen.
+    if (ground_theme() != 0u) { return stone; }
     return mix(stone,vec3<f32>(0.11,0.145,0.037),lichen*0.65);
 }
 fn landscape_shading_normal(ray: Ray, hit: Hit) -> vec3<f32> {

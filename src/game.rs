@@ -1847,6 +1847,8 @@ mod tests {
             discard: None,
             controls_back: crate::menu::Page::Title,
             targets_open: false,
+            air_open: false,
+            air_drag: None,
             toast: None,
         };
         app.state.sim_time = 42.0;

@@ -11,15 +11,93 @@ pub const TUMBLED_ROCK: f32 = 2.25;
 #[serde(rename_all = "snake_case")]
 #[repr(u32)]
 pub enum Theme {
+    /// Original forest clearing with the cottage; kept for levels and for
+    /// reproducible benchmarks, but no longer offered in explore mode.
     #[default]
     Forest = 0,
+    /// Atacama: barren alluvial basin with broken ridges.
     Desert = 1,
+    /// Airless regolith plain with craters; the host atmosphere is removed.
+    Craters = 2,
+    /// Snowfield plateau ringed by jagged peaks.
+    Alpine = 3,
+    /// Summit crater rim of Stromboli above a sea of dark lava rock, with
+    /// conical volcanoes all round the horizon (real Aeolian elevation data).
+    Basalt = 4,
+    /// Endless sand sea, seen from the crest of a high dune.
+    Dunes = 5,
+}
+
+impl Theme {
+    /// Grounds offered by the explore-mode switcher, in cycling order.
+    pub const EXPLORE: [Theme; 5] = [
+        Theme::Desert,
+        Theme::Craters,
+        Theme::Alpine,
+        Theme::Basalt,
+        Theme::Dunes,
+    ];
+
+    pub fn name(self) -> &'static str {
+        match self {
+            Theme::Forest => "Forest",
+            Theme::Desert => "Atacama",
+            Theme::Craters => "Craters",
+            Theme::Alpine => "Alpine",
+            Theme::Basalt => "Basalt",
+            Theme::Dunes => "Dunes",
+        }
+    }
+
+    /// The next explore ground; the forest joins the cycle at Atacama.
+    pub fn next_explore(self) -> Theme {
+        let i = Self::EXPLORE.iter().position(|t| *t == self);
+        i.map_or(Theme::Desert, |i| {
+            Self::EXPLORE[(i + 1) % Self::EXPLORE.len()]
+        })
+    }
+
+    /// Inverse of `theme as u32` (the GPU theme id); unknown ids are forest.
+    pub fn from_index(index: u32) -> Theme {
+        std::iter::once(Theme::Forest)
+            .chain(Self::EXPLORE)
+            .find(|t| *t as u32 == index)
+            .unwrap_or(Theme::Forest)
+    }
+
+    /// Airless grounds suppress the host atmosphere.
+    pub fn airless(self) -> bool {
+        self == Theme::Craters
+    }
 }
 
 pub fn landscape_for_theme(radius_m: f64, density: u32, theme: Theme) -> Vec<Primitive> {
     if theme == Theme::Forest {
         return landscape_with_density(radius_m, density);
     }
+    // Scattered rocks along the observing line, coloured for each ground.
+    let tints: [[f32; 3]; 4] = match theme {
+        // Bare sand, and a clean ice field.
+        Theme::Dunes | Theme::Alpine => return Vec::new(),
+        Theme::Craters => [
+            [0.20, 0.195, 0.19],
+            [0.13, 0.128, 0.125],
+            [0.26, 0.25, 0.24],
+            [0.16, 0.155, 0.15],
+        ],
+        Theme::Basalt => [
+            [0.06, 0.055, 0.052],
+            [0.035, 0.033, 0.032],
+            [0.10, 0.06, 0.045],
+            [0.05, 0.045, 0.043],
+        ],
+        _ => [
+            [0.36, 0.25, 0.15],
+            [0.19, 0.17, 0.14],
+            [0.43, 0.36, 0.26],
+            [0.27, 0.13, 0.065],
+        ],
+    };
     let mut rocks = Vec::new();
     let scale = crate::terrain::scale(radius_m);
     let mut seed = 0xa7ac_a4a1_u32;
@@ -45,12 +123,7 @@ pub fn landscape_for_theme(radius_m: f64, density: u32, theme: Theme) -> Vec<Pri
         let extent = proportions.map(|v| v * h * (0.75 + random() * 0.5));
         let angles = [random(), random(), random()].map(|v| (v * 256.0) as u32);
         let orientation = (angles[0] | (angles[1] << 8) | (angles[2] << 16)) as f32;
-        let tint = match i % 4 {
-            0 => [0.36, 0.25, 0.15],
-            1 => [0.19, 0.17, 0.14],
-            2 => [0.43, 0.36, 0.26],
-            _ => [0.27, 0.13, 0.065],
-        };
+        let tint = tints[i % 4];
         let shade = 0.75 + random() * 0.45;
         let d2 = f64::from(x * x + z * z);
         let curve = -d2 / (radius_m + (radius_m * radius_m - d2).max(0.0).sqrt());
@@ -370,7 +443,7 @@ mod tests {
     #[test]
     fn bounds_enclose_descendants_and_landscape_stays_within_buffer_capacity() {
         for radius in [5_000.0, 1_500_000.0, 6_371_000.0, 60_000_000.0] {
-            for theme in [Theme::Forest, Theme::Desert] {
+            for theme in std::iter::once(Theme::Forest).chain(Theme::EXPLORE) {
                 let objects = landscape_for_theme(radius, 100, theme);
                 assert!(objects.len() <= CAPACITY);
                 assert_eq!(

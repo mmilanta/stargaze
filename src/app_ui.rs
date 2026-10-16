@@ -407,6 +407,7 @@ impl App {
         if !self.show_hud {
             return;
         }
+        self.build_air_panel(v, vp);
         if self.game.is_some() {
             let title = self
                 .active_path
@@ -577,6 +578,227 @@ impl App {
         }
     }
 
+    /// The atmosphere panel above the bar's Air button, when open.
+    fn air_panel(&self) -> Option<(Rect, f32)> {
+        let (w, h) = self.renderer.as_ref()?.size();
+        self.air_panel_in([w as f32, h as f32])
+    }
+    fn air_panel_in(&self, vp: [f32; 2]) -> Option<(Rect, f32)> {
+        if !self.air_open || self.game.is_some() || !self.show_hud || self.menu.open {
+            return None;
+        }
+        if vp[0] < 1.0 || vp[1] < 1.0 {
+            return None;
+        }
+        let layout = ui::layout(vp[0], vp[1], self.scale);
+        let s = layout.scale;
+        let (w, h) = (330.0 * s, 132.0 * s);
+        let x = (layout.air.right() - w).clamp(8.0 * s, (layout.bar.w - w - 8.0 * s).max(8.0 * s));
+        Some((
+            Rect {
+                x,
+                y: layout.bar.y - h - 8.0 * s,
+                w,
+                h,
+            },
+            s,
+        ))
+    }
+    fn air_track(panel: Rect, s: f32, slider: crate::AirSlider) -> Rect {
+        let row = if slider == crate::AirSlider::Density {
+            0.0
+        } else {
+            1.0
+        };
+        Rect {
+            x: panel.x + 96.0 * s,
+            y: panel.y + (48.0 + row * 34.0) * s,
+            w: panel.w - 190.0 * s,
+            h: 6.0 * s,
+        }
+    }
+    fn air_reset(panel: Rect, s: f32) -> Rect {
+        Rect {
+            x: panel.right() - 92.0 * s,
+            y: panel.y + panel.h - 34.0 * s,
+            w: 80.0 * s,
+            h: 26.0 * s,
+        }
+    }
+    /// Slider position 0..1. Density is quadratic so the middle is 1x and
+    /// fine control stays near Earth's air; colour is the hue around the wheel.
+    fn air_value(&self, slider: crate::AirSlider) -> f32 {
+        match slider {
+            crate::AirSlider::Density => (self.state.air.density / AIR_DENSITY_MAX).sqrt() as f32,
+            crate::AirSlider::Colour => {
+                let native = self.state.scene.atmosphere.map_or(220.0, |a| a.hue());
+                self.state.air.hue.unwrap_or(native) / 360.0
+            }
+        }
+    }
+    fn set_air(&mut self, slider: crate::AirSlider, t: f32) {
+        let t = t.clamp(0.0, 1.0);
+        match slider {
+            crate::AirSlider::Density => {
+                let density = AIR_DENSITY_MAX * f64::from(t * t);
+                // Snap to the scene's own air near the middle.
+                self.state.air.density = if (density - 1.0).abs() < 0.04 {
+                    1.0
+                } else {
+                    density
+                };
+            }
+            crate::AirSlider::Colour => self.state.air.hue = Some(t * 360.0),
+        }
+    }
+    pub(crate) fn air_click(&mut self) -> bool {
+        let Some((panel, s)) = self.air_panel() else {
+            return false;
+        };
+        let (x, y) = self.cursor;
+        if !panel.contains(x, y) {
+            return false;
+        }
+        if Self::air_reset(panel, s).contains(x, y) {
+            self.state.air = crate::AirTuning::default();
+            return true;
+        }
+        if self.state.scene.atmosphere.is_none() || self.state.scene.ground.airless() {
+            return true;
+        }
+        for slider in [crate::AirSlider::Density, crate::AirSlider::Colour] {
+            let track = Self::air_track(panel, s, slider);
+            let grab = Rect {
+                x: track.x - 8.0 * s,
+                y: track.y - 12.0 * s,
+                w: track.w + 16.0 * s,
+                h: track.h + 24.0 * s,
+            };
+            if grab.contains(x, y) {
+                self.air_drag = Some(slider);
+                self.air_drag_to(x);
+            }
+        }
+        true
+    }
+    pub(crate) fn air_drag_to(&mut self, x: f64) {
+        if let (Some(slider), Some((panel, s))) = (self.air_drag, self.air_panel()) {
+            let track = Self::air_track(panel, s, slider);
+            self.set_air(slider, ((x as f32 - track.x) / track.w).clamp(0.0, 1.0));
+        }
+    }
+    fn build_air_panel(&self, v: &mut Vec<UiVertex>, vp: [f32; 2]) {
+        let Some((r, s)) = self.air_panel_in(vp) else {
+            return;
+        };
+        let text = |v: &mut Vec<UiVertex>, x: f32, y: f32, size: f32, t: &str, color| {
+            ui::push_text(v, x, y, size * s, t, color, vp)
+        };
+        ui::push_rect(
+            v,
+            r.x,
+            r.y,
+            r.w,
+            r.h,
+            [ui::BG[0], ui::BG[1], ui::BG[2], 0.9],
+            vp,
+        );
+        ui::outline(v, r, s, ui::LINE, vp);
+        text(
+            v,
+            r.x + 12.0 * s,
+            r.y + 12.0 * s,
+            0.8,
+            "AIR [J]",
+            ui::ACCENT,
+        );
+        let airless = self.state.scene.atmosphere.is_none() || self.state.scene.ground.airless();
+        if airless {
+            let why = if self.state.scene.atmosphere.is_none() {
+                "This world has no atmosphere."
+            } else {
+                "The crater ground is airless."
+            };
+            text(v, r.x + 12.0 * s, r.y + 52.0 * s, 0.75, why, ui::MUTED);
+        } else {
+            for slider in [crate::AirSlider::Density, crate::AirSlider::Colour] {
+                let track = Self::air_track(r, s, slider);
+                let t = self.air_value(slider);
+                let (label, value) = match slider {
+                    crate::AirSlider::Density => (
+                        "Density",
+                        if self.state.air.density <= 0.005 {
+                            "off".to_string()
+                        } else {
+                            format!("{:.2}x", self.state.air.density)
+                        },
+                    ),
+                    crate::AirSlider::Colour => (
+                        "Colour",
+                        self.state
+                            .air
+                            .hue
+                            .map_or("natural".into(), |h| hue_name(h).into()),
+                    ),
+                };
+                text(v, r.x + 12.0 * s, track.y - 5.0 * s, 0.75, label, ui::INK);
+                text(
+                    v,
+                    track.right() + 14.0 * s,
+                    track.y - 5.0 * s,
+                    0.75,
+                    &value,
+                    ui::MUTED,
+                );
+                if slider == crate::AirSlider::Colour {
+                    // The track shows the sky colour each position gives.
+                    let segments = 36;
+                    for i in 0..segments {
+                        let hue = 360.0 * (i as f32 + 0.5) / segments as f32;
+                        let [cr, cg, cb] = crate::sim::rgb([hue, 0.7, 0.95]);
+                        let w = track.w / segments as f32;
+                        ui::push_rect(
+                            v,
+                            track.x + i as f32 * w,
+                            track.y,
+                            w + 0.5,
+                            track.h,
+                            [cr, cg, cb, 1.0],
+                            vp,
+                        );
+                    }
+                } else {
+                    ui::push_rect(v, track.x, track.y, track.w, track.h, ui::LINE, vp);
+                    ui::push_rect(v, track.x, track.y, track.w * t, track.h, ui::OK, vp);
+                }
+                let knob = 7.0 * s;
+                ui::push_rect(
+                    v,
+                    track.x + track.w * t - knob,
+                    track.y + track.h * 0.5 - knob,
+                    2.0 * knob,
+                    2.0 * knob,
+                    if self.air_drag == Some(slider) {
+                        ui::ACCENT
+                    } else {
+                        ui::INK
+                    },
+                    vp,
+                );
+            }
+        }
+        let reset = Self::air_reset(r, s);
+        ui::button(
+            v,
+            reset,
+            "Reset",
+            s,
+            false,
+            reset.contains(self.cursor.0, self.cursor.1),
+            vp,
+        );
+    }
+
     fn targets_panel(vp: [f32; 2], s: f32, n: usize) -> Rect {
         Rect {
             x: vp[0] - 254.0 * s,
@@ -636,5 +858,22 @@ impl App {
             ),
             Instant::now(),
         ));
+    }
+}
+
+const AIR_DENSITY_MAX: f64 = 4.0;
+
+/// A plain name for a sky hue (degrees).
+fn hue_name(hue: f32) -> &'static str {
+    match hue.rem_euclid(360.0) {
+        h if h < 15.0 => "red",
+        h if h < 45.0 => "orange",
+        h if h < 70.0 => "yellow",
+        h if h < 160.0 => "green",
+        h if h < 195.0 => "teal",
+        h if h < 250.0 => "blue",
+        h if h < 290.0 => "violet",
+        h if h < 345.0 => "magenta",
+        _ => "red",
     }
 }

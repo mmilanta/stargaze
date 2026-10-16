@@ -114,6 +114,24 @@ pub fn generate(count: usize, band: usize, seed: u64) -> Vec<CatalogueStar> {
     out
 }
 
+/// Irradiance of the brightest catalogue star (`bright` = 1.62, about
+/// Sirius, magnitude -1.46) in renderer units, times a visual gain of 1000.
+/// Physically it is 10^(-0.4 * 25.28) of the solar-scene Sun at 1 AU
+/// (radiance ~1.1e5 over 7.0e-5 sr, so ~8.1), i.e. 6.4e-10, which would need
+/// night exposures in the tens of thousands. With the gain, stars show at
+/// everyday exposures (1-8) and the brightest show faintly in daylight. No
+/// rule fades them: illuminated air hides them by out-shining them.
+const BRIGHTEST_STAR_IRRADIANCE: f32 = 6.4e-7;
+
+/// Physical radiance of a catalogue star's disc: its real irradiance spread
+/// over the drawn disc, so its pixel brightness follows its flux.
+pub fn radiance(star: &CatalogueStar) -> [f32; 3] {
+    let radius = (star.angular_radius as f64).clamp(1e-6, 0.1) as f32;
+    let irradiance = BRIGHTEST_STAR_IRRADIANCE * star.bright / 1.62;
+    let radiance = irradiance / (std::f32::consts::PI * radius * radius);
+    star.color.map(|c| c * radiance)
+}
+
 /// Angular discs for the visual catalogue at infinity, with a primary-ray
 /// pixel cap. Illumination comes from finite scene stars and reflected light.
 #[repr(C)]
@@ -141,12 +159,10 @@ pub fn ray_catalogue(stars: &[CatalogueStar]) -> (Vec<RayStar>, Vec<u32>) {
                 dir.z as f32,
                 radius.sin().powi(2) as f32,
             ],
-            radiance: [
-                star.color[0] * star.bright,
-                star.color[1] * star.bright,
-                star.color[2] * star.bright,
-                0.0,
-            ],
+            radiance: {
+                let [r, g, b] = radiance(star);
+                [r, g, b, 0.0]
+            },
         });
         let theta = dir.z.clamp(-1.0, 1.0).acos();
         let phi = dir.y.atan2(dir.x) + PI;

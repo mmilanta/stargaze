@@ -25,6 +25,10 @@ const CASES: &[&str] = &[
     "eclipse-totality",
     "atacama-day",
     "atacama-night",
+    "ground-craters",
+    "ground-alpine",
+    "ground-basalt",
+    "ground-dunes",
 ];
 const FORMAT: wgpu::TextureFormat = wgpu::TextureFormat::Rgba8UnormSrgb;
 
@@ -241,6 +245,7 @@ fn state(scene: crate::sim::Scene, time: f64) -> crate::State {
         last_cursor: None,
         view_lock: None,
         press: None,
+        air: Default::default(),
     }
 }
 
@@ -449,10 +454,48 @@ fn fixture(name: &str, step: u32, cfg: &Config) -> Frame {
             crate::config::parse(include_str!("../configs/atacama.yaml")).unwrap(),
             if name == "atacama-day" { 0.14 + dt } else { dt },
         ),
+        // The explore-mode grounds at the Atacama site, by day.
+        "ground-craters" | "ground-alpine" | "ground-basalt" | "ground-dunes" => {
+            let mut s = state(
+                crate::config::parse(include_str!("../configs/atacama.yaml")).unwrap(),
+                0.14 + dt,
+            );
+            s.set_ground(match name {
+                "ground-craters" => crate::ground::Theme::Craters,
+                "ground-alpine" => crate::ground::Theme::Alpine,
+                "ground-basalt" => crate::ground::Theme::Basalt,
+                _ => crate::ground::Theme::Dunes,
+            });
+            s
+        }
         _ => panic!("unknown fixture"),
     };
     match name {
         "halo-rings" | "atacama-day" | "atacama-night" => s.point_initial_view(),
+        name if name.starts_with("ground-") => {
+            // Atacama's initial direction, levelled to show the ground.
+            s.point_initial_view();
+            if name == "ground-alpine" {
+                // East across the ice to the Cerro Torre group and Fitz Roy.
+                s.observer.az = 88_f64.to_radians();
+            }
+            if name == "ground-basalt" {
+                // Over the summit crater to the cones beyond.
+                s.observer.az = 10_f64.to_radians();
+            }
+            if name == "ground-dunes" {
+                // Down Big Daddy's slip face towards Deadvlei.
+                s.observer.az = 50_f64.to_radians();
+            }
+            s.observer.alt = match name {
+                "ground-dunes" => -14.0_f64,
+                "ground-craters" => -12.0,
+                "ground-basalt" => -9.0,
+                _ => 2.0,
+            }
+            .to_radians();
+            s.observer.fov_y = 60_f64.to_radians();
+        }
         "earth-daylight" | "earth-twilight" => {
             s.ground_view();
             s.observer.alt = 3_f64.to_radians();
@@ -812,6 +855,10 @@ fn run_benchmark(cfg: &Config) -> Result<()> {
         let exposure = match name.as_str() {
             "vantus-eclipse" | "vantus-airless" => 8.0,
             "moonlit-air" => 64.0,
+            "ground-craters" => 0.4,
+            "ground-dunes" => 0.3,
+            "ground-alpine" => 0.25,
+            "ground-basalt" => 0.6,
             "twilight-afterglow" => 16.0,
             "eclipse-totality" => 64.0,
             _ => 1.0,
@@ -905,7 +952,7 @@ fn benchmark_fixtures_are_deterministic_and_cover_requested_workloads() {
         }
         assert_eq!(
             a.globals.atmo_params[3] > 0.0,
-            !matches!(name, "vantus-airless" | "dual-eclipse")
+            !matches!(name, "vantus-airless" | "dual-eclipse" | "ground-craters")
         );
         if matches!(name, "earth-daylight" | "earth-twilight" | "median-dense") {
             let sun = if name == "median-dense" {
