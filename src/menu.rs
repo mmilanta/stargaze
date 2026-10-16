@@ -14,6 +14,8 @@ impl Entry {
     /// Puzzle titles avoid revealing body names, moon counts, or filenames.
     pub fn puzzle_title(&self, index: usize) -> String {
         match self.path.file_stem().and_then(|s| s.to_str()) {
+            Some("1-halo-volcano") => "Ember summit".into(),
+            Some("2-erg-dunes") => "Shadow season".into(),
             Some("puzzle") => "First field study".into(),
             Some("halo") => "Amber horizon".into(),
             Some("median-resonance") => "Clockwork sky".into(),
@@ -804,9 +806,9 @@ mod tests {
         assert_eq!(m.title_selected, 2);
         m.page = Page::Explore;
         m.refresh();
-        m.search = "vesper".into();
+        m.search = "volcano".into();
         m.hover(&l, ((l.rows[0].x + 5.0) as f64, (l.rows[0].y + 5.0) as f64));
-        assert!(m.selected_path().unwrap().ends_with("vesper.yaml"));
+        assert!(m.selected_path().unwrap().ends_with("1-halo-volcano.yaml"));
         m.move_selection(true, l.rows.len());
         assert_eq!(m.selected, 0);
         let play = l.play_for(0, Page::Explore);

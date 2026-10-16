@@ -19,7 +19,7 @@ struct Globals {
 struct Settings {
     g: Globals,
     counts: vec4<u32>, // bodies, accumulated samples, samples this dispatch, max surface vertices
-    background: vec4<f32>, // Milky Way brightness, map width, map height, unused
+    background: vec4<f32>, // Milky Way brightness, map width, map height, point-source gain
     lights: vec4<u32>, // first three emissive indices, total count; fallback for >3
 };
 struct Body {
@@ -117,8 +117,11 @@ fn inside_star_dot(view_direction: vec3<f32>, star_direction: vec3<f32>) -> bool
 }
 
 fn sphere_hit(ray: Ray, index: u32) -> Hit {
+    return sphere_hit_radius(ray, index, bodies[index].center.w);
+}
+
+fn sphere_hit_radius(ray: Ray, index: u32, radius: f32) -> Hit {
     let oc = relative_center(ray, index);
-    let radius = bodies[index].center.w;
     // A normalized f32 direction is not exactly unit length. Retain the
     // quadratic coefficient, especially for a camera metres above a planet.
     let a = dot(ray.direction, ray.direction);
@@ -593,6 +596,117 @@ fn atmosphere(origin: vec3<f32>, dir: vec3<f32>, limit: f32, rng: ptr<function, 
     return result;
 }
 
+// Ring area as seen by ringshine sampling (uniform over the annulus).
+fn ring_area(index: u32) -> f32 {
+    let body = bodies[index];
+    let r = body.center.w;
+    return PI * r * r * (body.ring_params.x * body.ring_params.x - body.ring_plane.w * body.ring_plane.w);
+}
+
+// Ringshine: next-event estimation of a planet's own sunlit rings onto its
+// surface. Continuations rarely hit the rings, so a planet's night side and
+// eclipsed face, lit mostly by them, otherwise fill in one speck at a time.
+// Returns the contribution before throughput * albedo, MIS-weighted against
+// the cosine continuation (see ring_mis in trace()).
+fn ringshine(index: u32, origin: vec3<f32>, normal: vec3<f32>, last_vertex: bool,
+    rng: ptr<function, u32>) -> vec3<f32> {
+    let body = bodies[index];
+    if (body.ring_params.x <= body.ring_plane.w || body.ring_params.y <= 0.0) {
+        return vec3<f32>(0.0);
+    }
+    let n = body.ring_plane.xyz;
+    let inner = body.ring_plane.w * body.ring_plane.w;
+    let outer = body.ring_params.x * body.ring_params.x;
+    let radius = sqrt(mix(inner, outer, random(rng))) * body.center.w;
+    let phi = TAU * random(rng);
+    let point = basis_direction(n, cos(phi), sin(phi), 0.0) * radius;
+    let offset = point - origin;
+    let distance2 = dot(offset, offset);
+    let distance = sqrt(distance2);
+    let direction = offset / distance;
+    let cos_surface = dot(normal, direction);
+    let cos_ring = abs(dot(direction, n));
+    if (cos_surface <= 0.0 || cos_ring < 1.0e-6) {
+        return vec3<f32>(0.0);
+    }
+    let blocker = sphere_hit(Ray(origin, direction, index), index);
+    if (blocker.index != MISS && blocker.distance < distance) {
+        return vec3<f32>(0.0);
+    }
+    let optics = ring_optics(index, point);
+    if (optics.w == 0.0) {
+        return vec3<f32>(0.0);
+    }
+    let mu_out = dot(-direction, n);
+    var shine = vec3<f32>(0.0);
+    for (var light_slot = 0u; light_slot < light_count(); light_slot += 1u) {
+        let i = light_index(light_slot);
+        if (bodies[i].material.w < 0.5) {
+            continue;
+        }
+        let light = sample_light(Ray(point, n, index), i, rng);
+        let mu_in = dot(light.direction, n);
+        let visibility = light_visibility(ring_origin(RingHit(0.0, index, point), light.direction), i);
+        shine += ring_bsdf(optics, mu_out, mu_in) * bodies[i].material.rgb
+            * (abs(mu_in) * visibility / light.pdf);
+    }
+    let pdf = distance2 / (ring_area(index) * cos_ring);
+    var weight = power_weight(pdf, cos_surface / PI);
+    if (last_vertex) {
+        weight = 1.0;
+    }
+    return shine * (cos_surface * weight / (PI * pdf));
+}
+
+// Smallest angular radius of a body on camera rays: that of the brightest
+// catalogue star (stars.rs), kept between 0.7 and STAR_DOT_PIXELS pixels.
+const POINT_DISC_RADIUS: f32 = 0.00136;
+
+// Camera rays see an unresolved body as a disc as large as a bright star's,
+// its light spread over it (true / drawn disc area), so it shows at once
+// rather than as one speck in thousands of samples. Overlapping discs (a
+// distant planet and its moons) must not hide each other: one is picked in
+// proportion to its area ratio, and `scale` (the sum of the ratios) keeps
+// every body's light.
+fn point_disc_hit(ray: Ray, closest: Hit, scale: ptr<function, f32>,
+    rng: ptr<function, u32>) -> Hit {
+    var result = closest;
+    var total = 0.0;
+    let pixel = 2.0 * settings.g.cam_forward.w / max(settings.g.viewport.y, 1.0);
+    let angle = clamp(POINT_DISC_RADIUS, 0.7 * pixel, STAR_DOT_PIXELS * pixel);
+    let host = u32(settings.g.atmo_params.w) - 1u;
+    for (var i = 0u; i < settings.counts.x; i += 1u) {
+        if (i == host || settings.g.ground_north.w == f32(i + 1u)) { continue; }
+        let radius = bodies[i].center.w;
+        let drawn = angle * length(relative_center(ray, i));
+        if (radius <= 0.0 || drawn <= radius) { continue; }
+        let hit = sphere_hit_radius(ray, i, drawn);
+        if (hit.distance < closest.distance) {
+            let ratio = (radius / drawn) * (radius / drawn);
+            total += ratio;
+            if (random(rng) * total < ratio) {
+                result = hit;
+            }
+        }
+    }
+    if (total > 0.0) {
+        *scale = total;
+    }
+    return result;
+}
+
+// See ring_cap in trace().
+const RING_INDIRECT_CAP: f32 = 0.003;
+
+// Camera-ray gain for a body (or ring system) of angular `extent` radius at
+// `distance`: the shared point-source gain while it is under a pixel,
+// fading to physical brightness once it spans three (see stars.rs).
+fn point_gain(extent: f32, distance: f32) -> f32 {
+    let pixel = 2.0 * settings.g.cam_forward.w / max(settings.g.viewport.y, 1.0);
+    let pixels = 2.0 * extent / max(distance, 1.0e-30) / pixel;
+    return mix(settings.background.w, 1.0, smoothstep(1.0, 3.0, pixels));
+}
+
 fn trace(initial: Ray, rng: ptr<function, u32>, backdrop: ptr<function, vec3<f32>>) -> vec4<f32> {
     var ray = initial;
     var throughput = vec3<f32>(1.0);
@@ -612,8 +726,26 @@ fn trace(initial: Ray, rng: ptr<function, u32>, backdrop: ptr<function, vec3<f32
     // The previous vertex was a local surface whose sky light is carried by
     // its continuation ray: add the sky cache if that ray escapes.
     var sky_on_escape = false;
+    // The camera ray's first celestial surface (or ring) takes the
+    // unresolved point-source gain, once.
+    var point_gained = false;
+    // Light reaching the camera after a ring-particle scatter is capped at
+    // that point's direct starlight, or a small fraction of its unshadowed
+    // starlight. A ring in its planet's shadow is lit only by rare
+    // continuations onto the dayside or sunlit ring, which the night exposure
+    // would otherwise turn into star-like specks; sunlit rings keep their
+    // multiple scattering.
+    var ring_cap = 1.0e30;
+    var ring_base = vec3<f32>(0.0);
+    // The previous vertex was a ringed planet's surface that sampled its
+    // rings explicitly (ringshine): a continuation onto them is MIS-weighted.
+    var shine_body = MISS;
     loop {
-        let hit = closest_hit(ray);
+        var hit = closest_hit(ray);
+        var disc_scale = 1.0;
+        if (depth == 0u && null_crossings == 0u && settings.background.w > 0.0) {
+            hit = point_disc_hit(ray, hit, &disc_scale, rng);
+        }
         let ring = closest_ring(ray, hit.distance);
         if (in_air) {
             in_air = false;
@@ -641,6 +773,11 @@ fn trace(initial: Ray, rng: ptr<function, u32>, backdrop: ptr<function, vec3<f32
             // air, moonlight) out-shines them under the adapted exposure.
         }
         if (ring.index != MISS) {
+            if (depth == 0u && !point_gained && settings.background.w > 0.0) {
+                point_gained = true;
+                let planet = bodies[ring.index];
+                throughput *= point_gain(planet.center.w * planet.ring_params.x, ring.distance);
+            }
             let n = bodies[ring.index].ring_plane.xyz;
             let optics = ring_optics(ring.index, ring.point);
             let mu_out = dot(-ray.direction, n);
@@ -649,6 +786,15 @@ fn trace(initial: Ray, rng: ptr<function, u32>, backdrop: ptr<function, vec3<f32
             // Uniform-sphere continuation matches the isotropic particle phase.
             let bsdf_pdf = scatter_probability / (4.0 * PI);
             let last_vertex = depth + 1u == settings.counts.w;
+            var ring_mis = 1.0;
+            if (shine_body == ring.index && null_crossings == 0u) {
+                let cos_ring = max(abs(dot(ray.direction, n)), 1.0e-6);
+                let shine_pdf = ring.distance * ring.distance / (ring_area(ring.index) * cos_ring);
+                ring_mis = power_weight(previous_pdf, shine_pdf);
+            }
+            shine_body = MISS;
+            var unshadowed = 0.0;
+            var direct = 0.0;
             for (var light_slot = 0u; light_slot < light_count(); light_slot += 1u) {
                 let i = light_index(light_slot);
                 if (bodies[i].material.w < 0.5 || optics.w == 0.0) {
@@ -662,8 +808,11 @@ fn trace(initial: Ray, rng: ptr<function, u32>, backdrop: ptr<function, vec3<f32
                 if (last_vertex) {
                     weight = 1.0;
                 }
-                radiance += throughput * ring_bsdf(optics, mu_out, mu_in)
-                    * bodies[i].material.rgb * (abs(mu_in) * visibility * weight / light.pdf);
+                let lit = throughput * ring_bsdf(optics, mu_out, mu_in)
+                    * bodies[i].material.rgb * (abs(mu_in) / light.pdf);
+                radiance += lit * (visibility * weight * ring_mis);
+                unshadowed += dot(lit, vec3<f32>(0.2126, 0.7152, 0.0722));
+                direct += dot(lit, vec3<f32>(0.2126, 0.7152, 0.0722)) * visibility;
             }
             if (random(rng) < transmission) {
                 // Null events neither consume bounce budget nor replace the
@@ -677,6 +826,10 @@ fn trace(initial: Ray, rng: ptr<function, u32>, backdrop: ptr<function, vec3<f32
             }
             if (last_vertex || scatter_probability == 0.0) {
                 break;
+            }
+            if (ring_cap > 1.0e29) {
+                ring_cap = max(direct, RING_INDIRECT_CAP * unshadowed);
+                ring_base = radiance;
             }
             let z = 1.0 - 2.0 * random(rng);
             let phi = TAU * random(rng);
@@ -717,6 +870,7 @@ fn trace(initial: Ray, rng: ptr<function, u32>, backdrop: ptr<function, vec3<f32
         // Local IDs never index the astronomical body buffer.
         var body: Body;
         if (!local) { body = bodies[hit.index]; }
+        throughput *= disc_scale;
         if (!local && body.material.w > 0.5) {
             var weight = 1.0;
             if (depth > 0u) {
@@ -725,6 +879,11 @@ fn trace(initial: Ray, rng: ptr<function, u32>, backdrop: ptr<function, vec3<f32
             }
             radiance += throughput * body.material.rgb * weight;
             break;
+        }
+        if (!local && depth == 0u && !point_gained && settings.background.w > 0.0) {
+            point_gained = true;
+            let extent = body.center.w * max(1.0, body.ring_params.x);
+            throughput *= point_gain(extent, hit.distance);
         }
         var normal = hit.normal;
         if (local) { normal = landscape_shading_normal(ray, hit); }
@@ -765,6 +924,11 @@ fn trace(initial: Ray, rng: ptr<function, u32>, backdrop: ptr<function, vec3<f32
                     * (bsdf_pdf * weight * visibility / sample.pdf);
             }
         }
+        shine_body = MISS;
+        if (!local) {
+            radiance += throughput * albedo * ringshine(hit.index, outgoing.offset, normal, last_vertex, rng);
+            shine_body = hit.index;
+        }
         let sky_lit = local && settings.g.ground_counts.y != 0u && settings.g.atmo_params.w > 0.5;
         if (sky_lit && last_vertex) {
             // Atmosphere lighting. With no continuation at the depth limit,
@@ -796,6 +960,13 @@ fn trace(initial: Ray, rng: ptr<function, u32>, backdrop: ptr<function, vec3<f32
         null_crossings = 0u;
     }
     // W holds backdrop luminance for metering, not presentation alpha.
+    if (ring_cap < 1.0e29) {
+        let indirect = radiance - ring_base;
+        let luminance = dot(indirect, vec3<f32>(0.2126, 0.7152, 0.0722));
+        if (luminance > ring_cap) {
+            radiance = ring_base + indirect * (ring_cap / luminance);
+        }
+    }
     return vec4<f32>(radiance, dot(*backdrop, vec3<f32>(0.2126, 0.7152, 0.0722)));
 }
 

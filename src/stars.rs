@@ -115,13 +115,19 @@ pub fn generate(count: usize, band: usize, seed: u64) -> Vec<CatalogueStar> {
 }
 
 /// Irradiance of the brightest catalogue star (`bright` = 1.62, about
-/// Sirius, magnitude -1.46) in renderer units, times a visual gain of 1000.
-/// Physically it is 10^(-0.4 * 25.28) of the solar-scene Sun at 1 AU
-/// (radiance ~1.1e5 over 7.0e-5 sr, so ~8.1), i.e. 6.4e-10, which would need
-/// night exposures in the tens of thousands. With the gain, stars show at
-/// everyday exposures (1-8) and the brightest show faintly in daylight. No
-/// rule fades them: illuminated air hides them by out-shining them.
-const BRIGHTEST_STAR_IRRADIANCE: f32 = 6.4e-7;
+/// Sirius, magnitude -1.46) in renderer units: 10^(-0.4 * 25.28) of the
+/// solar-scene Sun at 1 AU (radiance ~1.1e5 over 7.0e-5 sr, so ~8.1).
+/// Times POINT_SOURCE_GAIN, like every unresolved point of light.
+const BRIGHTEST_STAR_IRRADIANCE: f32 = 6.4e-10 * POINT_SOURCE_GAIN;
+
+/// Visual gain for unresolved points of light: background stars and any
+/// planet, moon or ring system under ~1 pixel (fading out by 3 pixels, see
+/// `point_gain` in pathtrace.wgsl). Physically they would need night
+/// exposures in the tens of thousands, where path-tracing noise looks like
+/// stars; a shared gain keeps exposures moderate and every brightness ratio
+/// physical (bright planets outshine the stars as Venus outshines Sirius).
+/// Illuminated air still hides them all by out-shining them.
+pub const POINT_SOURCE_GAIN: f32 = 100.0;
 
 /// Physical radiance of a catalogue star's disc: its real irradiance spread
 /// over the drawn disc, so its pixel brightness follows its flux.

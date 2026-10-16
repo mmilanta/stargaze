@@ -46,7 +46,7 @@ on sampling the reflected planet light first.
 
 - AMD Radeon RX 7600 XT, Vulkan, RADV Mesa 26.2.2-arch1.1; details and individual
   measurements are in [advancing.json](advancing.json).
-- `configs/atacama.yaml`, day 0, initial camera, 480×270, four bounces, fixed
+- `configs/legacy/atacama.yaml`, day 0, initial camera, 480×270, four bounces, fixed
   exposure 1. Images use accumulated one-sample submissions.
 - Error is measured in linear Rec.709 luminance over foreground rectangle
   `[60, 211, 420, 260)` against the current renderer's 1,024-sample image.

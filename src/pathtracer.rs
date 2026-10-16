@@ -41,7 +41,7 @@ pub(crate) fn exposure_meter_size((w, h): (u32, u32)) -> (u32, u32) {
 struct Settings {
     globals: Globals,
     counts: [u32; 4],
-    background: [f32; 4], // brightness, map width, map height, unused
+    background: [f32; 4], // Milky Way brightness, map width, map height, point-source gain
     lights: [u32; 4],     // up to three star indices and total count (larger scenes fall back)
 }
 
@@ -95,9 +95,9 @@ impl Default for Options {
             ev_bias: 0.0,
             auto_key: 0.25,
             auto_percentile: 0.9,
-            // About 1% of a daylight sky, which therefore hides it; it
-            // emerges in deep twilight and dark, moonless nights.
-            milky_way: 0.01,
+            // Visible at the night exposure cap (~250), still far below any
+            // twilight or daylight sky, which therefore hides it.
+            milky_way: 4.0e-4,
         }
     }
 }
@@ -741,7 +741,7 @@ impl PathTracer {
                 self.options.milky_way,
                 crate::sky::WIDTH as f32,
                 crate::sky::HEIGHT as f32,
-                0.0,
+                crate::stars::POINT_SOURCE_GAIN,
             ],
         };
         queue.write_buffer(&self.settings, 0, bytemuck::bytes_of(&settings));

@@ -78,7 +78,12 @@ fn gpu_milky_way_is_camera_only_and_does_not_drive_exposure() {
     let dim_body = sample(&device, &queue, &mut tracer, &scene, 64)[0];
     assert!(dim_body[..3].iter().all(|v| (*v - 1e-5).abs() < 1e-10));
     assert_eq!(dim_body[3], 0.0);
-    assert!(rings::read_exposure(&device, &queue, &tracer) > 10_000.0);
+    // Night exposure is capped (METER_FLOOR) so noise never looks like stars.
+    let capped = rings::read_exposure(&device, &queue, &tracer);
+    assert!(
+        (200.0..=300.0).contains(&capped),
+        "night exposure cap: {capped}"
+    );
 
     // Resize must preserve the panorama binding and world orientation.
     tracer.resize(&device, (2, 2));
@@ -147,15 +152,14 @@ fn gpu_bright_air_outshines_stars_and_milky_way() {
     let sky = luminance(day) - day[3];
     eprintln!("day={day:?}, scattered sky {sky}");
     // No visibility rule: both keep their brightness (less extinction), and
-    // the daylit air out-shines them (the catalogue's visual gain lets a
-    // bright star add a few percent; the Milky Way vanishes).
+    // the daylit air out-shines them by orders of magnitude.
     assert!(day[3] > 0.0 && day[3] <= night[3] * 1.0001);
     assert!(
-        sky > 30.0 * star_radiance,
+        sky > 10.0 * star_radiance,
         "daylight must out-shine the star"
     );
     assert!(
-        sky > 50.0 * night[3],
+        sky > 100.0 * night[3],
         "daylight must out-shine the Milky Way"
     );
     scene.bodies[1].color = [0.; 3];

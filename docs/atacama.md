@@ -13,7 +13,7 @@ Choose **The desert road** in Levels, or **Seca — the desert road** in Explore
 To launch directly:
 
 ```sh
-cargo run --release -- --config configs/atacama.yaml
+cargo run --release -- --config configs/legacy/atacama.yaml
 ```
 
 The camera starts two metres above the ground beside the trail, looking north and 12° above the
@@ -49,7 +49,7 @@ comparisons of ground noise in this scene.
 Guided ground sampling is enabled by default. To open the scene at night:
 
 ```sh
-STARGAZE_TIME=0 cargo run --release -- --config configs/atacama.yaml
+STARGAZE_TIME=0 cargo run --release -- --config configs/legacy/atacama.yaml
 ```
 
 Add `--unguided-ground` to compare with the original sampler, using the same
@@ -62,7 +62,7 @@ planet-lit ground; atmosphere noise can remain visible.
 Rewind to day 0, or launch a separate night view:
 
 ```sh
-STARGAZE_TIME=0 cargo run --release -- --config configs/atacama.yaml
+STARGAZE_TIME=0 cargo run --release -- --config configs/legacy/atacama.yaml
 ```
 
 Cobre, Sal and Hielo are all above the horizon then. Their radii and reflectances
@@ -89,7 +89,7 @@ allocated. The road is a surface material on the continuous terrain, so its
 lighting, shadows and perspective follow the same renderer as the rest of the ground.
 
 ```sh
-cargo run --release -- --check-config configs/atacama.yaml
+cargo run --release -- --check-config configs/legacy/atacama.yaml
 cargo test --release
 cargo test --release gpu_ground_theme_switch -- --ignored --nocapture --test-threads=1
 cargo test --release gpu_atacama_planet_brightness -- --ignored --nocapture --test-threads=1

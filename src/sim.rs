@@ -665,7 +665,7 @@ pub fn binary_scene() -> Scene {
 
 /// Halo's near-side observatory, facing ringed Calyx in the binary system.
 pub fn halo_scene() -> Scene {
-    crate::config::parse(include_str!("../configs/halo.yaml"))
+    crate::config::parse(include_str!("../configs/legacy/halo.yaml"))
         .expect("bundled Halo configuration must be valid")
 }
 
@@ -699,7 +699,7 @@ mod tests {
                 assert!((scene.step_local_day(next, false).unwrap() - start).abs() < 1e-9);
             }
         }
-        let vesper = crate::config::parse(include_str!("../configs/vesper.yaml")).unwrap();
+        let vesper = crate::config::parse(include_str!("../configs/legacy/vesper.yaml")).unwrap();
         let year = vesper.body(vesper.host).period_days;
         assert!((vesper.step_local_day(0.0, true).unwrap() - year / (year - 1.0)).abs() < 1e-9);
     }

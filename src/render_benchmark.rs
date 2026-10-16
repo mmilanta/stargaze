@@ -29,6 +29,8 @@ const CASES: &[&str] = &[
     "ground-alpine",
     "ground-basalt",
     "ground-dunes",
+    "level-1",
+    "level-2",
 ];
 const FORMAT: wgpu::TextureFormat = wgpu::TextureFormat::Rgba8UnormSrgb;
 
@@ -67,11 +69,11 @@ fn gpu_atacama_preview() -> Result<()> {
             ..Options::default()
         },
     );
-    let arrival = crate::config::parse(include_str!("../configs/atacama.yaml"))?
+    let arrival = crate::config::parse(include_str!("../configs/legacy/atacama.yaml"))?
         .initial_time_days
         .unwrap();
     for (name, time) in [("arrival", arrival), ("night", 0.0), ("daylight", 0.14)] {
-        let scene = crate::config::parse(include_str!("../configs/atacama.yaml"))?;
+        let scene = crate::config::parse(include_str!("../configs/legacy/atacama.yaml"))?;
         let mut s = state(scene, time);
         s.point_initial_view();
         let p = s.scene.positions(time);
@@ -111,7 +113,7 @@ fn gpu_atacama_preview() -> Result<()> {
 fn gpu_atacama_planet_brightness() {
     let (device, queue) = super::tests::gpu();
     for name in ["Cobre", "Sal", "Hielo"] {
-        let scene = crate::config::parse(include_str!("../configs/atacama.yaml")).unwrap();
+        let scene = crate::config::parse(include_str!("../configs/legacy/atacama.yaml")).unwrap();
         let mut s = state(scene, 0.0);
         let i = s.scene.bodies.iter().position(|b| b.name == name).unwrap();
         let fov = 2.0 * (30_f64.to_radians().tan() * 32.0 / 720.0).atan();
@@ -445,19 +447,33 @@ fn fixture(name: &str, step: u32, cfg: &Config) -> Frame {
         // Sun about 5 degrees below the horizon: civil twilight.
         "twilight-afterglow" => state(crate::sim::default_scene(), 1.0525 + dt),
         "median-dense" => state(
-            crate::config::parse(include_str!("../configs/median-resonance.yaml")).unwrap(),
+            crate::config::parse(include_str!("../configs/legacy/median-resonance.yaml")).unwrap(),
             0.25 + dt,
         ),
         "vantus-eclipse" => state(crate::sim::binary_scene(), 444.478 + dt),
         "vantus-airless" => state(crate::sim::binary_scene(), 444.478 + dt),
         "atacama-day" | "atacama-night" => state(
-            crate::config::parse(include_str!("../configs/atacama.yaml")).unwrap(),
+            crate::config::parse(include_str!("../configs/legacy/atacama.yaml")).unwrap(),
             if name == "atacama-day" { 0.14 + dt } else { dt },
         ),
+        // Level start views, exactly as configured.
+        "level-1" | "level-2" => {
+            // The app's own start: configured or searched time, initial view
+            // and lookout height. The benchmark runner strips STARGAZE_* vars.
+            let scene = crate::config::parse(if name == "level-1" {
+                include_str!("../configs/1-halo-volcano.yaml")
+            } else {
+                include_str!("../configs/2-erg-dunes.yaml")
+            })
+            .unwrap();
+            let mut s = crate::State::with_scene(scene);
+            s.sim_time += dt;
+            s
+        }
         // The explore-mode grounds at the Atacama site, by day.
         "ground-craters" | "ground-alpine" | "ground-basalt" | "ground-dunes" => {
             let mut s = state(
-                crate::config::parse(include_str!("../configs/atacama.yaml")).unwrap(),
+                crate::config::parse(include_str!("../configs/legacy/atacama.yaml")).unwrap(),
                 0.14 + dt,
             );
             s.set_ground(match name {
@@ -472,6 +488,7 @@ fn fixture(name: &str, step: u32, cfg: &Config) -> Frame {
     };
     match name {
         "halo-rings" | "atacama-day" | "atacama-night" => s.point_initial_view(),
+        "level-1" | "level-2" => {}
         name if name.starts_with("ground-") => {
             // Atacama's initial direction, levelled to show the ground.
             s.point_initial_view();
@@ -855,6 +872,9 @@ fn run_benchmark(cfg: &Config) -> Result<()> {
         let exposure = match name.as_str() {
             "vantus-eclipse" | "vantus-airless" => 8.0,
             "moonlit-air" => 64.0,
+            // The app's auto exposure for the level's night start view.
+            "level-1" => 110.0,
+            "level-2" => 0.16,
             "ground-craters" => 0.4,
             "ground-dunes" => 0.3,
             "ground-alpine" => 0.25,

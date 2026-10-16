@@ -74,7 +74,7 @@ fn scene_for_startup() -> Result<Option<Scene>> {
         match arg.to_str() {
             Some("--help" | "-h") => {
                 println!(
-                    "Stargaze — an observatory in a configurable star system\n\nUsage: stargaze [--game] [--unguided-ground] [--config FILE | --check-config FILE]\n\n--game               Play the anonymous system reconstruction puzzle\n--unguided-ground    Use the original ground sampler for comparison\n--guided-ground      Use guided ground sampling (default)\n--config FILE        Load a YAML system and its camera\n--check-config FILE  Validate without opening a window\n\nDefaults to configs/halo.yaml, or configs/puzzle.yaml with --game. STARGAZE_CONFIG also selects a file."
+                    "Stargaze — an observatory in a configurable star system\n\nUsage: stargaze [--game] [--unguided-ground] [--config FILE | --check-config FILE]\n\n--game               Play the anonymous system reconstruction puzzle\n--unguided-ground    Use the original ground sampler for comparison\n--guided-ground      Use guided ground sampling (default)\n--config FILE        Load a YAML system and its camera\n--check-config FILE  Validate without opening a window\n\nDefaults to the first level, configs/1-halo-volcano.yaml (also with --game). STARGAZE_CONFIG also selects a file."
                 );
                 return Ok(None);
             }
@@ -104,15 +104,22 @@ fn scene_for_startup() -> Result<Option<Scene>> {
         } else {
             let preset = std::env::var("STARGAZE_SYSTEM").ok();
             match preset.as_deref() {
-                None if game_requested() => {
-                    config::load(concat!(env!("CARGO_MANIFEST_DIR"), "/configs/puzzle.yaml"))?
-                }
-                None | Some("halo" | "binary") => {
-                    config::load(concat!(env!("CARGO_MANIFEST_DIR"), "/configs/halo.yaml"))?
-                }
+                None if game_requested() => config::load(concat!(
+                    env!("CARGO_MANIFEST_DIR"),
+                    "/configs/1-halo-volcano.yaml"
+                ))?,
+                // The first level opens by default.
+                None => config::load(concat!(
+                    env!("CARGO_MANIFEST_DIR"),
+                    "/configs/1-halo-volcano.yaml"
+                ))?,
+                Some("halo" | "binary") => config::load(concat!(
+                    env!("CARGO_MANIFEST_DIR"),
+                    "/configs/legacy/halo.yaml"
+                ))?,
                 Some("earth") => config::load(concat!(
                     env!("CARGO_MANIFEST_DIR"),
-                    "/configs/solar-system.yaml"
+                    "/configs/legacy/solar-system.yaml"
                 ))?,
                 Some("calyx" | "solar" | "sol" | "saturn") => scene_for_system(preset.as_deref()),
                 Some(other) => anyhow::bail!("unknown STARGAZE_SYSTEM '{other}'"),
@@ -1295,7 +1302,7 @@ impl App {
             self.open_page(menu::Page::Levels);
             self.select_map(std::path::Path::new(concat!(
                 env!("CARGO_MANIFEST_DIR"),
-                "/configs/puzzle.yaml"
+                "/configs/1-halo-volcano.yaml"
             )));
         } else if preset_selected {
             self.menu.can_resume = true;
@@ -2709,7 +2716,7 @@ mod app_tests {
 
     #[test]
     fn vesper_starts_and_resets_to_open_sky() {
-        let scene = config::parse(include_str!("../configs/vesper.yaml")).unwrap();
+        let scene = config::parse(include_str!("../configs/legacy/vesper.yaml")).unwrap();
         let mut state = State::with_scene(scene);
         assert_eq!(state.observer.az, 0.0);
         assert_eq!(state.observer.alt, 25_f64.to_radians());
@@ -3240,11 +3247,11 @@ mod app_tests {
         assert!(app.menu_key(KeyCode::Enter, None, None));
         assert!(app.menu.open);
         assert!(app.menu.page == menu::Page::Levels);
-        assert_eq!(app.menu.entries[0].puzzle_title(0), "First field study");
+        assert_eq!(app.menu.entries[0].puzzle_title(0), "Ember summit");
         app.menu_key(KeyCode::KeyP, None, None);
         assert!(app.menu.page == menu::Page::Explore);
         app.menu_key(KeyCode::Slash, None, None);
-        app.menu_key(KeyCode::KeyV, Some("vesper"), None);
+        app.menu_key(KeyCode::KeyV, Some("volcano"), None);
         assert_eq!(app.menu.visible().len(), 1);
         app.menu_key(KeyCode::Enter, None, None); // close the search first
         app.menu_key(KeyCode::Enter, None, None);
@@ -3252,7 +3259,7 @@ mod app_tests {
         assert!(app.game.is_none());
         assert_eq!(
             app.active_path.as_ref().unwrap().file_stem().unwrap(),
-            "vesper"
+            "1-halo-volcano"
         );
         app.toggle_menu();
         app.menu_key(KeyCode::KeyG, None, None);
@@ -3280,9 +3287,14 @@ mod app_tests {
 
     #[test]
     fn startup_options_enter_the_observatory_and_game_restores_the_saved_level() {
-        let puzzle =
-            std::path::Path::new(concat!(env!("CARGO_MANIFEST_DIR"), "/configs/puzzle.yaml"));
-        let halo = std::path::Path::new(concat!(env!("CARGO_MANIFEST_DIR"), "/configs/halo.yaml"));
+        let puzzle = std::path::Path::new(concat!(
+            env!("CARGO_MANIFEST_DIR"),
+            "/configs/1-halo-volcano.yaml"
+        ));
+        let halo = std::path::Path::new(concat!(
+            env!("CARGO_MANIFEST_DIR"),
+            "/configs/legacy/halo.yaml"
+        ));
         let mut source = app();
         edited_level(&mut source, puzzle);
         source.state.sim_time = 7.5;
@@ -3296,7 +3308,7 @@ mod app_tests {
         game.open_initial_view(None, false);
         assert!(!game.menu.open && game.menu.can_resume && game.study_started);
         assert_eq!(game.active_path.as_deref(), Some(puzzle));
-        assert_eq!(game.game.as_ref().unwrap().title, "First field study");
+        assert_eq!(game.game.as_ref().unwrap().title, "Ember summit");
         assert_eq!(game.game.as_ref().unwrap().progress(), expected);
         assert_eq!(game.state.sim_time, 7.5);
         assert_eq!(game.state.observer.fov_y, 0.3);
@@ -3310,7 +3322,9 @@ mod app_tests {
             assert_eq!(configured.active_path.as_deref(), Some(halo));
             assert_eq!(configured.game.is_some(), puzzle_mode);
             if let Some(g) = &configured.game {
-                assert_eq!(g.title, "Amber horizon");
+                // An explicit file outside the bundled level list gets the
+                // generic title.
+                assert_eq!(g.title, "Field study");
             }
             assert!(configured.build_frame(1280, 720).0.is_some());
 
@@ -3346,9 +3360,14 @@ mod app_tests {
             std::env::temp_dir().join(format!("stargaze-blueprint-levels-{}", std::process::id()));
         let save = dir.join("progress.yaml");
         app.progress = progress::Book::load_from(Some(save.clone()));
-        let path =
-            std::path::Path::new(concat!(env!("CARGO_MANIFEST_DIR"), "/configs/puzzle.yaml"));
-        let other = std::path::Path::new(concat!(env!("CARGO_MANIFEST_DIR"), "/configs/halo.yaml"));
+        let path = std::path::Path::new(concat!(
+            env!("CARGO_MANIFEST_DIR"),
+            "/configs/1-halo-volcano.yaml"
+        ));
+        let other = std::path::Path::new(concat!(
+            env!("CARGO_MANIFEST_DIR"),
+            "/configs/legacy/halo.yaml"
+        ));
         edited_level(&mut app, path);
         let summary = app.game.as_ref().unwrap().progress();
         assert_eq!(summary.0, 1);
@@ -3366,7 +3385,7 @@ mod app_tests {
         assert!(app.menu.open);
         assert!(save.exists());
         assert_eq!(
-            progress::Book::load_from(Some(save.clone())).levels["puzzle.yaml"].summary(),
+            progress::Book::load_from(Some(save.clone())).levels["1-halo-volcano.yaml"].summary(),
             summary
         );
         app.select_map(other);
@@ -3398,14 +3417,16 @@ mod app_tests {
         let path = dir.join("progress.yaml");
         app.progress = progress::Book::load_from(Some(path.clone()));
         app.menu.page = menu::Page::Levels;
-        let level =
-            std::path::Path::new(concat!(env!("CARGO_MANIFEST_DIR"), "/configs/puzzle.yaml"));
+        let level = std::path::Path::new(concat!(
+            env!("CARGO_MANIFEST_DIR"),
+            "/configs/1-halo-volcano.yaml"
+        ));
         app.select_map(level);
         app.state.sim_time = 17.0;
         app.request_leave(Leave::Levels);
         assert!(app.leave.is_none());
         assert_eq!(
-            progress::Book::load_from(Some(path.clone())).levels["puzzle.yaml"].time,
+            progress::Book::load_from(Some(path.clone())).levels["1-halo-volcano.yaml"].time,
             17.0
         );
         assert!(app.menu.summary(level).is_some());
@@ -3419,8 +3440,10 @@ mod app_tests {
     #[test]
     fn failed_keep_on_quit_preserves_the_editor_and_allows_retry() {
         let mut app = app();
-        let level =
-            std::path::Path::new(concat!(env!("CARGO_MANIFEST_DIR"), "/configs/puzzle.yaml"));
+        let level = std::path::Path::new(concat!(
+            env!("CARGO_MANIFEST_DIR"),
+            "/configs/1-halo-volcano.yaml"
+        ));
         edited_level(&mut app, level);
         app.request_leave(Leave::Quit);
         let before = app.game.as_ref().unwrap().progress();

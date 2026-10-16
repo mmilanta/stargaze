@@ -141,7 +141,7 @@ compute-capable Metal, Vulkan or DX12 device is sufficient.
 
 The **Desert road** level adds Atacama-inspired gravel, ochre hills and a tiny
 off-road two-track trail on the freely rotating middle moon of a ringed gas giant. Select it from
-Levels, or run `cargo run --release -- --config configs/atacama.yaml`.
+Levels, or run `cargo run --release -- --config configs/legacy/atacama.yaml`.
 See the [scene preview, orbital layout and night-view instructions](docs/atacama.md).
 
 Left-drag to look toward the ground; `Home` returns to the configured observing
@@ -213,17 +213,21 @@ If installing Rust using rustup for the first time, load its environment with
 ### Define a system with YAML
 
 ```sh
-cargo run --release -- --config configs/halo.yaml
-cargo run --release -- --config configs/solar-system.yaml
-cargo run --release -- --check-config configs/halo.yaml
+cargo run --release -- --config configs/legacy/halo.yaml
+cargo run --release -- --config configs/legacy/solar-system.yaml
+cargo run --release -- --check-config configs/legacy/halo.yaml
 ```
 
-The default launch reads `configs/halo.yaml` from the project directory at
-runtime. The second config contains the Sun, all eight planets and selected
-moons, with the camera on Earth looking at the Moon. Edit either file or
-create your own; changes take effect when selected from the menu or on the next launch without rebuilding.
+The menu lists the levels in `configs/` (one per explore ground, numbered in
+play order); the default launch, with or without `--game`, opens the first,
+`configs/1-halo-volcano.yaml`: Calyx and Halo over the volcano ground. The
+earlier systems live in `configs/legacy/` (still used by presets, tests and
+benchmarks); `configs/legacy/solar-system.yaml` contains the Sun, all eight
+planets and selected moons, with the camera on Earth looking at the Moon. Edit
+any file or create your own; changes take effect when selected from the menu
+or on the next launch without rebuilding.
 
-`configs/vesper.yaml` adds **Vesper and the bright wanderers**: a surface
+`configs/legacy/vesper.yaml` adds **Vesper and the bright wanderers**: a surface
 observatory under an Earth-like atmosphere, with two moons in a 2:1 orbital
 resonance (5 and 10 days). The inner rocky planet Cinder has a moon one
 quarter its diameter; the outer planet Aureole has three moons and compact
@@ -231,9 +235,9 @@ rings. Its authored night view keeps both planets above the horizon, with
 bright reflected surfaces that outshine the background star dots when resolved.
 The camera starts with a wide, 60° view of open sky, pointing north at 25°
 altitude, so the planets must be found by observing. Reset returns to this view.
-Select it in the menu or run `cargo run --release -- --config configs/vesper.yaml`.
+Select it in the menu or run `cargo run --release -- --config configs/legacy/vesper.yaml`.
 In game mode, select **Bright wanderers**, or launch it directly with
-`cargo run --release -- --game --config configs/vesper.yaml`.
+`cargo run --release -- --game --config configs/legacy/vesper.yaml`.
 Outside game mode, F1 and F2 target Aureole and Cinder; F3 and F4 target Vesper's moons.
 
 Click **Menu [M]** in Explore or **Maps [M]** in a field study to open the
@@ -585,10 +589,10 @@ and the Vantus eclipse).
 ```sh
 cargo run --release -- --game
 # Play any existing system as an anonymous puzzle:
-cargo run --release -- --game --config configs/halo.yaml
+cargo run --release -- --game --config configs/legacy/halo.yaml
 ```
 
-The default game loads a small fictional system from `configs/puzzle.yaml`.
+The default game loads a small fictional system from `configs/legacy/puzzle.yaml`.
 Observe the sky, infer the orbital hierarchy, and identify which object you
 are standing on. Body labels, named tracking titles, function-key targets, and
 automatic eclipse/transit searches are unavailable in this mode. Ordinary observatory mode retains those shortcuts.

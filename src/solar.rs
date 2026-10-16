@@ -65,7 +65,7 @@ impl Orbiter {
 }
 
 pub fn scene() -> Scene {
-    crate::config::parse(include_str!("../configs/solar-system.yaml"))
+    crate::config::parse(include_str!("../configs/legacy/solar-system.yaml"))
         .expect("bundled solar configuration must be valid")
 }
 

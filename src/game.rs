@@ -1764,7 +1764,11 @@ mod tests {
     }
 
     fn puzzle() -> Scene {
-        crate::config::load(concat!(env!("CARGO_MANIFEST_DIR"), "/configs/puzzle.yaml")).unwrap()
+        crate::config::load(concat!(
+            env!("CARGO_MANIFEST_DIR"),
+            "/configs/legacy/puzzle.yaml"
+        ))
+        .unwrap()
     }
 
     fn correct_puzzle() -> Game {
@@ -1855,7 +1859,10 @@ mod tests {
         app.state.view_lock = Some(crate::ViewLock::Background(glam::DVec3::X));
         app.toggle_menu();
         assert!(app.menu.open);
-        assert_eq!(app.menu.entries[0].path.file_stem().unwrap(), "puzzle");
+        assert_eq!(
+            app.menu.entries[0].path.file_stem().unwrap(),
+            "1-halo-volcano"
+        );
         app.toggle_menu();
         assert!(!app.menu.open);
         let game = app.game.as_ref().unwrap();
@@ -1872,7 +1879,10 @@ mod tests {
         assert_eq!(app.game.as_ref().unwrap().nodes.len(), 5);
         assert_eq!(app.state.sim_time, 42.0);
 
-        let path = std::path::Path::new(concat!(env!("CARGO_MANIFEST_DIR"), "/configs/halo.yaml"));
+        let path = std::path::Path::new(concat!(
+            env!("CARGO_MANIFEST_DIR"),
+            "/configs/legacy/halo.yaml"
+        ));
         app.select_map(path);
         assert!(!app.menu.open && app.menu.error.is_none());
         assert_eq!(app.state.scene.body(app.state.scene.host).name, "Halo");
@@ -1996,9 +2006,11 @@ mod tests {
 
     #[test]
     fn notebook_interaction_creates_marks_scores_and_undoes_without_sky_clicks() {
-        let scene =
-            crate::config::load(concat!(env!("CARGO_MANIFEST_DIR"), "/configs/puzzle.yaml"))
-                .unwrap();
+        let scene = crate::config::load(concat!(
+            env!("CARGO_MANIFEST_DIR"),
+            "/configs/legacy/puzzle.yaml"
+        ))
+        .unwrap();
         let mut g = Game::default();
         let l = Layout::new(1280.0, 720.0, 1.0);
         let center = |r: Rect| ((r.x + r.w * 0.5) as f64, (r.y + r.h * 0.5) as f64);

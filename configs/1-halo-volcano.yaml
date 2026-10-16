@@ -1,0 +1,235 @@
+# Stargaze system format v1. Distances and angles use explicit units.
+# Omit time_days to search for a suitable night view; set it for an exact epoch.
+# Orbit angles are measured in the shared ecliptic frame, including moon orbits.
+# Level 1 — the volcano ground. Halo, tidally locked to the ringed planet
+# Calyx, which orbits a yellow and an orange star (two suns, two shadows).
+# The suns are a close pair, 0.24 AU apart (never more than ~3.3 degrees in
+# Halo's sky), so Calyx often hides both at once: a double eclipse at the
+# near side's noon.
+# Halo orbits 110,000 km from Calyx (period by Kepler's third law), so Calyx
+# spans ~7 degrees and its rings ~13 degrees, low over the southern horizon.
+version: 1
+name: Calyx and Halo — the volcano
+camera:
+  body: halo
+  latitude_deg: 75.0
+  longitude_deg: 180.0
+  height_m: 2.0
+  look_at: calyx
+  # Calyx hangs fixed due south, ~15 degrees up (Halo is tidally locked):
+  # frame it over the crater rim, the lava sea and the horizon cones.
+  direction: {azimuth_deg: 180, altitude_deg: 10}
+  fov_deg: 70.0
+  atmosphere: earthlike
+  ground: basalt
+targets:
+  - calyx
+  - aur
+  - igni
+  - umbra
+  - nerid
+  - vantus
+  - pip
+  - iri
+bodies:
+  - id: barycentre
+    name: Barycentre
+    kind: anchor
+    radius_km: 0.0
+  - id: aur
+    name: Aur
+    kind: star
+    parent: barycentre
+    radius_km: 4487936.121
+    albedo: [0.0, 0.0, 0.0]
+    # 6.5x the original 2.0: Earth-like daylight at Halo, 4.2 AU away.
+    luminosity: 13.0
+    emission: [1.0, 0.96, 0.86]
+    orbit:
+      # Was 0.3 + 0.5 AU at 120 days; same masses, Kepler's third law.
+      semi_major_axis_au: 0.09
+      period_days: 19.72
+    rotation:
+      mode: free
+      period_days: 22.0
+  - id: igni
+    name: Igni
+    kind: star
+    parent: barycentre
+    radius_km: 2692761.6726
+    albedo: [0.0, 0.0, 0.0]
+    luminosity: 4.55
+    emission: [1.0, 0.42, 0.2]
+    orbit:
+      semi_major_axis_au: 0.15
+      period_days: 19.72
+      mean_anomaly_deg: 180.0
+    rotation:
+      mode: free
+      period_days: 30.0
+  - id: nerid
+    name: Nerid
+    kind: planet
+    parent: barycentre
+    # Enlarged and brightened so Nerid shines as a bright wandering star.
+    radius_km: 12000.0
+    albedo: [0.68, 0.75, 0.82]
+    orbit:
+      semi_major_axis_au: 2.6
+      period_days: 1530.0
+      eccentricity: 0.03
+      inclination_deg: 1.5
+      ascending_node_deg: 22.9183118052
+      periapsis_deg: 63.0253574644
+      mean_anomaly_deg: 114.5915590262
+    rotation:
+      mode: free
+      period_days: 0.85
+      obliquity_deg: 18.0
+  - id: pip
+    name: Pip
+    kind: moon
+    parent: nerid
+    radius_km: 1200.0
+    albedo: [0.6, 0.6, 0.62]
+    orbit:
+      period_days: 2.5
+      eccentricity: 0.01
+      inclination_deg: 2.0
+      periapsis_deg: 28.6478897565
+      mean_anomaly_deg: 57.2957795131
+      semi_major_axis_km: 32911.531554
+    rotation:
+      mode: free
+      period_days: 2.5
+      obliquity_deg: 2.0
+  - id: calyx
+    name: Calyx
+    kind: planet
+    parent: barycentre
+    radius_km: 6500.0
+    albedo: [0.72, 0.6, 0.42]
+    orbit:
+      semi_major_axis_au: 4.2
+      period_days: 3000.0
+      eccentricity: 0.02
+      inclination_deg: 1.0
+      ascending_node_deg: 114.5915590262
+      periapsis_deg: 171.8873385392
+      mean_anomaly_deg: 257.8310078089
+    rotation:
+      mode: free
+      period_days: 0.6
+      obliquity_deg: 22.0
+    rings:
+      inner_radius: 1.25
+      outer_radius: 1.9
+      optical_depth: 1.0
+      albedo: [0.88, 0.8, 0.66]
+      banded: true
+  - id: halo
+    name: Halo
+    kind: moon
+    parent: calyx
+    radius_km: 1500.0
+    albedo: [0.55, 0.57, 0.6]
+    orbit:
+      period_days: 34.481725
+      inclination_deg: 0.5
+      ascending_node_deg: 90.0
+      periapsis_deg: -90.0
+      semi_major_axis_km: 110000.0
+    rotation:
+      mode: tidal_lock
+  - id: umbra
+    name: Umbra
+    kind: moon
+    parent: calyx
+    radius_km: 1000.0
+    albedo: [0.35, 0.33, 0.32]
+    orbit:
+      period_days: 8.0
+      eccentricity: 0.01
+      inclination_deg: 1.5
+      ascending_node_deg: 57.2957795131
+      periapsis_deg: 114.5915590262
+      mean_anomaly_deg: 171.8873385392
+      semi_major_axis_km: 47871.318624
+    rotation:
+      mode: free
+      period_days: 8.0
+      obliquity_deg: 1.5000000000000002
+  - id: vantus
+    name: Vantus
+    kind: planet
+    parent: barycentre
+    # A gas giant (Jupiter is 71,500 km): a brilliant wandering star at
+    # night even from the far side of the suns. Moon orbits scale with it
+    # (same density, so the same periods).
+    radius_km: 60000.0
+    albedo: [0.62, 0.68, 0.78]
+    orbit:
+      semi_major_axis_au: 6.8
+      period_days: 6200.0
+      eccentricity: 0.05
+      inclination_deg: 2.5
+      ascending_node_deg: 85.9436692696
+      periapsis_deg: 45.8366236105
+      mean_anomaly_deg: 68.7549354157
+    rotation:
+      mode: free
+      period_days: 0.4
+      obliquity_deg: 12.000000000000002
+  - id: iri
+    name: Iri
+    kind: moon
+    parent: vantus
+    radius_km: 800.0
+    albedo: [0.5, 0.5, 0.55]
+    orbit:
+      period_days: 5.0
+      eccentricity: 0.005
+      inclination_deg: 1.0
+      periapsis_deg: 57.2957795131
+      mean_anomaly_deg: 28.6478897565
+      semi_major_axis_km: 80782.85
+    rotation:
+      mode: free
+      period_days: 5.0
+      obliquity_deg: 1.0
+  - id: kesh
+    name: Kesh
+    kind: moon
+    parent: vantus
+    radius_km: 600.0
+    albedo: [0.45, 0.4, 0.35]
+    orbit:
+      period_days: 11.0
+      eccentricity: 0.01
+      inclination_deg: 2.0
+      ascending_node_deg: 28.6478897565
+      periapsis_deg: 114.5915590262
+      mean_anomaly_deg: 143.2394487827
+      semi_major_axis_km: 134638.08
+    rotation:
+      mode: free
+      period_days: 11.0
+      obliquity_deg: 2.0
+  - id: coll
+    name: Coll
+    kind: moon
+    parent: vantus
+    radius_km: 500.0
+    albedo: [0.3, 0.32, 0.38]
+    orbit:
+      period_days: 18.0
+      eccentricity: 0.02
+      inclination_deg: 3.0
+      ascending_node_deg: 11.4591559026
+      periapsis_deg: 229.1831180523
+      mean_anomaly_deg: 286.4788975654
+      semi_major_axis_km: 201957.13
+    rotation:
+      mode: free
+      period_days: 18.0
+      obliquity_deg: 3.0000000000000004

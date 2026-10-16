@@ -609,11 +609,11 @@ fn gpu_scene_smoke() {
         ("halo", crate::sim::halo_scene()),
         (
             "puzzle",
-            crate::config::parse(include_str!("../configs/puzzle.yaml")).unwrap(),
+            crate::config::parse(include_str!("../configs/legacy/puzzle.yaml")).unwrap(),
         ),
         (
             "median",
-            crate::config::parse(include_str!("../configs/median-resonance.yaml")).unwrap(),
+            crate::config::parse(include_str!("../configs/legacy/median-resonance.yaml")).unwrap(),
         ),
         ("horizon", crate::sim::binary_scene()),
         ("vantus", crate::sim::binary_scene()),
@@ -1051,7 +1051,8 @@ fn gpu_reflected_atmosphere() {
 #[ignore = "requires a GPU"]
 fn gpu_dense_level_daylight() {
     let (device, queue) = gpu();
-    let scene = crate::config::parse(include_str!("../configs/median-resonance.yaml")).unwrap();
+    let scene =
+        crate::config::parse(include_str!("../configs/legacy/median-resonance.yaml")).unwrap();
     let mut state = crate::State::with_scene(scene);
     let lumen = state
         .scene
@@ -1125,17 +1126,17 @@ fn gpu_dense_level_daylight() {
             contrast > 0.3 * crate::stars::radiance(&star)[0],
             "the star is never removed by a rule"
         );
-        // The catalogue carries a visual gain, so even this bright star adds
-        // at most a few percent to daylight (faintly visible in the darker
-        // part of the daytime sky), but stands out on the faint side.
+        // Catalogue (with the shared point-source gain): daylight out-shines
+        // even this bright star by more than 10^2, while on the faint-sun
+        // side it stands out more.
         if time == noon {
             assert!(
-                ratio < 0.06,
+                ratio < 6.0e-3,
                 "daylight should out-shine stars across the sky"
             );
         } else {
             assert!(
-                ratio > 0.06,
+                ratio > 8.0e-3,
                 "stars should stand out more on the faint-sun side"
             );
         }

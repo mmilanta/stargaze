@@ -23,7 +23,7 @@ CASES = ["halo-rings", "earth-daylight", "earth-twilight", "median-dense",
          "vantus-eclipse", "vantus-airless", "dual-eclipse"]
 EXTRA_CASES = ["moonlit-air", "eclipse-umbra-edge", "twilight-afterglow", "eclipse-totality",
                "atacama-day", "atacama-night", "ground-craters", "ground-alpine", "ground-basalt",
-               "ground-dunes"]
+               "ground-dunes", "level-1", "level-2"]
 QUALITY_VARIANTS = ["reference", "sun6", "view12", "balanced", "fast", "planetshine-quarter", "no-planetshine"]
 OPTIMIZATION_VARIANTS = ["sky-any-hit", "dark-reflection", "raw-combined", "view6-sun4",
                          "view8-sun2", "reflect-half", "guided-ground", "guided-raw"]

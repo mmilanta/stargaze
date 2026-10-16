@@ -1,0 +1,180 @@
+# Level 2 — the dune ground. You stand at 22 degrees latitude on Erg, a ringed
+# desert planet, so its rings arch high across the southern sky (30-57 degrees
+# up) instead of showing edge-on.
+# Three moons in a 1:2:4 resonance; the innermost, Simoom, looks twice as
+# wide as the sun. The moons' orbits tilt 4 degrees from the planets' plane,
+# so eclipses come in seasons about six months apart; the level opens in one.
+# Inside Erg's orbit circles a near-double planet (Gemma and Gemmi, 3/4 its
+# size) whose orbit lies in their orbital plane: every orbit brings a solar
+# eclipse on Gemma and, half an orbit later, an eclipse of Gemmi.
+# Outside, Dhow has huge rings (three planet diameters wide) and a 50-degree
+# tilt; its three moons orbit in its equator (inclination 50, node 90 lies
+# in the plane normal to its tilted axis).
+# Orbital periods are illustrative Keplerian tracks, not an N-body model.
+version: 1
+name: Erg — the ringed dune sea
+# Inside the first eclipse season (days 182-204), when the sun lights the
+# rings' northern face that you see. Simoom totally covers the sun at day
+# 185.41, 37 degrees up in the west, about an hour after the level opens:
+# the sky turns black while the rings, outside its shadow, stay sunlit.
+time_days: 185.37
+camera:
+  body: erg
+  latitude_deg: 22
+  longitude_deg: 0
+  height_m: 2
+  look_at: simoom
+  # West, above the end of the ring arch: the sun and the approaching Simoom.
+  direction: {azimuth_deg: 270, altitude_deg: 30}
+  fov_deg: 70
+  atmosphere: earthlike
+  ground: dunes
+targets: [simoom, sirocco, harmattan, gemma, gemmi, dhow, khamsin, zonda, bora]
+bodies:
+  - id: ochre
+    name: Ochre
+    kind: star
+    radius_km: 696340
+    luminosity: 1
+    emission: [1.0, 0.94, 0.85]
+    rotation: {mode: free, period_days: 25}
+  # The near-double planet: Gemmi is 3/4 of Gemma's diameter and orbits in
+  # the planets' plane, so the pair eclipses each other every orbit.
+  - id: gemma
+    name: Gemma
+    kind: planet
+    parent: ochre
+    radius_km: 5200
+    albedo: [0.62, 0.58, 0.52]
+    orbit:
+      semi_major_axis_au: 0.62
+      period_days: 178.31
+      mean_anomaly_deg: 130
+    rotation: {mode: tidal_lock}
+  - id: gemmi
+    name: Gemmi
+    kind: moon
+    parent: gemma
+    radius_km: 3900
+    albedo: [0.55, 0.60, 0.66]
+    orbit:
+      semi_major_axis_km: 30000
+      period_days: 3.2
+    rotation: {mode: tidal_lock}
+  # Home: a ringed dune world. Rings lie in its equator (22-degree tilt).
+  - id: erg
+    name: Erg
+    kind: planet
+    parent: ochre
+    radius_km: 6371
+    albedo: [0.66, 0.42, 0.24]
+    orbit:
+      semi_major_axis_au: 1.0
+      period_days: 365.25
+    rotation: {mode: free, period_days: 0.95, obliquity_deg: 22}
+    rings:
+      inner_radius: 1.35
+      outer_radius: 2.4
+      optical_depth: 0.8
+      albedo: [0.86, 0.78, 0.66]
+      banded: true
+  # 1:2:4 mean-motion chain: each doubling of period widens the orbit by
+  # 2^(2/3). Mean longitudes 75, 105, 30 give a Laplace angle of -180.
+  # Simoom: 1700 km at 182,800 km spans 1.07 degrees, twice the sun.
+  - id: simoom
+    name: Simoom
+    kind: moon
+    parent: erg
+    radius_km: 1700
+    albedo: [0.58, 0.55, 0.50]
+    orbit:
+      semi_major_axis_km: 182800
+      period_days: 3
+      inclination_deg: 4
+      ascending_node_deg: 0
+      mean_anomaly_deg: 75
+    rotation: {mode: tidal_lock}
+  - id: sirocco
+    name: Sirocco
+    kind: moon
+    parent: erg
+    radius_km: 1300
+    albedo: [0.70, 0.66, 0.60]
+    orbit:
+      semi_major_axis_km: 290172.6
+      period_days: 6
+      inclination_deg: 4
+      ascending_node_deg: 0
+      mean_anomaly_deg: 105
+    rotation: {mode: tidal_lock}
+  - id: harmattan
+    name: Harmattan
+    kind: moon
+    parent: erg
+    radius_km: 2000
+    albedo: [0.48, 0.50, 0.55]
+    orbit:
+      semi_major_axis_km: 460614.0
+      period_days: 12
+      inclination_deg: 4
+      ascending_node_deg: 0
+      mean_anomaly_deg: 30
+    rotation: {mode: tidal_lock}
+  # The outer giant: rings from 1.3 to 4.3 planet radii (three diameters
+  # wide) and a 50-degree tilt. Moons orbit outside the rings, in its equator.
+  - id: dhow
+    name: Dhow
+    kind: planet
+    parent: ochre
+    radius_km: 30000
+    albedo: [0.70, 0.62, 0.50]
+    orbit:
+      semi_major_axis_au: 2.4
+      period_days: 1358.0
+      mean_anomaly_deg: 250
+    rotation: {mode: free, period_days: 0.45, obliquity_deg: 50}
+    rings:
+      inner_radius: 1.3
+      outer_radius: 4.3
+      optical_depth: 0.7
+      albedo: [0.84, 0.80, 0.72]
+      banded: true
+  - id: khamsin
+    name: Khamsin
+    kind: moon
+    parent: dhow
+    radius_km: 2500
+    albedo: [0.55, 0.52, 0.48]
+    orbit:
+      semi_major_axis_km: 180000
+      period_days: 2.8
+      inclination_deg: 50
+      ascending_node_deg: 90
+      mean_anomaly_deg: 20
+    rotation: {mode: tidal_lock}
+  - id: zonda
+    name: Zonda
+    kind: moon
+    parent: dhow
+    radius_km: 1800
+    albedo: [0.66, 0.68, 0.70]
+    orbit:
+      semi_major_axis_km: 290000
+      period_days: 5.73
+      inclination_deg: 50
+      ascending_node_deg: 90
+      mean_anomaly_deg: 160
+    rotation: {mode: tidal_lock}
+  - id: bora
+    name: Bora
+    kind: moon
+    parent: dhow
+    radius_km: 3200
+    albedo: [0.45, 0.47, 0.52]
+    orbit:
+      semi_major_axis_km: 520000
+      period_days: 13.75
+      inclination_deg: 50
+      ascending_node_deg: 90
+      mean_anomaly_deg: 280
+    rotation: {mode: tidal_lock}

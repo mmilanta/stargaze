@@ -39,9 +39,12 @@ struct Exposure {
 const BINS: u32 = 256u;
 const LOG_MIN: f32 = -24.0;
 const LOG_MAX: f32 = 24.0;
-// Below this the metered region is essentially empty sky; keep the current
-// exposure instead of chasing a meaningless dark frame towards infinity.
-const METER_FLOOR: f32 = 1.0e-6;
+// Below this the metered region is essentially empty night sky. Expose for
+// this floor instead of chasing a dark frame towards infinity: with the
+// default key (0.25) that caps night exposure at ~250. Higher gains would
+// lift path-tracing noise to the brightness of stars; unresolved points of
+// light carry a shared visual gain instead (stars::POINT_SOURCE_GAIN).
+const METER_FLOOR: f32 = 1.0e-3;
 const MIN_EXPOSURE: f32 = 1.0e-8;
 const MAX_EXPOSURE: f32 = 1.0e8;
 
@@ -96,10 +99,7 @@ fn resolve() {
         }
     }
     let t = (f32(bin) + 0.5) / f32(BINS);
-    let measured = exp2(LOG_MIN + t * (LOG_MAX - LOG_MIN));
-    if (measured < METER_FLOOR) {
-        return;
-    }
+    let measured = max(exp2(LOG_MIN + t * (LOG_MAX - LOG_MIN)), METER_FLOOR);
     let desired = clamp(exposure.key / measured, MIN_EXPOSURE, MAX_EXPOSURE);
     // Ease toward the new exposure so a scene or time change does not flicker.
     let rate = 0.15;

@@ -31,6 +31,9 @@ struct Camera {
     fov_deg: f64,
     #[serde(default)]
     atmosphere: Option<AtmosphereDef>,
+    /// Multiplier on the preset's density (Rayleigh and Mie); 1 if omitted.
+    #[serde(default)]
+    atmosphere_density: Option<f64>,
     #[serde(default)]
     ground: crate::ground::Theme,
     #[serde(default)]
@@ -279,6 +282,11 @@ impl System {
             "camera.height_m must be at least 0.1 metres"
         );
         ensure!(
+            c.atmosphere_density
+                .is_none_or(|d| d.is_finite() && (0.0..=10.0).contains(&d)),
+            "camera.atmosphere_density must be between 0 and 10"
+        );
+        ensure!(
             c.fov_deg.is_finite() && (0.001..=90.0).contains(&c.fov_deg),
             "camera.fov_deg must be in [0.001, 90]"
         );
@@ -298,9 +306,12 @@ impl System {
             host,
             default_target,
             targets,
-            atmosphere: c.atmosphere.map(|preset| match preset {
-                AtmosphereDef::Earthlike => Atmosphere::earthlike(),
-                AtmosphereDef::Dense => Atmosphere::dense(),
+            atmosphere: c.atmosphere.map(|preset| {
+                match preset {
+                    AtmosphereDef::Earthlike => Atmosphere::earthlike(),
+                    AtmosphereDef::Dense => Atmosphere::dense(),
+                }
+                .tuned(c.atmosphere_density.unwrap_or(1.0), None)
             }),
             ground: c.ground,
             default_fov_deg: c.fov_deg,
@@ -472,11 +483,11 @@ impl BodyDef {
 #[cfg(test)]
 mod tests {
     use super::*;
-    const HALO: &str = include_str!("../configs/halo.yaml");
-    const SOLAR: &str = include_str!("../configs/solar-system.yaml");
+    const HALO: &str = include_str!("../configs/legacy/halo.yaml");
+    const SOLAR: &str = include_str!("../configs/legacy/solar-system.yaml");
     #[test]
     fn desert_level_has_middle_free_moon_submoon_and_visible_wanderers() {
-        let scene = parse(include_str!("../configs/atacama.yaml")).unwrap();
+        let scene = parse(include_str!("../configs/legacy/atacama.yaml")).unwrap();
         assert_eq!(scene.ground, crate::ground::Theme::Desert);
         assert_eq!(parse(HALO).unwrap().ground, crate::ground::Theme::Forest);
         assert!(
@@ -606,13 +617,13 @@ mod tests {
         for yaml in [
             HALO,
             SOLAR,
-            include_str!("../configs/puzzle.yaml"),
-            include_str!("../configs/median-resonance.yaml"),
-            include_str!("../configs/vesper.yaml"),
+            include_str!("../configs/legacy/puzzle.yaml"),
+            include_str!("../configs/legacy/median-resonance.yaml"),
+            include_str!("../configs/legacy/vesper.yaml"),
         ] {
             assert!(parse(yaml).unwrap().atmosphere.is_some());
         }
-        let dense = parse(include_str!("../configs/median-resonance.yaml"))
+        let dense = parse(include_str!("../configs/legacy/median-resonance.yaml"))
             .unwrap()
             .atmosphere
             .unwrap();
@@ -625,7 +636,7 @@ mod tests {
     fn validates_optional_camera_direction() {
         assert!(parse(HALO).unwrap().initial_direction_deg.is_none());
         assert_eq!(
-            parse(include_str!("../configs/vesper.yaml"))
+            parse(include_str!("../configs/legacy/vesper.yaml"))
                 .unwrap()
                 .initial_direction_deg,
             Some([0.0, 25.0])

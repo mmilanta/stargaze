@@ -139,7 +139,7 @@ fn gpu_lowlight_study() -> Result<()> {
         Options::default(),
     );
     let mut s = state(
-        crate::config::parse(include_str!("../configs/atacama.yaml"))?,
+        crate::config::parse(include_str!("../configs/legacy/atacama.yaml"))?,
         0.0,
     );
     s.point_initial_view();

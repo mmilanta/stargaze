@@ -192,7 +192,7 @@ mod tests {
                 },
             );
             let scene = crate::config::load(format!(
-                "{}/configs/{name}.yaml",
+                "{}/configs/legacy/{name}.yaml",
                 env!("CARGO_MANIFEST_DIR")
             ))
             .unwrap();
