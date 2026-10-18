@@ -403,12 +403,8 @@ impl Game {
             3 => self.history(false),
             4 => {
                 if let Some(viewer) = self.viewer {
-                    self.score = Some(score(
-                        &self.topology(),
-                        viewer,
-                        &Topology::from_scene(scene),
-                        scene.host,
-                    ));
+                    let (truth, host) = Topology::from_scene_with_host(scene);
+                    self.score = Some(score(&self.topology(), viewer, &truth, host));
                     let score = self.score.unwrap();
                     self.best = Some(self.best.unwrap_or(0.0).max(score.total()));
                     if self.attempts.len() == 1000 {
@@ -605,23 +601,59 @@ impl Topology {
         }
     }
 
+    #[cfg(test)]
     fn from_scene(scene: &Scene) -> Self {
-        Self::new(
-            &scene.bodies.iter().map(|b| b.parent).collect::<Vec<_>>(),
-            &scene
-                .bodies
+        Self::from_scene_with_host(scene).0
+    }
+
+    /// The scene's tree as a player can draw it, with the host's index in it.
+    /// Theories have only stars, planets and moons, so an invisible anchor
+    /// (a barycentre) is replaced by its heaviest child, the one on the
+    /// smallest orbit around it: a binary star becomes the primary with its
+    /// companion as the first body orbiting it, followed by the planets.
+    /// Scenes without anchors keep their body indices.
+    fn from_scene_with_host(scene: &Scene) -> (Self, usize) {
+        let bodies = &scene.bodies;
+        let anchor = |i: usize| bodies[i].kind == BodyKind::Anchor;
+        let promoted = |a: usize| {
+            (0..bodies.len())
+                .filter(|&i| bodies[i].parent == Some(a))
+                .min_by(|&x, &y| bodies[x].elements.a.total_cmp(&bodies[y].elements.a))
+        };
+        // Resolve a parent through anchors to the body standing in for it.
+        let resolve = |mut parent: Option<usize>, child: usize| loop {
+            match parent {
+                Some(p) if anchor(p) => match promoted(p) {
+                    Some(q) if q != child => return Some(q),
+                    _ => parent = bodies[p].parent,
+                },
+                other => return other,
+            }
+        };
+        let kept: Vec<usize> = (0..bodies.len())
+            .filter(|&i| !anchor(i) || promoted(i).is_none())
+            .collect();
+        let mut local = vec![usize::MAX; bodies.len()];
+        for (k, &i) in kept.iter().enumerate() {
+            local[i] = k;
+        }
+        let topology = Self::new(
+            &kept
                 .iter()
-                .map(|b| b.elements.a)
+                .map(|&i| resolve(bodies[i].parent, i).map(|p| local[p]))
                 .collect::<Vec<_>>(),
-            scene
-                .bodies
+            &kept
                 .iter()
-                .map(|b| Traits {
-                    star: b.kind == BodyKind::Star,
-                    rings: b.rings.is_some(),
+                .map(|&i| bodies[i].elements.a)
+                .collect::<Vec<_>>(),
+            kept.iter()
+                .map(|&i| Traits {
+                    star: bodies[i].kind == BodyKind::Star,
+                    rings: bodies[i].rings.is_some(),
                 })
                 .collect(),
-        )
+        );
+        (topology, local[scene.host])
     }
 }
 
@@ -1926,6 +1958,27 @@ mod tests {
         assert!(score(&flat, 2, &tree, 2).topology < 100.0);
         assert!(score(&short, 1, &tree, 2).topology < 100.0);
         assert!(score(&tree, 2, &short, 1).topology < 100.0);
+    }
+
+    #[test]
+    fn a_barycentre_scores_as_its_primary_star() {
+        let scene = crate::config::parse(include_str!("../configs/1-halo-volcano.yaml")).unwrap();
+        let (truth, host) = Topology::from_scene_with_host(&scene);
+        assert!(
+            truth.traits[truth.root].star,
+            "the primary star is the root"
+        );
+        let first = truth.children[truth.root][0];
+        assert!(
+            truth.traits[first].star,
+            "the companion star orbits it first"
+        );
+        assert_eq!(truth.children.len(), scene.bodies.len() - 1);
+        // Companion, Nerid, Calyx, Vantus. Halo is Calyx's second moon
+        // (Umbra orbits inside it).
+        let calyx = truth.children[truth.root][2];
+        assert!(truth.traits[calyx].rings);
+        assert_eq!(truth.children[calyx][1], host);
     }
 
     #[test]

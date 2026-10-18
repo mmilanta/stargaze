@@ -7,18 +7,21 @@
 # Halo's sky), so Calyx often hides both at once: a double eclipse at the
 # near side's noon.
 # Halo orbits 110,000 km from Calyx (period by Kepler's third law), so Calyx
-# spans ~7 degrees and its rings ~13 degrees, low over the southern horizon.
+# spans ~7 degrees and its rings ~13 degrees, ~25 degrees above the eastern
+# horizon: the observatory stands near the edge of Halo's Calyx-facing side.
+# Halo's orbit, and so its tidally locked spin axis, is tilted 5 degrees to
+# Calyx's orbit: mild seasons over Calyx's 3000-day year, and eclipses of the
+# suns in long eclipse seasons, when the suns lie near the orbit's nodes.
+# The tilt is away from the ring plane, so the rings open up to ~27 degrees
+# over each Halo orbit.
 version: 1
 name: Calyx and Halo — the volcano
 camera:
   body: halo
-  latitude_deg: 75.0
-  longitude_deg: 180.0
+  latitude_deg: 35.0
+  longitude_deg: 122.0
   height_m: 2.0
   look_at: calyx
-  # Calyx hangs fixed due south, ~15 degrees up (Halo is tidally locked):
-  # frame it over the crater rim, the lava sea and the horizon cones.
-  direction: {azimuth_deg: 180, altitude_deg: 10}
   fov_deg: 70.0
   atmosphere: earthlike
   ground: basalt
@@ -31,6 +34,7 @@ targets:
   - vantus
   - pip
   - iri
+  - kesh
 bodies:
   - id: barycentre
     name: Barycentre
@@ -135,8 +139,8 @@ bodies:
     albedo: [0.55, 0.57, 0.6]
     orbit:
       period_days: 34.481725
-      inclination_deg: 0.5
-      ascending_node_deg: 90.0
+      inclination_deg: 5.0
+      ascending_node_deg: 270.0
       periapsis_deg: -90.0
       semi_major_axis_km: 110000.0
     rotation:
@@ -163,10 +167,9 @@ bodies:
     name: Vantus
     kind: planet
     parent: barycentre
-    # A gas giant (Jupiter is 71,500 km): a brilliant wandering star at
-    # night even from the far side of the suns. Moon orbits scale with it
-    # (same density, so the same periods).
-    radius_km: 60000.0
+    # The far giant, Jupiter-like (Jupiter is 71,500 km): a brilliant
+    # wandering star at night, a thin, faint dusty ring close in.
+    radius_km: 75000.0
     albedo: [0.62, 0.68, 0.78]
     orbit:
       semi_major_axis_au: 6.8
@@ -179,57 +182,56 @@ bodies:
     rotation:
       mode: free
       period_days: 0.4
-      obliquity_deg: 12.000000000000002
+      obliquity_deg: 12.0
+    rings:
+      inner_radius: 1.3
+      outer_radius: 1.4
+      optical_depth: 0.03
+      albedo: [0.62, 0.55, 0.48]
+      banded: false
+  # Two big moons in Vantus's equatorial plane (inclination = obliquity,
+  # node 90); periods by Kepler's law for a ~2.2e27 kg giant.
   - id: iri
     name: Iri
     kind: moon
     parent: vantus
-    radius_km: 800.0
+    radius_km: 2600.0
     albedo: [0.5, 0.5, 0.55]
     orbit:
-      period_days: 5.0
-      eccentricity: 0.005
-      inclination_deg: 1.0
-      periapsis_deg: 57.2957795131
-      mean_anomaly_deg: 28.6478897565
-      semi_major_axis_km: 80782.85
+      semi_major_axis_km: 670000.0
+      period_days: 3.29
+      eccentricity: 0.002
+      inclination_deg: 12.0
+      ascending_node_deg: 90.0
+      mean_anomaly_deg: 28.6
     rotation:
-      mode: free
-      period_days: 5.0
-      obliquity_deg: 1.0
+      mode: tidal_lock
   - id: kesh
     name: Kesh
     kind: moon
     parent: vantus
-    radius_km: 600.0
+    radius_km: 2400.0
     albedo: [0.45, 0.4, 0.35]
     orbit:
-      period_days: 11.0
-      eccentricity: 0.01
-      inclination_deg: 2.0
-      ascending_node_deg: 28.6478897565
-      periapsis_deg: 114.5915590262
-      mean_anomaly_deg: 143.2394487827
-      semi_major_axis_km: 134638.08
+      semi_major_axis_km: 1900000.0
+      period_days: 15.7
+      eccentricity: 0.007
+      inclination_deg: 12.0
+      ascending_node_deg: 90.0
+      mean_anomaly_deg: 143.2
     rotation:
-      mode: free
-      period_days: 11.0
-      obliquity_deg: 2.0
-  - id: coll
-    name: Coll
+      mode: tidal_lock
+  # Kesh's own tiny moon, well inside its ~55,000 km Hill sphere.
+  - id: mote
+    name: Mote
     kind: moon
-    parent: vantus
-    radius_km: 500.0
+    parent: kesh
+    radius_km: 150.0
     albedo: [0.3, 0.32, 0.38]
     orbit:
-      period_days: 18.0
-      eccentricity: 0.02
-      inclination_deg: 3.0
-      ascending_node_deg: 11.4591559026
-      periapsis_deg: 229.1831180523
-      mean_anomaly_deg: 286.4788975654
-      semi_major_axis_km: 201957.13
+      semi_major_axis_km: 15000.0
+      period_days: 1.33
+      inclination_deg: 12.0
+      ascending_node_deg: 90.0
     rotation:
-      mode: free
-      period_days: 18.0
-      obliquity_deg: 3.0000000000000004
+      mode: tidal_lock
