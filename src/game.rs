@@ -1886,6 +1886,7 @@ mod tests {
             air_open: false,
             air_drag: None,
             toast: None,
+            texture: None,
         };
         app.state.sim_time = 42.0;
         app.state.view_lock = Some(crate::ViewLock::Background(glam::DVec3::X));

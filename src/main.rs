@@ -19,6 +19,7 @@ mod sim;
 mod sky;
 mod stars;
 mod terrain;
+mod texture;
 mod typeface;
 mod ui;
 #[cfg(test)]
@@ -74,7 +75,7 @@ fn scene_for_startup() -> Result<Option<Scene>> {
         match arg.to_str() {
             Some("--help" | "-h") => {
                 println!(
-                    "Stargaze — an observatory in a configurable star system\n\nUsage: stargaze [--game] [--unguided-ground] [--config FILE | --check-config FILE]\n\n--game               Play the anonymous system reconstruction puzzle\n--unguided-ground    Use the original ground sampler for comparison\n--guided-ground      Use guided ground sampling (default)\n--config FILE        Load a YAML system and its camera\n--check-config FILE  Validate without opening a window\n\nDefaults to the first level, configs/1-halo-volcano.yaml (also with --game). STARGAZE_CONFIG also selects a file."
+                    "Stargaze — an observatory in a configurable star system\n\nUsage: stargaze [--game] [--unguided-ground] [--config FILE | --check-config FILE]\n\n--game               Play the anonymous system reconstruction puzzle\n--unguided-ground    Use the original ground sampler for comparison\n--guided-ground      Use guided ground sampling (default)\n--config FILE        Load a YAML system and its camera\n--check-config FILE  Validate without opening a window\n--texture [STYLE]    Planet texture editor (plain, gas_giant, cratered, rocky, icy, volcanic, terran)\n\nDefaults to the first level, configs/1-halo-volcano.yaml (also with --game). STARGAZE_CONFIG also selects a file."
                 );
                 return Ok(None);
             }
@@ -142,6 +143,23 @@ fn scene_for_startup() -> Result<Option<Scene>> {
     Ok(Some(scene))
 }
 
+/// `--texture [STYLE]` opens the planet texture editor instead of a system.
+fn texture_request() -> Result<Option<texture::Editor>> {
+    let args: Vec<String> = std::env::args().skip(1).collect();
+    let Some(i) = args.iter().position(|a| a == "--texture") else {
+        return Ok(None);
+    };
+    let style = match args.get(i + 1).filter(|a| !a.starts_with("--")) {
+        Some(name) => texture::parse_style(name).ok_or_else(|| {
+            anyhow::anyhow!(
+                "unknown texture style '{name}'; use plain, gas_giant, cratered, rocky, icy, volcanic or terran"
+            )
+        })?,
+        None => Some(sim::SurfaceStyle::Cratered),
+    };
+    Ok(Some(texture::Editor::new(style)))
+}
+
 fn game_requested() -> bool {
     std::env::args_os().any(|arg| arg == "--game")
 }
@@ -179,6 +197,8 @@ struct State {
     press: Option<(f64, f64)>,
     /// Explore-mode tuning of the host atmosphere.
     air: AirTuning,
+    /// Hide the local terrain and props (the texture editor's camera floats).
+    no_ground: bool,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -236,6 +256,7 @@ impl State {
             view_lock: None,
             press: None,
             air: AirTuning::default(),
+            no_ground: false,
         };
         if let Some(t) = state.scene.initial_time_days {
             state.sim_time = t;
@@ -802,6 +823,36 @@ impl State {
                 }
                 None => ([0.0; 4], [0.0; 4], [0.0; 4]),
             };
+            // Surface patterns are evaluated in the body's own rotating frame.
+            let spin = body.spin_quat(self.sim_time);
+            let ax = vf.world_to_view(spin * DVec3::X);
+            let ay = vf.world_to_view(spin * DVec3::Y);
+            let (style, seed, surface_color, surface_params) = match body.surface {
+                Some(surface) => {
+                    let gas = surface.style == sim::SurfaceStyle::GasGiant;
+                    let c = surface.secondary_albedo;
+                    (
+                        surface.style.code(),
+                        surface.seed,
+                        [
+                            c[0],
+                            c[1],
+                            c[2],
+                            if gas {
+                                surface.turbulence
+                            } else {
+                                surface.craters
+                            },
+                        ],
+                        if gas {
+                            [surface.bands, surface.storms as f32, 0.0, 0.0]
+                        } else {
+                            [surface.ice_caps, surface.ocean, surface.clouds, 0.0]
+                        },
+                    )
+                }
+                None => (0.0, i as u32, [0.0; 4], [0.0; 4]),
+            };
             bodies.push(Sphere {
                 center: center.into(),
                 radius: body.radius as f32,
@@ -815,6 +866,10 @@ impl State {
                 ring_plane,
                 ring_params,
                 ring_color,
+                axis_x: [ax.x as f32, ax.y as f32, ax.z as f32, style],
+                axis_y: [ay.x as f32, ay.y as f32, ay.z as f32, (seed % 4096) as f32],
+                surface_color,
+                surface_params,
             });
         }
 
@@ -823,14 +878,15 @@ impl State {
         // high/low split.
         let host = self.scene.body(self.scene.host);
         let host_view = vf.world_to_view(positions[self.scene.host] - vf.position);
-        let ground_enabled = std::env::var("STARGAZE_GROUND")
-            .map(|v| {
-                !matches!(
-                    v.trim().to_ascii_lowercase().as_str(),
-                    "0" | "off" | "false"
-                )
-            })
-            .unwrap_or(true);
+        let ground_enabled = !self.no_ground
+            && std::env::var("STARGAZE_GROUND")
+                .map(|v| {
+                    !matches!(
+                        v.trim().to_ascii_lowercase().as_str(),
+                        "0" | "off" | "false"
+                    )
+                })
+                .unwrap_or(true);
         // An airless ground (the crater field) removes the host's air; the
         // explore controls scale its density and turn its colour. Air tuned
         // to nothing is skipped entirely, as on an airless body.
@@ -1012,6 +1068,8 @@ struct App {
     air_open: bool,
     air_drag: Option<AirSlider>,
     toast: Option<(String, Instant)>,
+    /// `--texture`: the planet texture editor replaces the observatory.
+    texture: Option<texture::Editor>,
 }
 
 impl App {
@@ -1027,16 +1085,89 @@ impl App {
             && size.0 > 0
             && size.1 > 0
             && (self.motion.animating()
+                || self.texture.as_ref().is_some_and(|t| t.playing)
                 || self.game.as_ref().is_some_and(game::Game::animating)
                 || (self.world_visible()
                     && (self.state.warp != STOP_WARP
                         || self.renderer.as_ref().is_none_or(Renderer::needs_redraw))))
     }
 
+    /// Texture editor: advance its rotation, copy its values into the scene
+    /// and frame the planet in the space left of the panel.
+    fn update_texture(&mut self, w: u32, h: u32) {
+        let Some(editor) = self.texture.as_mut() else {
+            return;
+        };
+        editor.tick(Instant::now());
+        editor.apply(&mut self.state.scene);
+        let fov = editor.fov_deg.to_radians();
+        let planet = texture::Editor::planet_index(&self.state.scene);
+        self.state.point_at_fov(planet, fov);
+        let panel = texture::Editor::panel([w as f32, h as f32], self.scale);
+        let shift = f64::from(w as f32 - panel.x) * 0.5 / (f64::from(h.max(1)) * 0.5);
+        let angle = (shift * (fov * 0.5).tan()).atan();
+        self.state.observer.az += angle / self.state.observer.alt.cos().max(0.1);
+    }
+
+    /// Texture-editor input. Returns true when the event was consumed.
+    fn texture_event(&mut self, event_loop: &ActiveEventLoop, event: &WindowEvent) -> bool {
+        let vp = self
+            .renderer
+            .as_ref()
+            .map_or([1.0, 1.0], |r| [r.size().0 as f32, r.size().1 as f32]);
+        let scale = self.scale;
+        let Some(editor) = self.texture.as_mut() else {
+            return false;
+        };
+        match event {
+            WindowEvent::CloseRequested => event_loop.exit(),
+            WindowEvent::CursorMoved { position, .. } => {
+                self.cursor = (position.x, position.y);
+                editor.drag_to(position.x, vp, scale);
+            }
+            WindowEvent::MouseInput {
+                state,
+                button: MouseButton::Left,
+                ..
+            } => {
+                if *state == ElementState::Pressed {
+                    editor.press(self.cursor.0, self.cursor.1, vp, scale);
+                } else {
+                    editor.release();
+                }
+            }
+            WindowEvent::MouseWheel { delta, .. } => editor.zoom(match delta {
+                MouseScrollDelta::LineDelta(_, y) => f64::from(*y),
+                MouseScrollDelta::PixelDelta(p) => p.y / 50.0,
+            }),
+            WindowEvent::CursorLeft { .. } | WindowEvent::Focused(false) => editor.release(),
+            WindowEvent::KeyboardInput { event, .. } => {
+                if event.state == ElementState::Pressed
+                    && let PhysicalKey::Code(key) = event.physical_key
+                {
+                    if key == KeyCode::Escape {
+                        event_loop.exit();
+                    } else {
+                        editor.key(key);
+                    }
+                }
+            }
+            WindowEvent::MouseInput { .. } | WindowEvent::ModifiersChanged(_) => {}
+            _ => return false,
+        }
+        true
+    }
+
     /// Build only the visible screen; opaque UI screens need no orbit or camera
     /// calculations, body uploads, labels, or hidden HUD geometry.
     fn build_frame(&self, w: u32, h: u32) -> (Option<Frame>, Vec<ui::UiVertex>) {
         typeface::begin_frame([w, h], self.scale);
+        if let Some(editor) = &self.texture {
+            let frame = self.state.build_frame(w, h);
+            let mut vertices = Vec::new();
+            editor.build(&mut vertices, [w as f32, h as f32], self.scale, self.cursor);
+            return (Some(frame), vertices);
+        }
         let screen = if self.leave.is_some() {
             400
         } else if self.discard.is_some() {
@@ -1786,6 +1917,9 @@ impl ApplicationHandler for App {
             self.pacer.request();
             window.request_redraw();
         }
+        if self.texture.is_some() && self.texture_event(event_loop, &event) {
+            return;
+        }
         match event {
             WindowEvent::CloseRequested => {
                 if self.game.as_ref().is_some_and(|g| g.has_progress())
@@ -1842,7 +1976,9 @@ impl ApplicationHandler for App {
                     self.pacer.request();
                     return;
                 }
-                if self.world_visible() {
+                if self.texture.is_some() {
+                    self.update_texture(w, h);
+                } else if self.world_visible() {
                     self.state.advance();
                     self.state.track();
                 } else {
@@ -1859,7 +1995,9 @@ impl ApplicationHandler for App {
                     } else {
                         self.pacer.rendered(started);
                     }
-                    let title = if self.graphics.open {
+                    let title = if self.texture.is_some() {
+                        "stargaze · Texture editor".into()
+                    } else if self.graphics.open {
                         "stargaze · Settings".into()
                     } else if self.menu.open {
                         format!(
@@ -2319,8 +2457,15 @@ impl ApplicationHandler for App {
 fn main() -> Result<()> {
     env_logger::Builder::from_env(env_logger::Env::default().default_filter_or("info")).init();
 
-    let Some(scene) = scene_for_startup()? else {
-        return Ok(());
+    let texture = texture_request()?;
+    let scene = match &texture {
+        Some(editor) => editor.scene(),
+        None => {
+            let Some(scene) = scene_for_startup()? else {
+                return Ok(());
+            };
+            scene
+        }
     };
     let stars = stars::generate(3500, 2500, 0x5EED_1234);
     log::info!("generated {} background stars", stars.len());
@@ -2360,7 +2505,15 @@ fn main() -> Result<()> {
         air_open: false,
         air_drag: None,
         toast: None,
+        texture: None,
     };
+
+    if let Some(editor) = texture {
+        app.state.no_ground = true;
+        app.texture = Some(editor);
+        event_loop.run_app(&mut app)?;
+        return Ok(());
+    }
 
     app.progress = progress::Book::load();
     let args: Vec<_> = std::env::args_os().collect();
@@ -2457,6 +2610,7 @@ mod app_tests {
             air_open: false,
             air_drag: None,
             toast: None,
+            texture: None,
         }
     }
 

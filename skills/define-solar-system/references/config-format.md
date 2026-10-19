@@ -68,6 +68,7 @@ startup. `STARGAZE_AIM` still overrides the initial pointing.
 | `orbit` | Required with `parent`, absent for the root |
 | `rotation` | Optional free or synchronous rotation, described below |
 | `rings` | Optional ring annulus on a star, planet or moon |
+| `surface` | Optional procedural surface style on a planet or moon, described below |
 
 An `anchor` is invisible, casts no shadows and emits no light. Use one as the root of a binary system. The root remains at the origin. Radii are physical; orbit distances are centre-to-centre.
 
@@ -98,6 +99,16 @@ rotation:
   mode: tidal_lock
 ```
 
+```yaml
+rotation:
+  mode: tidal_lock
+  to: charon            # optional: lock to one of this body's own moons
+```
+
+With `to`, the body keeps longitude 0 turned toward that moon (a direct
+child) and spins once per moon orbit, around the moon's orbital pole. Lock the
+moon normally as well for a mutually locked pair, like Pluto and Charon.
+
 Tidal locking requires a parent and orbit. Its pole is aligned with the orbital normal; spin period, phase and epoch follow that orbit. Longitude 180° faces the parent exactly in a circular orbit. Eccentric orbits use uniform synchronous spin and therefore librate. Do not specify free-rotation fields with `tidal_lock`.
 
 ### Rings
@@ -112,6 +123,37 @@ rings:
 ```
 
 Require `1 < inner_radius < outer_radius`. The infinitesimally thin ring lies in the body's equator and follows its rotation frame. `banded: true` applies Saturn-like bands and gaps across this annulus; false gives a uniform disc. To keep rings clear of a moon, compare the ring's outer edge to the moon's periapsis distance **minus its radius**.
+
+### Surface
+
+```yaml
+surface:
+  style: cratered        # gas_giant, cratered, rocky, icy, volcanic or terran
+  seed: 7                # optional, default 0; varies the pattern
+  secondary_albedo: [0.3, 0.3, 0.3]  # optional second colour (alias: belt_albedo)
+```
+
+The body's `albedo` is the main colour; `secondary_albedo` is the second one.
+Its default suits each style. Patterns live in the body's own rotating frame,
+so they turn with its spin and follow its obliquity. Without `surface`, a body
+keeps the plain, softly mottled albedo. Surfaces only change reflectance:
+lighting, shadows and eclipses are unchanged. All parameters below are optional.
+
+| Style | Look | `albedo` / `secondary_albedo` | Parameters (defaults) |
+| --- | --- | --- | --- |
+| `gas_giant` | Turbulent belts and zones, hazy poles, oval storms | zones / belts | `bands` 1-30 (7), `turbulence` 0-1 (0.5), `storms` 0-3 (1) |
+| `cratered` | Moon/Mercury: dark maria, five sizes of craters, bright ray craters | highlands / maria | `craters` (0.8), `ice_caps` (0) |
+| `rocky` | Mars: dark albedo regions, softened craters, dust streaks, polar caps | plains / dark regions | `craters` (0.5), `ice_caps` (0.06) |
+| `icy` | Europa: ice crossed by long reddish cracks, chaos patches | ice / cracks | `craters` (0.15), `ice_caps` (0) |
+| `volcanic` | Io: sulphur plains, dark vents and lava flows, red plume rings | plains / deposits | `craters` = vent density (0.5), `ice_caps` (0) |
+| `terran` | Oceans, continents (green to desert, mountains, snow), clouds | land / ocean | `ocean` (0.65), `clouds` (0.4), `ice_caps` (0.1), `craters` (0) |
+
+`craters`, `ice_caps`, `ocean` and `clouds` are 0-1. `ice_caps` is the polar
+cap extent as a fraction of sin(latitude). Parameters that do not apply to the
+chosen style are rejected (gas giant parameters on solid bodies and vice
+versa; `ocean` and `clouds` only on `terran`). The first gas giant storm is a
+large oval in a deep version of the belt colour (red on a tan giant, dark blue
+on a blue one) and the bands swirl around it; further storms are small white ovals.
 
 ## Minimal complete example
 
