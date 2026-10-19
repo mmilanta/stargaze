@@ -67,7 +67,7 @@ startup. `STARGAZE_AIM` still overrides the initial pointing.
 | `emission` | Optional stellar RGB in [0,1], default `[1, 1, 1]`; tints the light |
 | `orbit` | Required with `parent`, absent for the root |
 | `rotation` | Optional free or synchronous rotation, described below |
-| `rings` | Optional ring annulus on a planet or moon |
+| `rings` | Optional ring annulus on a star, planet or moon |
 
 An `anchor` is invisible, casts no shadows and emits no light. Use one as the root of a binary system. The root remains at the origin. Radii are physical; orbit distances are centre-to-centre.
 

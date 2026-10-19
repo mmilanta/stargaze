@@ -437,8 +437,8 @@ impl BodyDef {
             .as_ref()
             .map(|r| -> Result<Rings> {
                 ensure!(
-                    matches!(kind, BodyKind::Planet | BodyKind::Moon),
-                    "rings require a planet or moon"
+                    matches!(kind, BodyKind::Star | BodyKind::Planet | BodyKind::Moon),
+                    "rings require a star, planet or moon"
                 );
                 ensure!(
                     r.inner_radius.is_finite()
@@ -485,6 +485,34 @@ mod tests {
     use super::*;
     const HALO: &str = include_str!("../configs/legacy/halo.yaml");
     const SOLAR: &str = include_str!("../configs/legacy/solar-system.yaml");
+    const CORONA: &str = include_str!("../configs/3-corona-valley.yaml");
+
+    #[test]
+    fn corona_level_opens_before_puna_occults_the_ringed_star_at_night() {
+        let scene = parse(CORONA).unwrap();
+        assert_eq!(scene.ground, crate::ground::Theme::Desert);
+        let id = |name: &str| scene.bodies.iter().position(|b| b.name == name).unwrap();
+        let (corona, brasa, puna) = (id("Corona"), id("Brasa"), id("Puna"));
+        assert_eq!(scene.body(corona).kind, BodyKind::Star);
+        assert!(scene.body(corona).rings.is_some(), "the main star is ringed");
+        assert!(!scene.body(scene.host).tidally_locked);
+        assert_eq!(scene.body(scene.host).parent, Some(brasa));
+        assert_eq!(scene.body(puna).parent, Some(brasa));
+        let start = scene.initial_time_days.unwrap();
+        let state = crate::State::with_scene(parse(CORONA).unwrap());
+        // Within two hours of the start, Puna fully covers Corona's disc while
+        // Corona is above the western ridges and Brasa is below the horizon.
+        let total = (0..2400).map(|i| start + i as f64 * 0.00005).find(|&t| {
+            let p = scene.positions(t);
+            let vf = state.observer.frame(&scene, t, &p);
+            let (dc, dp) = (p[corona] - vf.position, p[puna] - vf.position);
+            let rc = (scene.body(corona).radius / dc.length()).asin();
+            let rp = (scene.body(puna).radius / dp.length()).asin();
+            let up = |d: glam::DVec3| d.normalize().dot(vf.zenith).asin().to_degrees();
+            dc.angle_between(dp) < rp - rc && up(dc) > 20.0 && up(p[brasa] - vf.position) < -10.0
+        });
+        assert!(total.is_some(), "no total occultation after day {start}");
+    }
     #[test]
     fn desert_level_has_middle_free_moon_submoon_and_visible_wanderers() {
         let scene = parse(include_str!("../configs/legacy/atacama.yaml")).unwrap();

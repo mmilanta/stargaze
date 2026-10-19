@@ -1,0 +1,228 @@
+# Stargaze system format v1. Distances and angles use explicit units.
+# Orbit angles are measured in the shared ecliptic frame, including moon orbits.
+# Level 3 — the desert valley ground. A wide binary: Corona, a white star
+# wearing a dusty ring (2-5 stellar radii, tilted 25 degrees), and Brasa, a
+# red dwarf 4 AU away. You stand in a desert valley on Quebrada, the middle
+# of three planets circling Brasa in a resonance chain (periods 15, 22.5 and
+# 33.75 days, each 3:2 with the next). Quebrada spins freely every 1.15 days
+# and is not tidally locked: red Brasa gives the day, while Corona, ~1/6 as
+# bright and its rings ~0.9 degrees across, gives a second, paler white day.
+# Every 67.5 days the big outer neighbour Puna overtakes Quebrada. When that
+# happens with Corona behind it, Puna hides the star's disc but not its
+# rings: a black disc inside a blazing ring, while the sky goes dark.
+# The level opens at night (Brasa below the horizon), with Corona 52 degrees
+# up in the west and Puna already crossing its rings. Totality runs from day
+# 4580.036 to 4580.048 (17 minutes), with Corona ~30 degrees above the ridges.
+# Corona also has its own family inside Brasa's orbit: Ocre (one moon) and
+# Ceniza (two moons in a 1:2 resonance). Far outside, the ringed giant
+# Tormenta circles the whole binary with four moons.
+# Everything except Tormenta's moons shares one plane, so transits and
+# occultations are common.
+# Orbital periods are illustrative Keplerian tracks, not an N-body model.
+version: 1
+name: Corona — the ringed star over the valley
+time_days: 4579.97
+camera:
+  body: quebrada
+  latitude_deg: -18
+  longitude_deg: 0
+  height_m: 2
+  look_at: corona
+  # West, above the ridges where Corona sets during the occultation.
+  direction: {azimuth_deg: 278, altitude_deg: 28}
+  fov_deg: 60
+  atmosphere: earthlike
+  ground: desert
+targets: [corona, puna, salar, brasa, ocre, ceniza, tormenta, alba, chispa]
+bodies:
+  # The primary: a white F-type star, 1.3 solar radii, 2.5 suns' luminosity,
+  # with a dusty debris ring in its equator, tilted 25 degrees to the plane.
+  - id: corona
+    name: Corona
+    kind: star
+    radius_km: 905000
+    luminosity: 2.5
+    emission: [0.90, 0.94, 1.0]
+    rotation: {mode: free, period_days: 9, obliquity_deg: 25}
+    rings:
+      inner_radius: 2.0
+      outer_radius: 5.0
+      optical_depth: 0.6
+      albedo: [0.92, 0.80, 0.62]
+      banded: true
+  # Corona's inner family, well inside Brasa's orbit.
+  - id: ocre
+    name: Ocre
+    kind: planet
+    parent: corona
+    radius_km: 5600
+    albedo: [0.62, 0.40, 0.26]
+    orbit:
+      semi_major_axis_au: 0.55
+      period_days: 130.5
+      mean_anomaly_deg: 40
+    rotation: {mode: free, period_days: 1.8, obliquity_deg: 10}
+  - id: chispa
+    name: Chispa
+    kind: moon
+    parent: ocre
+    radius_km: 1400
+    albedo: [0.55, 0.55, 0.55]
+    orbit:
+      semi_major_axis_km: 260000
+      period_days: 11
+      mean_anomaly_deg: 200
+    rotation: {mode: tidal_lock}
+  - id: ceniza
+    name: Ceniza
+    kind: planet
+    parent: corona
+    radius_km: 6800
+    albedo: [0.42, 0.44, 0.48]
+    orbit:
+      semi_major_axis_au: 1.1
+      period_days: 369.6
+      mean_anomaly_deg: 250
+    rotation: {mode: free, period_days: 0.7, obliquity_deg: 18}
+  # Alba and Ocaso: a 1:2 resonance (4 and 8 days; Ocaso 2^(2/3) farther).
+  - id: alba
+    name: Alba
+    kind: moon
+    parent: ceniza
+    radius_km: 1500
+    albedo: [0.72, 0.70, 0.66]
+    orbit:
+      semi_major_axis_km: 150000
+      period_days: 4
+      mean_anomaly_deg: 30
+    rotation: {mode: tidal_lock}
+  - id: ocaso
+    name: Ocaso
+    kind: moon
+    parent: ceniza
+    radius_km: 1900
+    albedo: [0.50, 0.36, 0.30]
+    orbit:
+      semi_major_axis_km: 238110
+      period_days: 8
+      mean_anomaly_deg: 195
+    rotation: {mode: tidal_lock}
+  # The companion: a red dwarf, 0.35 solar radii, 4 AU from Corona.
+  - id: brasa
+    name: Brasa
+    kind: star
+    parent: corona
+    radius_km: 243700
+    luminosity: 0.012
+    emission: [1.0, 0.64, 0.40]
+    orbit:
+      semi_major_axis_au: 4.0
+      period_days: 2310
+      mean_anomaly_deg: 0
+    rotation: {mode: free, period_days: 30}
+  # Brasa's 2:3:4.5 chain (each period 1.5x the last, so each orbit
+  # 1.5^(2/3) = 1.31x wider). Quebrada sits in the red dwarf's warm zone.
+  - id: salar
+    name: Salar
+    kind: planet
+    parent: brasa
+    radius_km: 5200
+    albedo: [0.82, 0.80, 0.76]
+    orbit:
+      semi_major_axis_au: 0.08394
+      period_days: 15
+      mean_anomaly_deg: 120
+    rotation: {mode: tidal_lock}
+  - id: quebrada
+    name: Quebrada
+    kind: planet
+    parent: brasa
+    radius_km: 6000
+    albedo: [0.60, 0.44, 0.32]
+    orbit:
+      semi_major_axis_au: 0.11
+      period_days: 22.5
+      mean_anomaly_deg: 0
+    rotation: {mode: free, period_days: 1.15, obliquity_deg: 6}
+  - id: puna
+    name: Puna
+    kind: planet
+    parent: brasa
+    radius_km: 11000
+    albedo: [0.46, 0.52, 0.58]
+    orbit:
+      semi_major_axis_au: 0.14415
+      period_days: 33.75
+      mean_anomaly_deg: 300
+    rotation: {mode: tidal_lock}
+  # The outer giant circles both stars at 14 AU, its rings and moons in its
+  # equator, tilted 27 degrees (inclination 27, node 90 = its equator).
+  - id: tormenta
+    name: Tormenta
+    kind: planet
+    parent: corona
+    radius_km: 65000
+    albedo: [0.74, 0.66, 0.52]
+    orbit:
+      semi_major_axis_au: 14
+      period_days: 15126
+      mean_anomaly_deg: 150
+    rotation: {mode: free, period_days: 0.44, obliquity_deg: 27}
+    rings:
+      inner_radius: 1.3
+      outer_radius: 2.5
+      optical_depth: 0.9
+      albedo: [0.86, 0.82, 0.74]
+      banded: true
+  - id: rayo
+    name: Rayo
+    kind: moon
+    parent: tormenta
+    radius_km: 1200
+    albedo: [0.80, 0.78, 0.72]
+    orbit:
+      semi_major_axis_km: 300000
+      period_days: 1.94
+      inclination_deg: 27
+      ascending_node_deg: 90
+      mean_anomaly_deg: 10
+    rotation: {mode: tidal_lock}
+  - id: trueno
+    name: Trueno
+    kind: moon
+    parent: tormenta
+    radius_km: 1800
+    albedo: [0.52, 0.50, 0.48]
+    orbit:
+      semi_major_axis_km: 520000
+      period_days: 4.43
+      inclination_deg: 27
+      ascending_node_deg: 90
+      mean_anomaly_deg: 130
+    rotation: {mode: tidal_lock}
+  - id: granizo
+    name: Granizo
+    kind: moon
+    parent: tormenta
+    radius_km: 2600
+    albedo: [0.70, 0.74, 0.80]
+    orbit:
+      semi_major_axis_km: 900000
+      period_days: 10.08
+      inclination_deg: 27
+      ascending_node_deg: 90
+      mean_anomaly_deg: 250
+    rotation: {mode: tidal_lock}
+  - id: niebla
+    name: Niebla
+    kind: moon
+    parent: tormenta
+    radius_km: 2100
+    albedo: [0.60, 0.56, 0.50]
+    orbit:
+      semi_major_axis_km: 2000000
+      period_days: 33.4
+      inclination_deg: 27
+      ascending_node_deg: 90
+      mean_anomaly_deg: 330
+    rotation: {mode: tidal_lock}

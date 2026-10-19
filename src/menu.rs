@@ -16,6 +16,7 @@ impl Entry {
         match self.path.file_stem().and_then(|s| s.to_str()) {
             Some("1-halo-volcano") => "Ember summit".into(),
             Some("2-erg-dunes") => "Shadow season".into(),
+            Some("3-corona-valley") => "Two-sun valley".into(),
             Some("puzzle") => "First field study".into(),
             Some("halo") => "Amber horizon".into(),
             Some("median-resonance") => "Clockwork sky".into(),
