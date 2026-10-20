@@ -2,6 +2,9 @@
 //! It rotates with the observer's surface frame rather than the telescope.
 use bytemuck::{Pod, Zeroable};
 
+#[path = "ground_cache.rs"]
+mod cache;
+
 pub const CAPACITY: usize = 256;
 pub const SKY_TEXELS: usize = 128;
 /// Faceted rock with three packed 8-bit Euler angles in extent.w.
@@ -72,6 +75,15 @@ impl Theme {
 }
 
 pub fn landscape_for_theme(radius_m: f64, density: u32, theme: Theme) -> Vec<Primitive> {
+    if matches!(theme, Theme::Dunes | Theme::Alpine) {
+        return Vec::new();
+    }
+    cache::get(radius_m, density, theme, || {
+        landscape_for_theme_uncached(radius_m, density, theme)
+    })
+}
+
+fn landscape_for_theme_uncached(radius_m: f64, density: u32, theme: Theme) -> Vec<Primitive> {
     if theme == Theme::Forest {
         return landscape_with_density(radius_m, density);
     }
