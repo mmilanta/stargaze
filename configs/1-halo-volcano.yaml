@@ -133,7 +133,8 @@ bodies:
       optical_depth: 1.0
       albedo: [0.88, 0.8, 0.66]
       banded: true
-    surface: {style: rocky, seed: 3}
+    # A small gas planet: turbulent belts and storms, no solid surface.
+    surface: {style: gas_giant, seed: 3, bands: 8, turbulence: 0.6, storms: 2}
   - id: halo
     name: Halo
     kind: moon
