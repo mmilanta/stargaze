@@ -422,6 +422,13 @@ fn gas_giant_albedo(body: Body, local: vec3<f32>) -> vec3<f32> {
 
 // --- Solid-body surfaces ------------------------------------------------
 
+// Signed distances occur on both sides of a rim or latitude band. WGSL pow
+// has no defined result for a negative base, even with exponent 2.0; square
+// directly so these profiles stay finite on every GPU/compiler path.
+fn surface_gaussian(distance: f32) -> f32 {
+    return exp(-(distance * distance));
+}
+
 fn hash33(p: vec3<f32>) -> vec3<f32> {
     return vec3<f32>(hash31(p), hash31(p + vec3<f32>(19.1, 7.3, 3.7)),
         hash31(p + vec3<f32>(5.9, 31.7, 11.3)));
@@ -557,7 +564,7 @@ fn crater_layer(q: vec3<f32>, scale: f32, density: f32, off: vec3<f32>,
         let r = d + wobble;
         floor_shade = min(floor_shade, 1.0 - 0.18 * contrast * (1.0 - smoothstep(0.55, 0.9, r)));
         // Inside the footprint the crater's own rim replaces older relief.
-        let rim = 0.22 * contrast * exp(-pow((r - 1.0) / 0.13, 2.0));
+        let rim = 0.22 * contrast * surface_gaussian((r - 1.0) / 0.13);
         let footprint = 1.0 - smoothstep(1.1, 1.3, r);
         relief = mix(relief, rim, footprint);
         // Outside: a bright ejecta blanket that thins outwards and partly
@@ -696,7 +703,7 @@ fn volcanic_albedo(body: Body, q: vec3<f32>) -> vec3<f32> {
         // Only some vents have a large plume ring; their radius varies.
         let plume = hash31(cell + vec3<f32>(2.0, 6.0, 17.0));
         let ring_radius = 2.0 + 4.0 * plume;
-        let ring = exp(-pow((d - ring_radius) / (0.25 * ring_radius), 2.0)) * step(0.7, plume);
+        let ring = surface_gaussian((d - ring_radius) / (0.25 * ring_radius)) * step(0.7, plume);
         color = mix(color, vec3<f32>(0.62, 0.22, 0.1), ring * 0.65);
         // Smaller vents leave a diffuse dark-orange stain instead.
         color = mix(color, deposit * 0.6, (1.0 - smoothstep(0.5, 2.0, d)) * 0.5);
@@ -746,7 +753,8 @@ fn terran_albedo(body: Body, q: vec3<f32>) -> vec3<f32> {
         // More cloud in the equatorial and mid-latitude storm belts, less
         // over the subtropics.
         let lat = abs(q.z);
-        let belts = 0.06 * (exp(-pow(lat / 0.12, 2.0)) + exp(-pow((lat - 0.72) / 0.15, 2.0))) - 0.04 * exp(-pow((lat - 0.42) / 0.1, 2.0));
+        let belts = 0.06 * (surface_gaussian(lat / 0.12) + surface_gaussian((lat - 0.72) / 0.15))
+            - 0.04 * surface_gaussian((lat - 0.42) / 0.1);
         let threshold = 0.62 - 0.22 * cover - belts;
         let mask = smoothstep(threshold - 0.04, threshold + 0.14, cloud);
         color = mix(color, vec3<f32>(0.93, 0.94, 0.96), mask * 0.95);
@@ -1356,18 +1364,20 @@ fn trace(initial: Ray, rng: ptr<function, u32>, backdrop: ptr<function, vec3<f32
         }
         var normal = hit.normal;
         if (local) { normal = landscape_shading_normal(ray, hit); }
-        var albedo: vec3<f32>;
         var outgoing: Ray;
         if (local) {
-            albedo = landscape_albedo(ray, hit);
             outgoing = landscape_outgoing(ray, hit);
         } else {
-            albedo = surface_albedo(body, normal);
             // Celestial surfaces retain their body-relative origin; local
             // ground and props instead use a five-millimetre offset.
             let origin = normal * (body.center.w * (1.0 + 2.0e-6));
             outgoing = Ray(origin, normal, hit.index);
         }
+        // Factor Lambertian color out of the light loop. Keeping the complex
+        // procedural albedo live across sampling corrupted solid-body textures
+        // on RADV (stripes and black fragments). Evaluate it after incoming
+        // light, then apply it once; visibility and MIS remain independent.
+        var direct_light = vec3<f32>(0.0);
         let last_vertex = depth + 1u == settings.counts.w;
         for (var light_slot = 0u; light_slot < light_count(); light_slot += 1u) {
             let i = light_index(light_slot);
@@ -1388,11 +1398,15 @@ fn trace(initial: Ray, rng: ptr<function, u32>, backdrop: ptr<function, vec3<f32
                     // No BSDF continuation at the depth limit: NEE alone.
                     weight = 1.0;
                 }
-                radiance += throughput * albedo * bodies[i].material.rgb
+                direct_light += bodies[i].material.rgb
                     * air_transmittance(outgoing, sample.direction)
                     * (bsdf_pdf * weight * visibility / sample.pdf);
             }
         }
+        var albedo: vec3<f32>;
+        if (local) { albedo = landscape_albedo(ray, hit); }
+        else { albedo = surface_albedo(body, normal); }
+        radiance += throughput * albedo * direct_light;
         shine_body = MISS;
         if (!local) {
             radiance += throughput * albedo * ringshine(hit.index, outgoing.offset, normal, last_vertex, rng);

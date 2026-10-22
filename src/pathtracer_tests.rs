@@ -9,6 +9,9 @@ mod ground;
 #[path = "sky_tests.rs"]
 mod sky;
 
+#[path = "surface_tests.rs"]
+mod surfaces;
+
 // Isolate transport regressions from the decorative galactic backdrop.
 fn test_options() -> Options {
     Options {
