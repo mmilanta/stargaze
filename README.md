@@ -479,8 +479,8 @@ sequence is deterministic for a given pixel and sample index.
 
 In Play/Explore observation, moving the mouse looks around without holding a
 button. The pointer is captured and hidden; HUD controls are **keyboard-only**.
-Mouse buttons do not activate the HUD or select sky targets. A small centre
-reticle helps aim; `K` locks what it points at. Mouse movement releases tracking.
+Mouse buttons do not activate the HUD. A small centre reticle helps aim;
+right-click (or `K`) locks the body or sky direction it points at. Mouse movement releases tracking.
 Zoom sensitivity follows the field of view, including at deep magnification.
 
 `Esc` / `M`, `P`, or `Tab` (Play) release the pointer for the menu, settings,
@@ -491,7 +491,7 @@ or minimizing also releases capture; returning to observation captures it again.
 | --- | --- |
 | `M` / `Esc` | open the menu or resume the current view |
 | mouse movement | look around (no button held) |
-| `K` | track the body at the centre, or hold that background sky direction |
+| right-click / `K` | track the body at the centre, or hold that background sky direction |
 | `U` | release the view lock |
 | `R` | keep the horizon level or the stars fixed while following a target |
 | scroll / `=` / `-` | zoom, down to 0.001° |
@@ -530,8 +530,8 @@ Page Down / Page Up perform these jumps while observing, once per key press,
 except when the targets panel is open: there they navigate target pages without
 advancing time. In the map menu they continue to turn pages.
 
-Pressing `K` with a body at the centre locks the telescope onto it as time advances.
-With empty sky at the centre, `K` holds that direction fixed against the background stars,
+Right-clicking (or pressing `K`) with a body at the centre locks the telescope onto it as time advances.
+With empty sky at the centre, right-click holds that direction fixed against the background stars,
 compensating for the observer's rotation. The selected target is centred without
 changing zoom. The ground is not a lock target.
 

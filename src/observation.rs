@@ -111,6 +111,24 @@ impl App {
         true
     }
 
+    /// Keep sky locking on right-click, but never route observation clicks to
+    /// the HUD. The captured pointer aims at the reticle, not its old position.
+    pub(crate) fn observation_button(
+        &mut self,
+        button: crate::MouseButton,
+        state: crate::ElementState,
+        (width, height): (u32, u32),
+    ) -> bool {
+        if !self.observing() {
+            return false;
+        }
+        if button == crate::MouseButton::Right && state == crate::ElementState::Pressed {
+            self.state
+                .lock_at(width as f64 * 0.5, height as f64 * 0.5, width, height);
+        }
+        true
+    }
+
     /// Only exposure adjustment repeats while held; toggles, target selection,
     /// and time jumps must remain single-press actions.
     pub(crate) fn repeat_observation_key(&mut self, key: KeyCode) -> bool {

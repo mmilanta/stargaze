@@ -682,7 +682,7 @@ fn build_controls(v: &mut Vec<UiVertex>, vp: [f32; 2], l: &Layout, scroll: f32) 
             "OBSERVATION",
             &[
                 ("mouse", "look around (no button)"),
-                ("K", "lock body / sky at centre"),
+                ("right-click K", "lock body / sky at centre"),
                 ("U", "release lock"),
                 ("scroll = -", "zoom (to 0.001°)"),
                 ("← →", "signed speed"),

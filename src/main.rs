@@ -1896,9 +1896,10 @@ impl ApplicationHandler for App {
                 }
             }
             WindowEvent::MouseInput { state, button, .. } => {
-                // Observation controls are keyboard-only. Buttons never unlock,
-                // pan, or activate a HUD control while the mouse is captured.
-                if self.observing() {
+                // The HUD is keyboard-only; right-click still locks the sky
+                // at the centre reticle rather than the hidden cursor position.
+                let size = self.renderer.as_ref().map_or((0, 0), Renderer::size);
+                if self.observation_button(button, state, size) {
                     return;
                 }
                 if button == MouseButton::Left {
@@ -2689,6 +2690,34 @@ mod app_tests {
         app.game = Some(game::Game::default());
         app.observation_key(KeyCode::BracketRight);
         assert_eq!(app.state.air.density, 1.0);
+    }
+
+    #[test]
+    fn observation_right_click_locks_the_reticle_without_activating_hud_buttons() {
+        for puzzle in [false, true] {
+            let mut app = app();
+            if puzzle {
+                app.game = Some(game::Game::default());
+            }
+            app.state.point_at(2);
+            let layout = ui::layout(800.0, 600.0, 1.0);
+            // A stale pointer position over Settings must not affect sky picking.
+            app.cursor = (layout.settings.x as f64, layout.settings.center_y() as f64);
+            assert!(app.observation_button(MouseButton::Right, ElementState::Pressed, (800, 600)));
+            assert_eq!(app.state.view_lock, Some(ViewLock::Body(2)));
+            assert!(!app.graphics.open);
+            assert!(app.observation_button(MouseButton::Left, ElementState::Pressed, (800, 600)));
+            assert_eq!(app.state.view_lock, Some(ViewLock::Body(2)));
+            assert!(!app.graphics.open);
+            app.state.unlock();
+            assert!(app.observation_button(MouseButton::Right, ElementState::Released, (800, 600)));
+            assert_eq!(app.state.view_lock, None);
+            assert!(app.observation_button(MouseButton::Right, ElementState::Pressed, (0, 0)));
+            assert_eq!(app.state.view_lock, None);
+            app.menu.open = true;
+            assert!(!app.observation_button(MouseButton::Right, ElementState::Pressed, (800, 600)));
+            assert_eq!(app.state.view_lock, None);
+        }
     }
 
     #[test]
