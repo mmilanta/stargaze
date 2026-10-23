@@ -398,7 +398,7 @@ STARGAZE_UI_PREVIEWS=/tmp/stargaze-ui \
 
 ### Quality settings
 
-Open **Settings** with **F11** while observing, from the main menu,
+Open **Settings** with **P** while observing, from the main menu,
 or through **Menu → Settings** (M, then G). The gear is available in field studies too.
 Choose **Eco**, **Balanced**, or **High**, then use sliders or Left/Right to
 customize the Rendering and Interface sections:
@@ -483,7 +483,7 @@ Mouse buttons do not activate the HUD or select sky targets. A small centre
 reticle helps aim; `K` locks what it points at. Mouse movement releases tracking.
 Zoom sensitivity follows the field of view, including at deep magnification.
 
-`Esc` / `M`, `F11`, or `Tab` (Play) release the pointer for the menu, settings,
+`Esc` / `M`, `P`, or `Tab` (Play) release the pointer for the menu, settings,
 or Theory editor. Those screens retain normal clickable controls. Losing focus
 or minimizing also releases capture; returning to observation captures it again.
 
@@ -509,7 +509,7 @@ or minimizing also releases capture; returning to observation captures it again.
 | `[` / `]` (air panel open) | decrease / increase density |
 | `;` / `'` (air panel open) | change sky hue |
 | `Backspace` (air panel open) | reset atmosphere tuning |
-| `F11` | graphics settings |
+| `P` | graphics settings |
 | `F10` | main menu; puzzles offer keep / discard first |
 | `,` `.` | exposure compensation down / up by 0.25 EV |
 | `A` | toggle automatic exposure metering (on by default) |

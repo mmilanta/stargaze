@@ -2120,7 +2120,7 @@ impl ApplicationHandler for App {
                 if self.menu_key(key, event.text.as_deref(), Some(event_loop)) {
                     return;
                 }
-                if key == KeyCode::F11 {
+                if key == KeyCode::KeyP {
                     self.open_settings();
                     return;
                 }
@@ -2513,7 +2513,7 @@ mod app_tests {
             app.state.view_lock = Some(ViewLock::Body(2));
             let (before, _) = app.build_frame(3840, 2160);
             let before = before.unwrap();
-            let open = |app: &mut App| app.observation_key(KeyCode::F11);
+            let open = |app: &mut App| app.observation_key(KeyCode::KeyP);
             let original = app.graphics.settings;
             open(&mut app);
             assert!(app.graphics.open && !app.menu.open);

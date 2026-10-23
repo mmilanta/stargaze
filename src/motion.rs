@@ -122,7 +122,7 @@ pub fn pressed(label: &str, r: Rect) -> bool {
             KeyCode::KeyH => label.ends_with("[H]"),
             KeyCode::KeyA => label.ends_with("[A]"),
             KeyCode::KeyU => label.ends_with("[U]"),
-            KeyCode::F11 => label.ends_with("[F11]"),
+            KeyCode::KeyP => label.ends_with("[P]"),
             KeyCode::KeyV => label.ends_with("[V]"),
             KeyCode::KeyX => label.ends_with("[X]"),
             KeyCode::KeyZ => label.ends_with("[Z]"),

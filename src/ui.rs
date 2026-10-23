@@ -185,7 +185,7 @@ impl ToolbarStyle {
             + time_group_width(keys)
             + lock_group_width(keys)
             + exposure_group_width(keys)
-            + toolbar_width("Settings [F11]", keys)
+            + toolbar_width("Settings [P]", keys)
             + 13.0
             + toolbar_width("Hide [H]", keys)
             + 12.0;
@@ -332,8 +332,8 @@ fn layout_mode(w: f32, h: f32, scale: f32, puzzle: bool) -> Layout {
     let hide_start = hide.x - 6.0 * s;
     let settings = style.control(
         bar,
-        hide_start - (7.0 + toolbar_width("Settings [F11]", style.keys)) * s,
-        toolbar_width("Settings [F11]", style.keys),
+        hide_start - (7.0 + toolbar_width("Settings [P]", style.keys)) * s,
+        toolbar_width("Settings [P]", style.keys),
     );
     let settings_start = settings.x - 6.0 * s;
     let targets = style.control(
@@ -1889,7 +1889,7 @@ fn build_bar(v: &mut Vec<UiVertex>, l: &Layout, w: f32, h: f32, state: HudState<
         b(v, l.air, AIR_LABEL, state.air_open);
         b(v, l.targets, "Targets [G]", state.targets_open);
     }
-    b(v, l.settings, "Settings [F11]", false);
+    b(v, l.settings, "Settings [P]", false);
     b(v, l.hide, "Hide [H]", false);
 }
 
@@ -2050,7 +2050,7 @@ mod tests {
                 (l.next_day, "+1d [PgUp]"),
                 (l.hide, "Hide [H]"),
                 (l.targets, "Targets [G]"),
-                (l.settings, "Settings [F11]"),
+                (l.settings, "Settings [P]"),
             ] {
                 let (text_x, _, key_x) = toolbar_content(r, label, l.style);
                 if let Some(key_x) = key_x {
