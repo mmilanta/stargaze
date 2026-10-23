@@ -137,19 +137,20 @@ pub fn pressed(label: &str, r: Rect) -> bool {
             KeyCode::ArrowLeft => label == "←",
             KeyCode::ArrowRight => label == "→",
             _ => [
-                KeyCode::F1,
-                KeyCode::F2,
-                KeyCode::F3,
-                KeyCode::F4,
-                KeyCode::F5,
-                KeyCode::F6,
-                KeyCode::F7,
-                KeyCode::F8,
-                KeyCode::F9,
+                KeyCode::Digit1,
+                KeyCode::Digit2,
+                KeyCode::Digit3,
+                KeyCode::Digit4,
+                KeyCode::Digit5,
+                KeyCode::Digit6,
+                KeyCode::Digit7,
+                KeyCode::Digit8,
+                KeyCode::Digit9,
+                KeyCode::Digit0,
             ]
             .iter()
             .position(|k| *k == key)
-            .is_some_and(|i| label.ends_with(&format!("[F{}]", i + 1))),
+            .is_some_and(|i| label.ends_with(&format!("[{}]", (i + 1) % 10))),
         }
     })
 }

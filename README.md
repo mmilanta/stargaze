@@ -12,7 +12,7 @@ The Amber horizon camera sits beneath an Earth-like atmosphere on Halo.
 Halo's circular orbit and matching rotation keep Calyx fixed in the sky,
 without camera tracking. The observatory is two metres above the surface at
 35° N on the planet-facing hemisphere, with an initial 80° field of view.
-Press `F1` to aim at Calyx. Run `cargo run --release` for the main menu,
+Press `G`, then `1` to aim at Calyx. Run `cargo run --release` for the main menu,
 or `STARGAZE_SYSTEM=halo cargo run --release` to open this observatory directly.
 
 `STARGAZE_SYSTEM=halo` or `binary` explicitly selects this view.
@@ -156,7 +156,7 @@ off-road two-track trail on the freely rotating middle moon of a ringed gas gian
 Levels, or run `cargo run --release -- --config configs/legacy/atacama.yaml`.
 See the [scene preview, orbital layout and night-view instructions](docs/atacama.md).
 
-Left-drag to look toward the ground; `Home` returns to the configured observing
+Move the mouse to look toward the ground; `Home` returns to the configured observing
 view. The scenery uses real stellar lighting, so choose daylight to see it
 clearly and pause for convergence. A continuous heightfield forms connected
 ridges and valleys, using warped multifractal noise and thermal erosion. It
@@ -174,7 +174,7 @@ Eco/Balanced/High select 35%/70%/100% density.
 
 ![Native lookout with continuous terrain and weathered outcrops](docs/rocky-lookout.png)
 
-For daylight scenery, run this command and left-drag to look toward the ground:
+For daylight scenery, run this command and move the mouse to look toward the ground:
 
 ```sh
 STARGAZE_SYSTEM=earth STARGAZE_TIME=0.599 cargo run --release
@@ -265,7 +265,8 @@ altitude, so the planets must be found by observing. Reset returns to this view.
 Select it in the menu or run `cargo run --release -- --config configs/legacy/vesper.yaml`.
 In game mode, select **Bright wanderers**, or launch it directly with
 `cargo run --release -- --game --config configs/legacy/vesper.yaml`.
-Outside game mode, F1 and F2 target Aureole and Cinder; F3 and F4 target Vesper's moons.
+Outside game mode, open targets with `G`: `1` and `2` target Aureole and Cinder;
+`3` and `4` target Vesper's moons.
 
 Click **Menu [M]** in Explore or **Maps [M]** in a field study to open the
 system or level list. Entries are selected with Up/Down, their number key, or
@@ -324,20 +325,21 @@ Ganymede, Callisto, Titan, Titania and Triton. Satellite orbits follow their
 parent's tilted equator where appropriate. The Earth observatory remains
 available with `STARGAZE_SYSTEM=earth`, with its atmosphere enabled.
 
-The shortcuts below describe the Saturn observatory. In the Earth preset,
-key `F7` aims at Saturn (body index `8`).
+Open the targets panel with `G` before using the number shortcuts below.
+They describe the Saturn observatory. In the Earth preset,
+key `7` aims at Saturn (body index `8`).
 
 | Key | Target | `STARGAZE_AIM` body index |
 | --- | --- | --- |
-| `F1` | Moon | `2` |
-| `F2` | Sun | `0` |
-| `F3` | Mercury | `5` |
-| `F4` | Venus | `6` |
-| `F5` | Mars | `3` |
-| `F6` | Jupiter | `7` |
-| `F7` | S/2009 S 1 (inner rings) | `19` |
-| `F8` | Uranus | `9` |
-| `F9` | Neptune | `10` |
+| `1` | Moon | `2` |
+| `2` | Sun | `0` |
+| `3` | Mercury | `5` |
+| `4` | Venus | `6` |
+| `5` | Mars | `3` |
+| `6` | Jupiter | `7` |
+| `7` | S/2009 S 1 (inner rings) | `19` |
+| `8` | Uranus | `9` |
+| `9` | Neptune | `10` |
 
 For example, `STARGAZE_SYSTEM=solar STARGAZE_AIM=7 cargo run --release`
 starts aimed at Jupiter and the Galilean moons.
@@ -396,7 +398,7 @@ STARGAZE_UI_PREVIEWS=/tmp/stargaze-ui \
 
 ### Quality settings
 
-Open **Settings** with the observatory gear button or **F11**, from the main menu,
+Open **Settings** with **F11** while observing, from the main menu,
 or through **Menu → Settings** (M, then G). The gear is available in field studies too.
 Choose **Eco**, **Balanced**, or **High**, then use sliders or Left/Right to
 customize the Rendering and Interface sections:
@@ -475,28 +477,39 @@ sequence is deterministic for a given pixel and sample index.
 
 ### Controls
 
+In Play/Explore observation, moving the mouse looks around without holding a
+button. The pointer is captured and hidden; HUD controls are **keyboard-only**.
+Mouse buttons do not activate the HUD or select sky targets. A small centre
+reticle helps aim; `K` locks what it points at. Mouse movement releases tracking.
+Zoom sensitivity follows the field of view, including at deep magnification.
+
+`Esc` / `M`, `F11`, or `Tab` (Play) release the pointer for the menu, settings,
+or Theory editor. Those screens retain normal clickable controls. Losing focus
+or minimizing also releases capture; returning to observation captures it again.
+
 | Input | Action |
 | --- | --- |
-| Menu / `M` / `Esc` | open the menu or resume the current view |
-| left-drag (sky) | look around |
-| right-click (sky) | track the clicked body, or hold a fixed direction against the background stars |
-| left-click (sky) | release the view lock |
-| Lock indicator / `U` | show the target and release the lock |
-| Horizon / Stars / `R` | keep the horizon level or the stars fixed while following a target |
+| `M` / `Esc` | open the menu or resume the current view |
+| mouse movement | look around (no button held) |
+| `K` | track the body at the centre, or hold that background sky direction |
+| `U` | release the view lock |
+| `R` | keep the horizon level or the stars fixed while following a target |
 | scroll / `=` / `-` | zoom, down to 0.001° |
-| Labels toggle (bar) | show / hide names |
-| Exposure slider (right of playback controls) | brightness compensation, −8 to +8 EV in quarter stops, in either mode |
-| Auto switch / `A` | toggle automatic exposure; enabling it resets compensation to 0 EV |
-| Stop / Play / Space | pause or resume the previous signed playback speed |
-| −1 day / Page Down; +1 day / Page Up | jump backward / forward by one local solar day, preserving speed and tracking |
-| Left / Right arrow (bar) | choose −1000, −100, −10, −1, 0, +1, +10, +100 or +1000 minutes per second |
-| `F1`–`F9` | aim at scene targets (`F9` is solar-only) |
+| `Space` | pause or resume the previous signed playback speed |
+| `Page Down` / `Page Up` | jump backward / forward by one local solar day (targets panel closed) |
+| Left / Right arrow | choose −1000, −100, −10, −1, 0, +1, +10, +100 or +1000 minutes per second |
+| `1`–`9`, `0` (targets panel open) | aim at a target on the current page (Explore only) |
+| `Page Up` / `Page Down` (targets panel open) | previous / next page of up to 10 targets |
 | `E` | search up to ten model years for a visible eclipse |
 | `T` | search for a moon transit (e.g. Phobos/Mars or Io/Jupiter) |
 | `Home` | reset view |
 | `G` | show / hide the target panel in Explore |
 | `B` | cycle the ground in Explore: Atacama, airless craters, snowy alpine, volcanic basalt, dune sea |
 | `J` | open the atmosphere panel in Explore: density (off to 4×) and sky colour |
+| `[` / `]` (air panel open) | decrease / increase density |
+| `;` / `'` (air panel open) | change sky hue |
+| `Backspace` (air panel open) | reset atmosphere tuning |
+| `F11` | graphics settings |
 | `F10` | main menu; puzzles offer keep / discard first |
 | `,` `.` | exposure compensation down / up by 0.25 EV |
 | `A` | toggle automatic exposure metering (on by default) |
@@ -513,18 +526,19 @@ target tracking stay unchanged, and backward jumps can pass day zero.
 If no full revolution is found, the clock shows **No day found** and time
 stays unchanged. This includes worlds permanently locked toward the root;
 the search is bounded to 512 of the shortest resolved spin/orbit cycles.
-Page Down / Page Up perform these jumps while observing, once per key press.
-In the map menu they continue to turn pages.
+Page Down / Page Up perform these jumps while observing, once per key press,
+except when the targets panel is open: there they navigate target pages without
+advancing time. In the map menu they continue to turn pages.
 
-Right-clicking a body locks the telescope onto it as time advances. Right-clicking
-empty sky holds the clicked direction fixed against the background stars,
+Pressing `K` with a body at the centre locks the telescope onto it as time advances.
+With empty sky at the centre, `K` holds that direction fixed against the background stars,
 compensating for the observer's rotation. The selected target is centred without
 changing zoom. The ground is not a lock target.
 
 The bottom bar shows **Locked [U]** with the target name when labels are visible. With labels
 hidden, including in game mode, it shows **Star**, **Planet / moon**, or
 **Background sky** instead. The lock indicator remains available when the HUD
-is hidden. Left-clicking the observation view or the lock indicator releases it.
+is hidden. `U` or mouse movement releases it.
 Menus, playback controls, exposure controls, and the diagram preserve the lock.
 Aiming with a target shortcut, resetting, or loading a different system releases it.
 
@@ -613,7 +627,7 @@ Tests cover WGSL validation and buffer layouts, accumulation invalidation,
 star-grid seam/pole coverage, actual GPU emission, finite-disc irradiance,
 umbras, penumbras, annular eclipses, multiple stars, MIS, indirect reflected
 light, distant-surface self-intersection, deep-zoom label alignment, picking,
-tracking and click/drag handling, atmosphere units, extinction, twilight and
+tracking and relative mouse-look, atmosphere units, extinction, twilight and
 atmospheric eclipses, screen-space star caps and dark ground without catalogue
 fireflies, near-surface horizon intersections, ring geometry and Beer-Lambert
 transmission, ring scattering, energy conservation and shadows, MIS through

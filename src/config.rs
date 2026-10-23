@@ -410,10 +410,6 @@ impl System {
             Ok(())
         };
         check_target(default_target)?;
-        ensure!(
-            self.targets.len() <= 9,
-            "targets supports at most nine number-key shortcuts"
-        );
         let targets = if self.targets.is_empty() {
             vec![default_target]
         } else {
@@ -939,6 +935,27 @@ mod tests {
         assert!(parse(&airless).unwrap().atmosphere.is_none());
         assert!(parse(&HALO.replace("earthlike", "unknown")).is_err());
     }
+    #[test]
+    fn target_lists_can_span_multiple_number_key_pages() {
+        let mut system: System = serde_saphyr::from_str(SOLAR).unwrap();
+        system.targets = system
+            .bodies
+            .iter()
+            .filter(|body| body.id != system.camera.body && !matches!(body.kind, Kind::Anchor))
+            .map(|body| body.id.clone())
+            .collect();
+        let count = system.targets.len();
+        assert!(count > 10);
+        let scene = system.into_scene().unwrap();
+        assert_eq!(scene.targets.len(), count);
+        assert!(
+            scene
+                .targets
+                .iter()
+                .all(|&i| i < scene.bodies.len() && i != scene.host)
+        );
+    }
+
     #[test]
     fn validates_optional_camera_direction() {
         assert!(parse(HALO).unwrap().initial_direction_deg.is_none());
