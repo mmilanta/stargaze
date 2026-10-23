@@ -142,7 +142,7 @@ mod tests {
         let map = panorama();
         assert_eq!(map.len(), WIDTH * HEIGHT);
         assert!(map.iter().any(|v| *v != 0));
-        assert!(map.iter().any(|v| *v == 0));
+        assert!(map.contains(&0));
         assert!(std::ptr::eq(map, panorama()), "cache the generated map");
     }
 }

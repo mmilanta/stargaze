@@ -9,6 +9,7 @@ mod ground;
 mod gui;
 mod menu;
 mod motion;
+mod paths;
 mod pathtracer;
 #[cfg(test)]
 mod performance_tests;
@@ -75,8 +76,12 @@ fn scene_for_startup() -> Result<Option<Scene>> {
         match arg.to_str() {
             Some("--help" | "-h") => {
                 println!(
-                    "Stargaze — an observatory in a configurable star system\n\nUsage: stargaze [--game] [--unguided-ground] [--config FILE | --check-config FILE]\n\n--game               Play the anonymous system reconstruction puzzle\n--unguided-ground    Use the original ground sampler for comparison\n--guided-ground      Use guided ground sampling (default)\n--config FILE        Load a YAML system and its camera\n--check-config FILE  Validate without opening a window\n--texture [STYLE]    Planet texture editor (plain, gas_giant, cratered, rocky, icy, volcanic, terran)\n\nDefaults to the first level, configs/1-halo-volcano.yaml (also with --game). STARGAZE_CONFIG also selects a file."
+                    "Stargaze — an observatory in a configurable star system\n\nUsage: stargaze [--game] [--unguided-ground] [--config FILE | --check-config FILE]\n\n--version, -V        Print the application version\n--game               Play the anonymous system reconstruction puzzle\n--unguided-ground    Use the original ground sampler for comparison\n--guided-ground      Use guided ground sampling (default)\n--config FILE        Load a YAML system and its camera\n--check-config FILE  Validate without opening a window\n--texture [STYLE]    Planet texture editor (plain, gas_giant, cratered, rocky, icy, volcanic, terran)\n\nDefaults to the first level, configs/1-halo-volcano.yaml (also with --game). STARGAZE_CONFIG also selects a file."
                 );
+                return Ok(None);
+            }
+            Some("--version" | "-V") => {
+                println!("stargaze {}", env!("CARGO_PKG_VERSION"));
                 return Ok(None);
             }
             Some("--game") => {}
@@ -105,23 +110,10 @@ fn scene_for_startup() -> Result<Option<Scene>> {
         } else {
             let preset = std::env::var("STARGAZE_SYSTEM").ok();
             match preset.as_deref() {
-                None if game_requested() => config::load(concat!(
-                    env!("CARGO_MANIFEST_DIR"),
-                    "/configs/1-halo-volcano.yaml"
-                ))?,
-                // The first level opens by default.
-                None => config::load(concat!(
-                    env!("CARGO_MANIFEST_DIR"),
-                    "/configs/1-halo-volcano.yaml"
-                ))?,
-                Some("halo" | "binary") => config::load(concat!(
-                    env!("CARGO_MANIFEST_DIR"),
-                    "/configs/legacy/halo.yaml"
-                ))?,
-                Some("earth") => config::load(concat!(
-                    env!("CARGO_MANIFEST_DIR"),
-                    "/configs/legacy/solar-system.yaml"
-                ))?,
+                // The first level opens by default (also with --game).
+                None => config::load(paths::configs().join("1-halo-volcano.yaml"))?,
+                Some("halo" | "binary") => config::load(paths::configs().join("legacy/halo.yaml"))?,
+                Some("earth") => config::load(paths::configs().join("legacy/solar-system.yaml"))?,
                 Some("calyx" | "solar" | "sol" | "saturn") => scene_for_system(preset.as_deref()),
                 Some(other) => anyhow::bail!("unknown STARGAZE_SYSTEM '{other}'"),
             }
@@ -1431,10 +1423,7 @@ impl App {
             self.select_map(path);
         } else if puzzle && !preset_selected {
             self.open_page(menu::Page::Levels);
-            self.select_map(std::path::Path::new(concat!(
-                env!("CARGO_MANIFEST_DIR"),
-                "/configs/1-halo-volcano.yaml"
-            )));
+            self.select_map(&paths::configs().join("1-halo-volcano.yaml"));
         } else if preset_selected {
             self.menu.can_resume = true;
             self.menu.page = if puzzle {

@@ -294,7 +294,7 @@ fn gpu_milky_way_exposure_cap_and_preview() {
         sample(&device, &queue, &mut preview, &scene, 4);
         let pixels = presented_pixels(&device, &queue, &preview);
         let mut ppm = b"P6\n640 360\n255\n".to_vec();
-        for pixel in pixels.chunks_exact(4) {
+        for pixel in pixels.as_chunks::<4>().0 {
             ppm.extend_from_slice(&pixel[..3]);
         }
         std::fs::create_dir_all(&dir).unwrap();
