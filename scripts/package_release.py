@@ -38,6 +38,7 @@ def main():
         for filename in [ROOT / 'assets/fonts/OFL-DMSans.txt',
                          ROOT / 'prototypes/menu-ui/assets/OFL-PlexMono.txt']:
             shutil.copy2(filename, licenses / filename.name)
+        shutil.copy2(ROOT / 'assets/terrain/README.md', licenses / 'Terrain-attribution.md')
         if windows:
             archive = dist / f'{name}.zip'
             with zipfile.ZipFile(archive, 'w', zipfile.ZIP_DEFLATED) as output:
