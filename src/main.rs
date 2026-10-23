@@ -2077,6 +2077,7 @@ impl ApplicationHandler for App {
                     return;
                 };
                 if event.repeat && !self.menu.searching {
+                    self.repeat_observation_key(key);
                     return;
                 }
                 if self.modal_key(key, event_loop) {
@@ -2688,6 +2689,60 @@ mod app_tests {
         app.game = Some(game::Game::default());
         app.observation_key(KeyCode::BracketRight);
         assert_eq!(app.state.air.density, 1.0);
+    }
+
+    #[test]
+    fn holding_exposure_keys_repeats_and_clamps_without_repeating_other_actions() {
+        for puzzle in [false, true] {
+            let mut app = app();
+            if puzzle {
+                app.game = Some(game::Game::default());
+            }
+            app.observation_key(KeyCode::Period);
+            assert_eq!(app.ev_bias, 0.25);
+            assert!(app.repeat_observation_key(KeyCode::Period));
+            assert_eq!(app.ev_bias, 0.5);
+            for _ in 0..100 {
+                assert!(app.repeat_observation_key(KeyCode::Period));
+            }
+            assert_eq!(app.ev_bias, ui::MAX_EV);
+            for _ in 0..100 {
+                assert!(app.repeat_observation_key(KeyCode::Comma));
+            }
+            assert_eq!(app.ev_bias, ui::MIN_EV);
+            assert!(app.repeat_observation_key(KeyCode::Period));
+            assert_eq!(app.ev_bias, ui::MIN_EV + 0.25);
+            let time = app.state.sim_time;
+            let auto = app.auto_exposure;
+            for key in [
+                KeyCode::KeyA,
+                KeyCode::PageDown,
+                KeyCode::Space,
+                KeyCode::KeyP,
+            ] {
+                assert!(!app.repeat_observation_key(key));
+            }
+            assert_eq!(app.auto_exposure, auto);
+            assert_eq!(app.state.sim_time, time);
+            assert!(!app.graphics.open);
+            let bias = app.ev_bias;
+            app.menu.open = true;
+            assert!(!app.repeat_observation_key(KeyCode::Period));
+            app.menu.open = false;
+            app.graphics.open = true;
+            assert!(!app.repeat_observation_key(KeyCode::Comma));
+            app.graphics.open = false;
+            app.leave = Some(Leave::Levels);
+            assert!(!app.repeat_observation_key(KeyCode::Period));
+            app.leave = None;
+            if let Some(game) = &mut app.game {
+                game.open = true;
+            }
+            if puzzle {
+                assert!(!app.repeat_observation_key(KeyCode::Comma));
+            }
+            assert_eq!(app.ev_bias, bias);
+        }
     }
 
     #[test]

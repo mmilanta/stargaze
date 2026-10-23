@@ -111,6 +111,16 @@ impl App {
         true
     }
 
+    /// Only exposure adjustment repeats while held; toggles, target selection,
+    /// and time jumps must remain single-press actions.
+    pub(crate) fn repeat_observation_key(&mut self, key: KeyCode) -> bool {
+        if !self.observing() || !matches!(key, KeyCode::Comma | KeyCode::Period) {
+            return false;
+        }
+        self.observation_key(key);
+        true
+    }
+
     pub(crate) fn observation_key(&mut self, key: KeyCode) {
         if self.target_key(key) || self.state.time_key(key) || self.air_key(key) {
             return;
