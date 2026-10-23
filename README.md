@@ -511,7 +511,7 @@ or minimizing also releases capture; returning to observation captures it again.
 | `Backspace` (air panel open) | reset atmosphere tuning |
 | `P` | graphics settings |
 | `F10` | main menu; puzzles offer keep / discard first |
-| `,` `.` | exposure compensation down / up by 0.25 EV |
+| `,` `.` (hold to repeat) | exposure compensation down / up by 0.25 EV, clamped to −8…+8 EV |
 | `A` | toggle automatic exposure metering (on by default) |
 | `H` | show / hide HUD |
 | `L` | toggle labels |
