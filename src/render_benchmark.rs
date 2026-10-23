@@ -243,10 +243,7 @@ fn state(scene: crate::sim::Scene, time: f64) -> crate::State {
         resume_warp: crate::STOP_WARP + 1,
         day_step_failed: false,
         last: Instant::now(),
-        dragging: false,
-        last_cursor: None,
         view_lock: None,
-        press: None,
         air: Default::default(),
         no_ground: false,
     }

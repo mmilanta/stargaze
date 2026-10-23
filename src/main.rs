@@ -9,6 +9,7 @@ mod ground;
 mod gui;
 mod menu;
 mod motion;
+mod observation;
 mod paths;
 mod pathtracer;
 #[cfg(test)]
@@ -32,7 +33,9 @@ use std::time::Instant;
 use anyhow::Result;
 use glam::DVec3;
 use winit::application::ApplicationHandler;
-use winit::event::{ElementState, MouseButton, MouseScrollDelta, WindowEvent};
+use winit::event::{
+    DeviceEvent, DeviceId, ElementState, MouseButton, MouseScrollDelta, WindowEvent,
+};
 use winit::event_loop::{ActiveEventLoop, ControlFlow, EventLoop};
 use winit::keyboard::{KeyCode, ModifiersState, PhysicalKey};
 use winit::window::{Window, WindowId};
@@ -180,13 +183,8 @@ struct State {
     resume_warp: usize,
     day_step_failed: bool,
     last: Instant,
-    /// True only after a sky press crosses the drag threshold.
-    dragging: bool,
-    last_cursor: Option<(f64, f64)>,
     /// Either a moving scene body or a fixed direction against distant stars.
     view_lock: Option<ViewLock>,
-    /// Cursor position where the current left-button press began (sky only).
-    press: Option<(f64, f64)>,
     /// Explore-mode tuning of the host atmosphere.
     air: AirTuning,
     /// Hide the local terrain and props (the texture editor's camera floats).
@@ -243,10 +241,7 @@ impl State {
             resume_warp: STOP_WARP + 1,
             day_step_failed: false,
             last: Instant::now(),
-            dragging: false,
-            last_cursor: None,
             view_lock: None,
-            press: None,
             air: AirTuning::default(),
             no_ground: false,
         };
@@ -481,7 +476,7 @@ impl State {
         None
     }
 
-    /// Aim at the k-th entry of the scene's target list (function keys).
+    /// Aim at the k-th entry of the scene's target list.
     fn aim_target(&mut self, k: usize) {
         if let Some(&target) = self.scene.targets.get(k) {
             self.aim_at(target);
@@ -674,47 +669,29 @@ impl State {
         self.track();
     }
 
-    fn begin_sky_press(&mut self, cursor: (f64, f64)) {
-        self.unlock();
-        self.press = Some(cursor);
-        self.last_cursor = Some(cursor);
-        self.dragging = false;
-    }
-
-    /// Do not pan until the cursor leaves the click tolerance.
-    fn drag_sky(&mut self, cursor: (f64, f64), scale: f64, height: u32) {
-        let Some(start) = self.press else { return };
-        if !self.dragging {
-            if (cursor.0 - start.0).hypot(cursor.1 - start.1) <= 4.0 * scale {
-                return;
-            }
-            self.dragging = true;
-            self.unlock();
+    /// Relative mouse-look: right moves right, down moves down. Sensitivity
+    /// follows the telescope FOV so fine aiming remains possible at deep zoom.
+    fn look_around(&mut self, (dx, dy): (f64, f64), height: u32) -> bool {
+        if !dx.is_finite() || !dy.is_finite() || (dx == 0.0 && dy == 0.0) || height == 0 {
+            return false;
         }
-        let previous = self.last_cursor.unwrap_or(start);
-        let rad_per_px = self.observer.fov_y / height.max(1) as f64;
+        self.unlock();
+        let sensitivity = self.observer.fov_y / height as f64;
         if self.observer.star_orientation.is_some() {
             let positions = self.scene.positions(self.sim_time);
             let frame = self.observer.frame(&self.scene, self.sim_time, &positions);
-            let dir = (frame.forward - frame.right * ((cursor.0 - previous.0) * rad_per_px)
-                + frame.up * ((cursor.1 - previous.1) * rad_per_px))
+            let dir = (frame.forward + frame.right * (dx * sensitivity)
+                - frame.up * (dy * sensitivity))
                 .normalize();
             self.observer.alt = dir.dot(frame.zenith).clamp(-1.0, 1.0).asin();
             self.observer.az = dir.dot(frame.east).atan2(dir.dot(frame.north));
         } else {
-            self.observer.az -= (cursor.0 - previous.0) * rad_per_px;
-            self.observer.alt = (self.observer.alt + (cursor.1 - previous.1) * rad_per_px)
-                .clamp(-5.0_f64.to_radians(), 89.0_f64.to_radians());
+            self.observer.az =
+                (self.observer.az + dx * sensitivity).rem_euclid(std::f64::consts::TAU);
+            self.observer.alt = (self.observer.alt - dy * sensitivity)
+                .clamp(-89.0_f64.to_radians(), 89.0_f64.to_radians());
         }
-        self.last_cursor = Some(cursor);
-    }
-
-    /// Finish or cancel a gesture, returning whether it was a sky click.
-    fn end_sky_press(&mut self) -> bool {
-        let click = self.press.take().is_some() && !self.dragging;
-        self.dragging = false;
-        self.last_cursor = None;
-        click
+        true
     }
 
     /// Return the nearest body under a physical-pixel cursor position, if any.
@@ -1041,11 +1018,11 @@ struct App {
     pressed_key: Option<KeyCode>,
     modifiers: ModifiersState,
     mouse_down: bool,
+    mouse_look: observation::MouseLook,
     show_labels: bool,
     show_hud: bool,
     auto_exposure: bool,
     ev_bias: f32,
-    exposure_dragging: bool,
     occluded: bool,
     graphics: graphics::Menu,
     pacer: graphics::FramePacer,
@@ -1056,9 +1033,9 @@ struct App {
     discard: Option<std::path::PathBuf>,
     controls_back: menu::Page,
     targets_open: bool,
-    /// Explore-mode atmosphere panel, and the slider being dragged in it.
+    target_page: usize,
+    /// Explore-mode atmosphere panel (keyboard controlled).
     air_open: bool,
-    air_drag: Option<AirSlider>,
     toast: Option<(String, Instant)>,
     /// `--texture`: the planet texture editor replaces the observatory.
     texture: Option<texture::Editor>,
@@ -1315,30 +1292,14 @@ impl App {
             && game.open
         {
             game.right_click(&game.layout(w as f32, h as f32, self.scale), self.cursor);
-            return;
         }
-        let (x, y) = self.cursor;
-        let hud = ui::layout(w as f32, h as f32, self.scale)
-            .with_puzzle(self.game.is_some())
-            .with_hidden(!self.show_hud);
-        if hud.lock.contains(x, y)
-            || (self.show_hud && hud.bar.contains(x, y))
-            || (self.game.is_none() && hud.home.contains(x, y))
-        {
-            return;
-        }
-        self.state.end_sky_press();
-        self.exposure_dragging = false;
-        self.state.lock_at(x, y, w, h);
     }
 
     fn toggle_notebook(&mut self) {
         if let Some(game) = self.game.as_mut() {
             game.toggle();
         }
-        self.state.end_sky_press();
         self.state.last = Instant::now();
-        self.exposure_dragging = false;
     }
 
     fn refresh_progress(&mut self) {
@@ -1397,8 +1358,6 @@ impl App {
     }
 
     fn open_page(&mut self, page: menu::Page) {
-        self.state.end_sky_press();
-        self.exposure_dragging = false;
         if let Some(game) = &mut self.game {
             game.release();
         }
@@ -1460,8 +1419,6 @@ impl App {
     fn request_leave(&mut self, to: Leave) {
         if self.game.as_ref().is_some_and(|g| g.has_progress()) && self.active_path.is_some() {
             self.leave = Some(to);
-            self.state.end_sky_press();
-            self.exposure_dragging = false;
             if let Some(game) = &mut self.game {
                 game.release();
                 game.dismiss_result();
@@ -1577,12 +1534,11 @@ impl App {
                 self.menu.open = false;
                 self.menu.can_resume = true;
                 self.menu.error = None;
-                self.exposure_dragging = false;
                 self.show_hud = true;
                 self.sync_exposure();
                 self.targets_open = false;
+                self.target_page = 0;
                 self.air_open = false;
-                self.air_drag = None;
                 self.toast = Some((
                     if puzzle {
                         "Field study ready. Observe, then draw your theory.".into()
@@ -1720,82 +1676,6 @@ impl App {
         true
     }
 
-    /// UI clicks preserve tracking, except the explicit lock/unlock button.
-    fn hud_click(&mut self, layout: &ui::Layout, x: f64, y: f64) -> bool {
-        if layout.lock.contains(x, y) {
-            self.state.unlock();
-            return true;
-        }
-        if layout.hide.contains(x, y) {
-            self.show_hud = !self.show_hud;
-            return true;
-        }
-        if !self.show_hud && layout.home.contains(x, y) {
-            if self.game.is_some() {
-                self.request_leave(Leave::Levels);
-            } else {
-                self.toggle_menu();
-            }
-            return true;
-        }
-        if !self.show_hud || !layout.bar.contains(x, y) {
-            return false;
-        }
-        if layout.settings.contains(x, y) {
-            self.open_settings();
-        } else if layout.home.contains(x, y) {
-            if self.game.is_some() {
-                self.request_leave(Leave::Levels);
-            } else {
-                self.toggle_menu();
-            }
-        } else if layout.horizon.contains(x, y) {
-            if self.state.observer.star_orientation.is_some() {
-                self.state.toggle_star_orientation();
-            }
-        } else if layout.stars.contains(x, y) {
-            if self.state.observer.star_orientation.is_none() {
-                self.state.toggle_star_orientation();
-            }
-        } else if self.game.is_none() && layout.targets.contains(x, y) {
-            self.targets_open = !self.targets_open;
-        } else if self.game.is_none() && layout.ground.contains(x, y) {
-            self.cycle_ground();
-        } else if self.game.is_none() && layout.air.contains(x, y) {
-            self.air_open = !self.air_open;
-            self.air_drag = None;
-        } else if layout.slower.contains(x, y) {
-            self.state.change_speed(false);
-        } else if layout.faster.contains(x, y) {
-            self.state.change_speed(true);
-        } else if layout.stop.contains(x, y) {
-            self.state.toggle_stop();
-        } else if layout.previous_day.contains(x, y) {
-            self.state.step_local_day(false);
-        } else if layout.next_day.contains(x, y) {
-            self.state.step_local_day(true);
-        } else if self.game.is_some() && layout.draw.contains(x, y) {
-            self.toggle_notebook();
-        } else if self.game.is_none() && layout.toggle.contains(x, y) {
-            self.show_labels = !self.show_labels;
-        } else if layout.exposure.contains(x, y) {
-            self.exposure_dragging = true;
-            self.adjust_exposure(layout, x);
-        } else if layout.auto.contains(x, y) {
-            self.auto_exposure = !self.auto_exposure;
-            if self.auto_exposure {
-                self.ev_bias = 0.0;
-            }
-            self.sync_exposure();
-        }
-        true
-    }
-
-    fn adjust_exposure(&mut self, layout: &ui::Layout, x: f64) {
-        self.ev_bias = layout.exposure_bias_at(x);
-        self.sync_exposure();
-    }
-
     fn sync_exposure(&mut self) {
         if let Some(r) = self.renderer.as_mut() {
             r.set_exposure_controls(self.auto_exposure, self.ev_bias);
@@ -1814,19 +1694,6 @@ impl App {
         self.graphics.persist();
         self.toast = Some((self.graphics.message.clone(), Instant::now()));
         self.pacer.request();
-    }
-
-    fn ui_layout(&self) -> Option<ui::Layout> {
-        let r = self.renderer.as_ref()?;
-        let (w, h) = r.size();
-        if w == 0 || h == 0 {
-            return None;
-        }
-        Some(
-            ui::layout(w as f32, h as f32, self.scale)
-                .with_puzzle(self.game.is_some())
-                .with_hidden(!self.show_hud),
-        )
     }
 }
 
@@ -1876,11 +1743,26 @@ impl ApplicationHandler for App {
                 ));
                 self.renderer = Some(renderer);
                 window.request_redraw();
+                self.mouse_look.focused = window.has_focus();
                 self.window = Some(window);
+                self.sync_mouse_capture();
             }
             Err(err) => {
                 log::error!("failed to initialise renderer: {err:?}");
                 event_loop.exit();
+            }
+        }
+    }
+
+    fn device_event(&mut self, _event_loop: &ActiveEventLoop, _id: DeviceId, event: DeviceEvent) {
+        self.sync_mouse_capture();
+        if let DeviceEvent::MouseMotion { delta } = event {
+            let height = self.renderer.as_ref().map_or(0, |r| r.size().1);
+            if self.observation_motion(delta, height) {
+                self.pacer.request();
+                if let Some(window) = &self.window {
+                    window.request_redraw();
+                }
             }
         }
     }
@@ -2014,6 +1896,12 @@ impl ApplicationHandler for App {
                 }
             }
             WindowEvent::MouseInput { state, button, .. } => {
+                // The HUD is keyboard-only; right-click still locks the sky
+                // at the centre reticle rather than the hidden cursor position.
+                let size = self.renderer.as_ref().map_or((0, 0), Renderer::size);
+                if self.observation_button(button, state, size) {
+                    return;
+                }
                 if button == MouseButton::Left {
                     self.mouse_down = state == ElementState::Pressed;
                 }
@@ -2041,12 +1929,7 @@ impl ApplicationHandler for App {
                             self.title_action(i, Some(event_loop));
                             return;
                         }
-                        if self.air_click() || self.targets_click() {
-                            self.state.end_sky_press();
-                            return;
-                        }
                         if self.menu_click(cx, cy) {
-                            self.state.end_sky_press();
                             return;
                         }
                         if let (Some(game), Some(r)) = (self.game.as_mut(), self.renderer.as_ref())
@@ -2054,19 +1937,8 @@ impl ApplicationHandler for App {
                             let (w, h) = r.size();
                             let layout = game.layout(w.max(1) as f32, h.max(1) as f32, self.scale);
                             if game.open && game.click(&layout, self.cursor, &self.state.scene) {
-                                self.state.end_sky_press();
-                                self.exposure_dragging = false;
                                 self.state.last = Instant::now();
-                                return;
                             }
-                        }
-                        let consumed = self
-                            .ui_layout()
-                            .is_some_and(|layout| self.hud_click(&layout, cx, cy));
-                        if consumed {
-                            self.state.end_sky_press();
-                        } else {
-                            self.state.begin_sky_press((cx, cy));
                         }
                     }
                     ElementState::Released => {
@@ -2074,13 +1946,13 @@ impl ApplicationHandler for App {
                             game.release();
                         }
                         self.graphics.dragging = None;
-                        self.exposure_dragging = false;
-                        self.air_drag = None;
-                        self.state.end_sky_press();
                     }
                 }
             }
             WindowEvent::CursorMoved { position, .. } => {
+                if self.observing() {
+                    return;
+                }
                 self.cursor = (position.x, position.y);
                 if self.graphics.open {
                     if let Some(r) = &self.renderer {
@@ -2110,23 +1982,14 @@ impl ApplicationHandler for App {
                         &game.layout(w.max(1) as f32, h.max(1) as f32, self.scale),
                         self.cursor,
                     );
-                    return;
-                }
-                if self.air_drag.is_some() {
-                    self.air_drag_to(position.x);
-                } else if self.exposure_dragging {
-                    if let Some(layout) = self.ui_layout() {
-                        self.adjust_exposure(&layout, position.x);
-                    }
-                } else {
-                    let height = self.renderer.as_ref().map(|r| r.size().1).unwrap_or(1);
-                    self.state.drag_sky(self.cursor, self.scale as f64, height);
                 }
             }
             WindowEvent::Focused(false) | WindowEvent::CursorLeft { .. } => {
                 if matches!(event, WindowEvent::Focused(false)) {
                     // Modifier releases while unfocused may never reach us.
                     self.modifiers = ModifiersState::empty();
+                    self.mouse_look.focused = false;
+                    self.sync_mouse_capture();
                 }
                 self.pressed_key = None;
                 self.mouse_down = false;
@@ -2134,9 +1997,11 @@ impl ApplicationHandler for App {
                     game.release();
                 }
                 // A release outside the window may never reach us.
-                self.exposure_dragging = false;
-                self.air_drag = None;
-                self.state.end_sky_press();
+                self.graphics.dragging = None;
+            }
+            WindowEvent::Focused(true) => {
+                self.mouse_look.focused = true;
+                self.sync_mouse_capture();
             }
             WindowEvent::MouseWheel { delta, .. } => {
                 let y = match delta {
@@ -2213,6 +2078,7 @@ impl ApplicationHandler for App {
                     return;
                 };
                 if event.repeat && !self.menu.searching {
+                    self.repeat_observation_key(key);
                     return;
                 }
                 if self.modal_key(key, event_loop) {
@@ -2256,7 +2122,7 @@ impl ApplicationHandler for App {
                 if self.menu_key(key, event.text.as_deref(), Some(event_loop)) {
                     return;
                 }
-                if key == KeyCode::F11 {
+                if key == KeyCode::KeyP {
                     self.open_settings();
                     return;
                 }
@@ -2300,91 +2166,14 @@ impl ApplicationHandler for App {
                         return;
                     }
                     // Named target and event shortcuts bypass the observation puzzle.
-                    if matches!(
-                        key,
-                        KeyCode::KeyL
-                            | KeyCode::KeyE
-                            | KeyCode::KeyT
-                            | KeyCode::F1
-                            | KeyCode::F2
-                            | KeyCode::F3
-                            | KeyCode::F4
-                            | KeyCode::F5
-                            | KeyCode::F6
-                            | KeyCode::F7
-                            | KeyCode::F8
-                            | KeyCode::F9
-                    ) {
+                    if matches!(key, KeyCode::KeyL | KeyCode::KeyE | KeyCode::KeyT) {
                         return;
                     }
                 }
                 if event.repeat && matches!(key, KeyCode::PageUp | KeyCode::PageDown) {
                     return;
                 }
-                if self.state.time_key(key) {
-                    return;
-                }
-                match event.physical_key {
-                    PhysicalKey::Code(KeyCode::KeyR | KeyCode::KeyS | KeyCode::KeyO) => {
-                        if !event.repeat {
-                            self.state.toggle_star_orientation();
-                        }
-                    }
-                    PhysicalKey::Code(KeyCode::KeyU) => self.state.unlock(),
-                    PhysicalKey::Code(KeyCode::Home) => self.state.reset_view(),
-                    PhysicalKey::Code(KeyCode::F10) => self.request_leave(Leave::Title),
-                    PhysicalKey::Code(KeyCode::KeyG) if self.game.is_none() => {
-                        self.targets_open = !self.targets_open
-                    }
-                    PhysicalKey::Code(KeyCode::KeyB) if self.game.is_none() && !event.repeat => {
-                        self.cycle_ground()
-                    }
-                    PhysicalKey::Code(KeyCode::KeyJ) if self.game.is_none() && !event.repeat => {
-                        self.air_open = !self.air_open;
-                        self.air_drag = None;
-                    }
-                    PhysicalKey::Code(KeyCode::KeyE) => self.find_event(false),
-                    PhysicalKey::Code(KeyCode::KeyT) => self.find_event(true),
-                    PhysicalKey::Code(KeyCode::KeyH) => {
-                        self.show_hud = !self.show_hud;
-                        self.exposure_dragging = false;
-                    }
-                    PhysicalKey::Code(KeyCode::KeyL) => self.show_labels = !self.show_labels,
-                    PhysicalKey::Code(KeyCode::KeyA) => {
-                        self.auto_exposure = !self.auto_exposure;
-                        if self.auto_exposure {
-                            self.ev_bias = 0.0;
-                        }
-                        self.sync_exposure();
-                    }
-                    PhysicalKey::Code(KeyCode::Comma) => {
-                        self.ev_bias = (self.ev_bias - 0.25).clamp(ui::MIN_EV, ui::MAX_EV);
-                        self.sync_exposure();
-                    }
-                    PhysicalKey::Code(KeyCode::Period) => {
-                        self.ev_bias = (self.ev_bias + 0.25).clamp(ui::MIN_EV, ui::MAX_EV);
-                        self.sync_exposure();
-                    }
-                    PhysicalKey::Code(KeyCode::F1) => self.state.aim_target(0),
-                    PhysicalKey::Code(KeyCode::F2) => self.state.aim_target(1),
-                    PhysicalKey::Code(KeyCode::F3) => self.state.aim_target(2),
-                    PhysicalKey::Code(KeyCode::F4) => self.state.aim_target(3),
-                    PhysicalKey::Code(KeyCode::F5) => self.state.aim_target(4),
-                    PhysicalKey::Code(KeyCode::F6) => self.state.aim_target(5),
-                    PhysicalKey::Code(KeyCode::F7) => self.state.aim_target(6),
-                    PhysicalKey::Code(KeyCode::F8) => self.state.aim_target(7),
-                    PhysicalKey::Code(KeyCode::F9) => self.state.aim_target(8),
-                    PhysicalKey::Code(KeyCode::Equal) | PhysicalKey::Code(KeyCode::NumpadAdd) => {
-                        let fov = self.state.observer.fov_y * ZOOM_STEP;
-                        self.state.observer.fov_y = fov.max(MIN_FOV_DEG.to_radians());
-                    }
-                    PhysicalKey::Code(KeyCode::Minus)
-                    | PhysicalKey::Code(KeyCode::NumpadSubtract) => {
-                        let fov = self.state.observer.fov_y / ZOOM_STEP;
-                        self.state.observer.fov_y = fov.min(MAX_FOV_DEG.to_radians());
-                    }
-                    _ => {}
-                }
+                self.observation_key(key);
             }
             _ => {}
         }
@@ -2400,6 +2189,7 @@ impl ApplicationHandler for App {
     }
 
     fn about_to_wait(&mut self, event_loop: &ActiveEventLoop) {
+        self.sync_mouse_capture();
         let size = self
             .renderer
             .as_ref()
@@ -2476,11 +2266,11 @@ fn main() -> Result<()> {
         pressed_key: None,
         modifiers: ModifiersState::empty(),
         mouse_down: false,
+        mouse_look: observation::MouseLook::default(),
         show_labels: true,
         show_hud: true,
         auto_exposure: true,
         ev_bias: 0.0,
-        exposure_dragging: false,
         occluded: false,
         graphics: graphics::Menu::load(),
         pacer: graphics::FramePacer::default(),
@@ -2491,8 +2281,8 @@ fn main() -> Result<()> {
         discard: None,
         controls_back: menu::Page::Title,
         targets_open: false,
+        target_page: 0,
         air_open: false,
-        air_drag: None,
         toast: None,
         texture: None,
     };
@@ -2581,11 +2371,11 @@ mod app_tests {
             pressed_key: None,
             modifiers: ModifiersState::empty(),
             mouse_down: false,
+            mouse_look: observation::MouseLook::default(),
             show_labels: true,
             show_hud: true,
             auto_exposure: true,
             ev_bias: 0.0,
-            exposure_dragging: false,
             occluded: false,
             graphics: graphics::Menu::default(),
             pacer: graphics::FramePacer::default(),
@@ -2596,8 +2386,8 @@ mod app_tests {
             discard: None,
             controls_back: menu::Page::Title,
             targets_open: false,
+            target_page: 0,
             air_open: false,
-            air_drag: None,
             toast: None,
             texture: None,
         }
@@ -2725,16 +2515,9 @@ mod app_tests {
             app.state.view_lock = Some(ViewLock::Body(2));
             let (before, _) = app.build_frame(3840, 2160);
             let before = before.unwrap();
-            let l = ui::layout(3840.0, 2160.0, 2.0).with_puzzle(puzzle);
-            let click = |app: &mut App| {
-                assert!(app.hud_click(
-                    &l,
-                    (l.settings.x + l.settings.w * 0.5) as f64,
-                    l.settings.center_y() as f64
-                ))
-            };
+            let open = |app: &mut App| app.observation_key(KeyCode::KeyP);
             let original = app.graphics.settings;
-            click(&mut app);
+            open(&mut app);
             assert!(app.graphics.open && !app.menu.open);
             assert!(app.build_frame(3840, 2160).0.is_none());
             app.graphics.draft.resolution_percent = 50;
@@ -2743,7 +2526,7 @@ mod app_tests {
             assert!(!app.graphics.open);
             assert_eq!(app.graphics.settings, original);
             assert!(app.state.last.elapsed().as_secs_f64() < 1.0);
-            click(&mut app);
+            open(&mut app);
             app.graphics.draft.resolution_percent = 50;
             app.state.last = Instant::now() - std::time::Duration::from_secs(60);
             app.settings_key(KeyCode::Enter);
@@ -2762,86 +2545,266 @@ mod app_tests {
     }
 
     #[test]
-    fn far_right_hide_remains_clickable_after_resizing_and_restores_the_hud() {
-        for (w, h, scale) in [
-            (1920.0, 1080.0, 1.0),
-            (1440.0, 900.0, 1.0),
-            (1280.0, 480.0, 1.0),
-            (640.0, 480.0, 2.0),
-        ] {
+    fn mouse_look_only_moves_in_focused_captured_observation() {
+        for puzzle in [false, true] {
             let mut app = app();
-            app.state.view_lock = Some(ViewLock::Body(2));
-            let visible = ui::layout(w, h, scale);
-            assert!(app.hud_click(
-                &visible,
-                (w - 10.0 * visible.scale) as f64,
-                visible.hide.center_y() as f64
-            ));
-            assert!(!app.show_hud);
-            let hidden = ui::layout(w, h, scale).with_hidden(true);
-            assert!(app.hud_click(
-                &hidden,
-                (w - 14.0 * hidden.scale) as f64,
-                hidden.hide.center_y() as f64
-            ));
-            assert!(app.show_hud);
-            assert_eq!(app.state.view_lock, Some(ViewLock::Body(2)));
+            if puzzle {
+                app.game = Some(game::Game::default());
+            }
+            let motion = (20.0, 10.0);
+            assert!(app.observing());
+            assert!(!app.observation_motion(motion, 720));
+            app.mouse_look.focused = true;
+            assert!(!app.observation_motion(motion, 720));
+            app.mouse_look.captured = true;
+            assert!(app.observation_motion(motion, 720));
+            let angles = (app.state.observer.az, app.state.observer.alt);
+            app.menu.open = true;
+            assert!(!app.observing());
+            assert!(!app.observation_motion(motion, 720));
+            app.menu.open = false;
+            app.graphics.open = true;
+            assert!(!app.observation_motion(motion, 720));
+            app.graphics.open = false;
+            app.leave = Some(Leave::Levels);
+            assert!(!app.observation_motion(motion, 720));
+            app.leave = None;
+            app.discard = Some("level.yaml".into());
+            assert!(!app.observation_motion(motion, 720));
+            app.discard = None;
+            if let Some(game) = &mut app.game {
+                game.open = true;
+            }
+            if puzzle {
+                assert!(!app.observation_motion(motion, 720));
+                app.game.as_mut().unwrap().open = false;
+                app.game.as_mut().unwrap().result_open = true;
+                assert!(!app.observation_motion(motion, 720));
+                app.game.as_mut().unwrap().result_open = false;
+            }
+            app.mouse_look.focused = false;
+            assert!(!app.observation_motion(motion, 720));
+            app.mouse_look.focused = true;
+            app.occluded = true;
+            assert!(!app.observation_motion(motion, 720));
+            assert_eq!((app.state.observer.az, app.state.observer.alt), angles);
+            app.occluded = false;
+            assert!(app.observation_motion(motion, 720));
         }
     }
 
     #[test]
-    fn time_controls_and_menus_preserve_lock_but_lock_button_releases_it() {
+    fn target_panel_paginates_more_than_ten_targets_and_preserves_time() {
         let mut app = app();
-        let layout = ui::layout(1280.0, 720.0, 1.0);
-        let click = |app: &mut App, r: ui::Rect| {
-            assert!(app.hud_click(&layout, (r.x + r.w * 0.5) as f64, (r.y + r.h * 0.5) as f64));
-        };
+        let targets = app.state.scene.targets.clone();
+        app.state.scene.targets = (0..23).map(|i| targets[i % targets.len()]).collect();
+        assert_eq!(app.target_pages(), 3);
+        assert_eq!(app.target_index(KeyCode::Digit1), None);
+        app.observation_key(KeyCode::KeyG);
+        let time = app.state.sim_time;
+        assert_eq!(app.target_index(KeyCode::Digit1), Some(0));
+        assert_eq!(app.target_index(KeyCode::Digit0), Some(9));
+        app.observation_key(KeyCode::PageDown);
+        assert_eq!(app.target_index(KeyCode::Digit1), Some(10));
+        assert_eq!(app.target_index(KeyCode::Digit0), Some(19));
+        app.observation_key(KeyCode::PageDown);
+        assert_eq!(app.target_index(KeyCode::Digit1), Some(20));
+        assert_eq!(app.target_index(KeyCode::Digit3), Some(22));
+        assert_eq!(app.target_index(KeyCode::Digit4), None);
+        assert_eq!(app.target_index(KeyCode::Digit0), None);
+        app.observation_key(KeyCode::PageDown);
+        assert_eq!(app.target_page, 2);
+        app.observation_key(KeyCode::Digit0); // empty slot must be a no-op
+        assert_eq!(app.state.sim_time, time);
+        app.observation_key(KeyCode::PageUp);
+        assert_eq!(app.target_page, 1);
+        app.observation_key(KeyCode::PageUp);
+        app.observation_key(KeyCode::PageUp);
+        assert_eq!(app.target_page, 0);
+        assert_eq!(app.state.sim_time, time);
+        app.game = Some(game::Game::default());
+        assert_eq!(app.target_index(KeyCode::Digit1), None);
+        app.game = None;
+        app.observation_key(KeyCode::KeyG);
+        app.observation_key(KeyCode::PageDown);
+        assert!(
+            app.state.sim_time < time - 0.99,
+            "closed panel restores day stepping"
+        );
+        app.state.scene.targets.clear();
+        app.observation_key(KeyCode::KeyG);
+        assert_eq!(app.target_pages(), 1);
+        assert_eq!(app.target_index(KeyCode::Digit1), None);
+        app.build_frame(1280, 720); // empty panels must still render
+    }
+
+    #[test]
+    fn number_keys_select_the_current_target_page_instead_of_function_keys() {
+        let mut app = app();
+        let target = *app.state.scene.targets.last().unwrap();
+        app.state.scene.targets.resize(11, target);
+        let mut expected = State::with_scene(sim::default_scene());
+        expected.scene.targets = app.state.scene.targets.clone();
+        expected.aim_target(10);
+        app.observation_key(KeyCode::KeyG);
+        app.observation_key(KeyCode::PageDown);
+        let before = (
+            app.state.sim_time,
+            app.state.observer.az,
+            app.state.observer.alt,
+        );
+        app.observation_key(KeyCode::F1);
+        assert_eq!(
+            (
+                app.state.sim_time,
+                app.state.observer.az,
+                app.state.observer.alt
+            ),
+            before
+        );
+        app.observation_key(KeyCode::Digit1);
+        assert_eq!(app.state.sim_time, expected.sim_time);
+        assert_eq!(app.state.observer.az, expected.observer.az);
+        assert_eq!(app.state.observer.alt, expected.observer.alt);
+        assert_eq!(app.state.observer.fov_y, expected.observer.fov_y);
+    }
+
+    #[test]
+    fn air_panel_has_keyboard_adjustments_and_reset() {
+        let mut app = app();
+        assert!(app.state.scene.atmosphere.is_some());
+        app.observation_key(KeyCode::KeyG);
+        app.observation_key(KeyCode::KeyJ);
+        assert!(app.air_open && !app.targets_open);
+        app.observation_key(KeyCode::BracketRight);
+        assert!(app.state.air.density > 1.0);
+        app.observation_key(KeyCode::Quote);
+        assert!(app.state.air.hue.is_some());
+        for _ in 0..100 {
+            app.observation_key(KeyCode::BracketLeft);
+        }
+        assert_eq!(app.state.air.density, 0.0);
+        app.observation_key(KeyCode::Backspace);
+        assert_eq!(app.state.air.density, 1.0);
+        assert_eq!(app.state.air.hue, None);
+        app.game = Some(game::Game::default());
+        app.observation_key(KeyCode::BracketRight);
+        assert_eq!(app.state.air.density, 1.0);
+    }
+
+    #[test]
+    fn observation_right_click_locks_the_reticle_without_activating_hud_buttons() {
+        for puzzle in [false, true] {
+            let mut app = app();
+            if puzzle {
+                app.game = Some(game::Game::default());
+            }
+            app.state.point_at(2);
+            let layout = ui::layout(800.0, 600.0, 1.0);
+            // A stale pointer position over Settings must not affect sky picking.
+            app.cursor = (layout.settings.x as f64, layout.settings.center_y() as f64);
+            assert!(app.observation_button(MouseButton::Right, ElementState::Pressed, (800, 600)));
+            assert_eq!(app.state.view_lock, Some(ViewLock::Body(2)));
+            assert!(!app.graphics.open);
+            assert!(app.observation_button(MouseButton::Left, ElementState::Pressed, (800, 600)));
+            assert_eq!(app.state.view_lock, Some(ViewLock::Body(2)));
+            assert!(!app.graphics.open);
+            app.state.unlock();
+            assert!(app.observation_button(MouseButton::Right, ElementState::Released, (800, 600)));
+            assert_eq!(app.state.view_lock, None);
+            assert!(app.observation_button(MouseButton::Right, ElementState::Pressed, (0, 0)));
+            assert_eq!(app.state.view_lock, None);
+            app.menu.open = true;
+            assert!(!app.observation_button(MouseButton::Right, ElementState::Pressed, (800, 600)));
+            assert_eq!(app.state.view_lock, None);
+        }
+    }
+
+    #[test]
+    fn holding_exposure_keys_repeats_and_clamps_without_repeating_other_actions() {
+        for puzzle in [false, true] {
+            let mut app = app();
+            if puzzle {
+                app.game = Some(game::Game::default());
+            }
+            app.observation_key(KeyCode::Period);
+            assert_eq!(app.ev_bias, 0.25);
+            assert!(app.repeat_observation_key(KeyCode::Period));
+            assert_eq!(app.ev_bias, 0.5);
+            for _ in 0..100 {
+                assert!(app.repeat_observation_key(KeyCode::Period));
+            }
+            assert_eq!(app.ev_bias, ui::MAX_EV);
+            for _ in 0..100 {
+                assert!(app.repeat_observation_key(KeyCode::Comma));
+            }
+            assert_eq!(app.ev_bias, ui::MIN_EV);
+            assert!(app.repeat_observation_key(KeyCode::Period));
+            assert_eq!(app.ev_bias, ui::MIN_EV + 0.25);
+            let time = app.state.sim_time;
+            let auto = app.auto_exposure;
+            for key in [
+                KeyCode::KeyA,
+                KeyCode::PageDown,
+                KeyCode::Space,
+                KeyCode::KeyP,
+            ] {
+                assert!(!app.repeat_observation_key(key));
+            }
+            assert_eq!(app.auto_exposure, auto);
+            assert_eq!(app.state.sim_time, time);
+            assert!(!app.graphics.open);
+            let bias = app.ev_bias;
+            app.menu.open = true;
+            assert!(!app.repeat_observation_key(KeyCode::Period));
+            app.menu.open = false;
+            app.graphics.open = true;
+            assert!(!app.repeat_observation_key(KeyCode::Comma));
+            app.graphics.open = false;
+            app.leave = Some(Leave::Levels);
+            assert!(!app.repeat_observation_key(KeyCode::Period));
+            app.leave = None;
+            if let Some(game) = &mut app.game {
+                game.open = true;
+            }
+            if puzzle {
+                assert!(!app.repeat_observation_key(KeyCode::Comma));
+            }
+            assert_eq!(app.ev_bias, bias);
+        }
+    }
+
+    #[test]
+    fn keyboard_can_hide_and_restore_hud_without_releasing_tracking() {
+        let mut app = app();
+        app.state.view_lock = Some(ViewLock::Body(2));
+        app.observation_key(KeyCode::KeyH);
+        assert!(!app.show_hud);
+        app.observation_key(KeyCode::KeyH);
+        assert!(app.show_hud);
+        assert_eq!(app.state.view_lock, Some(ViewLock::Body(2)));
+    }
+
+    #[test]
+    fn keyboard_controls_and_menus_preserve_lock_until_u_releases_it() {
+        let mut app = app();
         for lock in [ViewLock::Body(2), ViewLock::Background(DVec3::X)] {
             app.state.view_lock = Some(lock);
             let time = app.state.sim_time;
             app.state.warp = STOP_WARP;
-            click(&mut app, layout.faster);
+            assert!(app.state.time_key(KeyCode::ArrowRight));
             assert_eq!(app.state.warp, STOP_WARP + 1);
-            click(&mut app, layout.slower);
-            assert_eq!(app.state.warp, STOP_WARP);
-            assert_eq!(WARPS[app.state.warp], 0.0);
-            click(&mut app, layout.faster);
-            click(&mut app, layout.stop);
+            assert!(app.state.time_key(KeyCode::Space));
             assert_eq!(WARPS[app.state.warp], 0.0);
             assert_eq!(app.state.sim_time, time);
-            assert_eq!(app.state.view_lock, Some(lock));
-            for speed in [STOP_WARP, STOP_WARP + 1] {
-                app.state.warp = speed;
-                click(&mut app, layout.next_day);
-                assert!(app.state.sim_time > time + 0.99);
-                assert_eq!(app.state.view_lock, Some(lock));
-                assert_eq!(app.state.warp, speed);
-                click(&mut app, layout.previous_day);
-                assert!((app.state.sim_time - time).abs() < 1e-8);
-                assert_eq!(app.state.view_lock, Some(lock));
-                assert_eq!(app.state.warp, speed);
-            }
             assert!(app.state.time_key(KeyCode::PageDown));
             assert!(app.state.sim_time < time - 0.99);
             assert!(app.state.time_key(KeyCode::PageUp));
             assert!((app.state.sim_time - time).abs() < 1e-8);
-            assert_eq!(app.state.view_lock, Some(lock));
-            assert_eq!(app.state.warp, STOP_WARP + 1);
-            for r in [layout.toggle, layout.exposure, layout.auto] {
-                click(&mut app, r);
+            for key in [KeyCode::KeyL, KeyCode::Comma, KeyCode::KeyA, KeyCode::KeyR] {
+                app.observation_key(key);
                 assert_eq!(app.state.view_lock, Some(lock));
             }
-            let fov = app.state.observer.fov_y;
-            click(&mut app, layout.stars);
-            let orientation = app.state.observer.star_orientation;
-            assert!(orientation.is_some());
-            click(&mut app, layout.stars);
-            assert_eq!(app.state.observer.star_orientation, orientation);
-            click(&mut app, layout.horizon);
-            click(&mut app, layout.horizon);
-            assert!(app.state.observer.star_orientation.is_none());
-            assert_eq!(app.state.observer.fov_y, fov);
-            assert_eq!(app.state.view_lock, Some(lock));
             app.toggle_menu();
             app.toggle_menu();
             assert_eq!(app.state.view_lock, Some(lock));
@@ -2851,7 +2814,7 @@ mod app_tests {
             assert_eq!(app.state.view_lock, Some(lock));
             app.game = None;
             app.show_hud = false;
-            click(&mut app, layout.lock);
+            app.observation_key(KeyCode::KeyU);
             assert_eq!(app.state.view_lock, None);
             app.show_hud = true;
         }
@@ -3155,9 +3118,8 @@ mod app_tests {
             );
             assert!(vf.right.is_finite() && vf.up.is_finite());
         }
-        state.begin_sky_press((100.0, 100.0));
+        state.unlock();
         assert_eq!(state.view_lock, None);
-        state.end_sky_press();
         state.sim_time += 0.1;
         state.track();
         let p = state.scene.positions(state.sim_time);
@@ -3247,40 +3209,43 @@ mod app_tests {
     }
 
     #[test]
-    fn sky_click_unlocks_immediately_but_jitter_does_not_pan() {
-        let mut state = State::with_scene(sim::default_scene());
-        state.view_lock = Some(ViewLock::Body(2));
-        let angles = (state.observer.az, state.observer.alt);
-        state.begin_sky_press((400.0, 300.0));
-        // Travel can accumulate indefinitely without ever leaving the click
-        // tolerance. It must not move the telescope or turn into a drag.
-        for _ in 0..10 {
-            state.drag_sky((402.0, 300.0), 1.0, 600);
-            state.drag_sky((400.0, 300.0), 1.0, 600);
+    fn mouse_look_moves_without_a_press_and_scales_with_fov() {
+        for steady in [false, true] {
+            let mut state = State::with_scene(sim::default_scene());
+            state.observer.az = 0.5;
+            state.observer.alt = 0.3;
+            if steady {
+                state.toggle_star_orientation();
+            }
+            state.view_lock = Some(ViewLock::Body(2));
+            assert!(!state.look_around((0.0, 0.0), 600));
+            assert!(!state.look_around((f64::NAN, 1.0), 600));
+            assert!(!state.look_around((1.0, 1.0), 0));
+            assert_eq!(state.view_lock, Some(ViewLock::Body(2)));
+            let positions = state.scene.positions(state.sim_time);
+            let before = state
+                .observer
+                .frame(&state.scene, state.sim_time, &positions);
+            assert!(state.look_around((10.0, 5.0), 600));
+            let after = state
+                .observer
+                .frame(&state.scene, state.sim_time, &positions);
+            assert!(after.forward.dot(before.right) > 0.0, "right means right");
+            assert!(after.forward.dot(before.up) < 0.0, "down means down");
+            assert_eq!(state.view_lock, None);
         }
-        assert_eq!((state.observer.az, state.observer.alt), angles);
-        assert_eq!(state.view_lock, None);
-        assert!(state.end_sky_press());
-
-        state.begin_sky_press((400.0, 300.0));
-        state.drag_sky((407.0, 300.0), 2.0, 600);
-        assert_eq!(
-            (state.observer.az, state.observer.alt),
-            angles,
-            "threshold scales with DPI"
-        );
-        state.drag_sky((410.0, 300.0), 2.0, 600);
-        assert_eq!(state.view_lock, None);
-        assert!(
-            (state.observer.az - (angles.0 - 10.0 * state.observer.fov_y / 600.0)).abs() < 1e-12
-        );
-        state.drag_sky((400.0, 300.0), 2.0, 600);
-        assert!(
-            !state.end_sky_press(),
-            "returning to the press is still a drag"
-        );
-        state.drag_sky((500.0, 400.0), 1.0, 600);
-        assert!(!state.end_sky_press(), "cancelled gestures cannot click");
+        let mut state = State::with_scene(sim::default_scene());
+        state.observer.az = 0.5;
+        state.look_around((10.0, 0.0), 600);
+        let movement = state.observer.az - 0.5;
+        state.observer.az = 0.5;
+        state.observer.fov_y *= 0.1;
+        state.look_around((10.0, 0.0), 600);
+        assert!((state.observer.az - 0.5 - movement * 0.1).abs() < 1e-12);
+        state.look_around((0.0, 1e6), 600);
+        assert_eq!(state.observer.alt, -89.0_f64.to_radians());
+        state.look_around((0.0, -1e6), 600);
+        assert_eq!(state.observer.alt, 89.0_f64.to_radians());
     }
 
     #[test]
