@@ -38,7 +38,7 @@ The browser's illustrative sky and prototype navigation rail are not game assets
 Menus and HUD controls shrink to fit small windows; long settings and controls
 pages scroll. The elapsed clock uses simulation time; local-day buttons use the
 existing orbital solver, including its failure state for synchronous worlds.
-The observatory and field-study HUD add a Settings gear with F11, keeping Hide
+The observatory and field-study HUD add a Settings gear with P, keeping Hide
 at the far right. Frame-rate and still-image limits extend the prototype settings
 page with the same slider design. They support the requested tradeoff between
 smooth motion, paused convergence and maximum detail; existing saved values remain valid.

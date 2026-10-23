@@ -704,7 +704,7 @@ fn build_controls(v: &mut Vec<UiVertex>, vp: [f32; 2], l: &Layout, scroll: f32) 
                 ("; '", "air hue (panel open)"),
                 ("Backspace", "reset air (panel open)"),
                 ("F10", "title screen"),
-                ("F11", "settings"),
+                ("P", "settings"),
                 ("Esc M", "menu / release cursor"),
             ],
         ),
