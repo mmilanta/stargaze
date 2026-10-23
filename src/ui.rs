@@ -109,7 +109,6 @@ pub struct Layout {
     pub air: Rect,
     pub settings: Rect,
     pub hide: Rect,
-    pub draw: Rect,
     pub stop: Rect,
     pub previous_day: Rect,
     pub next_day: Rect,
@@ -158,11 +157,6 @@ impl Layout {
             };
         }
         self
-    }
-
-    pub fn exposure_bias_at(&self, x: f64) -> f32 {
-        let fraction = ((x as f32 - self.exposure.x) / self.exposure.w).clamp(0.0, 1.0);
-        ((MIN_EV + fraction * (MAX_EV - MIN_EV)) * 4.0).round() / 4.0
     }
 }
 
@@ -370,7 +364,6 @@ fn layout_mode(w: f32, h: f32, scale: f32, puzzle: bool) -> Layout {
         bar,
         home,
         toggle,
-        draw: toggle,
         time_label,
         slower,
         speed,
@@ -1164,7 +1157,7 @@ pub fn build_lock(
         viewport,
     );
     let px = if target.is_some() { 10.5 } else { 8.5 } * s;
-    let mut label = target.unwrap_or("right-click to lock").to_string();
+    let mut label = target.unwrap_or("K: lock centre").to_string();
     let available = r.right() - x - if target.is_some() { 30.0 } else { 9.0 } * s;
     if typeface::width(Face::Mono, &label, px) > available {
         while !label.is_empty() && typeface::width(Face::Mono, &format!("{label}…"), px) > available
@@ -1933,25 +1926,12 @@ mod tests {
     }
 
     #[test]
-    fn exposure_slider_maps_clamps_and_fits_after_time_buttons() {
+    fn exposure_indicator_fits_after_time_buttons() {
         for (w, scale) in [(1400.0, 1.0), (1190.0, 1.6), (581.0, 1.6), (320.0, 2.0)] {
             let l = layout(w, 800.0, scale);
             assert!(l.exposure.x > l.faster.right());
             assert!(l.auto.x > l.exposure.right());
             assert!(l.auto.right() < w);
-            assert_eq!(l.exposure_bias_at(l.exposure.x as f64 - 100.0), MIN_EV);
-            assert_eq!(
-                l.exposure_bias_at(l.exposure.right() as f64 + 100.0),
-                MAX_EV
-            );
-            assert_eq!(
-                l.exposure_bias_at((l.exposure.x + l.exposure.w * 0.5) as f64),
-                0.0
-            );
-            assert_eq!(
-                l.exposure_bias_at((l.exposure.x + l.exposure.w * 0.75) as f64),
-                4.0
-            );
         }
     }
 
