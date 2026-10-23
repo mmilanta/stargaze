@@ -1157,7 +1157,7 @@ pub fn build_lock(
         viewport,
     );
     let px = if target.is_some() { 10.5 } else { 8.5 } * s;
-    let mut label = target.unwrap_or("K: lock centre").to_string();
+    let mut label = target.unwrap_or("right-click to lock").to_string();
     let available = r.right() - x - if target.is_some() { 30.0 } else { 9.0 } * s;
     if typeface::width(Face::Mono, &label, px) > available {
         while !label.is_empty() && typeface::width(Face::Mono, &format!("{label}…"), px) > available
