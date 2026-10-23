@@ -1,0 +1,11 @@
+# Shader generation and fixtures use exact multiline text on every platform.
+* text=auto eol=lf
+
+# Embedded binary assets must never undergo newline conversion.
+*.u16 binary
+*.ttf binary
+*.png binary
+*.jpg binary
+*.jpeg binary
+*.gif binary
+*.webp binary
