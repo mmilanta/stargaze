@@ -187,6 +187,66 @@ fn gpu_texture_editor_surfaces() {
     );
 }
 
+#[test]
+#[ignore = "requires a GPU; high resolution visual review of icy and volcanic surfaces"]
+fn gpu_icy_volcanic_detail_preview() {
+    use crate::sim::SurfaceStyle;
+    let (device, queue) = gpu();
+    let size = (960, 720);
+    let mut tracer = PathTracer::new_with_guided_ground(
+        &device,
+        wgpu::TextureFormat::Rgba8UnormSrgb,
+        size,
+        &[],
+        Options {
+            samples_per_frame: 4,
+            max_bounces: 4,
+            sample_limit: 32,
+            auto_exposure: true,
+            ..test_options()
+        },
+        true,
+    );
+    for style in [SurfaceStyle::Icy, SurfaceStyle::Volcanic] {
+        for (seed, rotation, light) in [(0, 0.0, 60.0), (0, 120.0, 35.0), (17, 225.0, 100.0)] {
+            let frame = editor_frame_at(Some(style), size, seed, rotation, light);
+            let start = std::time::Instant::now();
+            // Accumulate 32 samples, then let the picker's actual GPU exposure
+            // settle. A fixed exposure of 1 washes out the material colours.
+            let pixels = sample(&device, &queue, &mut tracer, &frame, 64);
+            let readback = device.create_buffer(&wgpu::BufferDescriptor {
+                label: Some("surface-preview-exposure"),
+                size: 4,
+                usage: wgpu::BufferUsages::COPY_DST | wgpu::BufferUsages::MAP_READ,
+                mapped_at_creation: false,
+            });
+            let mut encoder = device.create_command_encoder(&Default::default());
+            encoder.copy_buffer_to_buffer(&tracer.exposure, 0, &readback, 0, 4);
+            queue.submit(Some(encoder.finish()));
+            let (send, receive) = std::sync::mpsc::channel();
+            readback
+                .slice(..)
+                .map_async(wgpu::MapMode::Read, move |r| send.send(r).unwrap());
+            device.poll(wgpu::PollType::wait_indefinitely()).unwrap();
+            receive.recv().unwrap().unwrap();
+            let data = readback.slice(..).get_mapped_range().unwrap();
+            let exposure = bytemuck::cast_slice::<u8, f32>(&data)[0];
+            eprintln!(
+                "{} seed={seed} rotation={rotation}, exposure={exposure}: {:?}",
+                style.name(),
+                start.elapsed()
+            );
+            assert!(pixels.iter().flatten().all(|v| v.is_finite() && *v >= 0.0));
+            save_surface(
+                &format!("detail-{}-{seed}-{rotation}", style.name()),
+                size,
+                &pixels,
+                exposure,
+            );
+        }
+    }
+}
+
 fn install_surface_probe(device: &wgpu::Device, tracer: &mut PathTracer, source: String) {
     let shader = device.create_shader_module(wgpu::ShaderModuleDescriptor {
         label: Some("independent surface/lighting probe"),

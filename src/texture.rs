@@ -113,8 +113,8 @@ fn style_albedo(style: Option<SurfaceStyle>) -> [f32; 3] {
         Some(SurfaceStyle::GasGiant) => [0.86, 0.76, 0.6],
         Some(SurfaceStyle::Cratered) => [0.62, 0.6, 0.57],
         Some(SurfaceStyle::Rocky) => [0.72, 0.45, 0.28],
-        Some(SurfaceStyle::Icy) => [0.9, 0.88, 0.84],
-        Some(SurfaceStyle::Volcanic) => [0.86, 0.78, 0.38],
+        Some(SurfaceStyle::Icy) => [0.61, 0.66, 0.67],
+        Some(SurfaceStyle::Volcanic) => [0.62, 0.54, 0.28],
         Some(SurfaceStyle::Terran) => [0.72, 0.62, 0.45],
     }
 }

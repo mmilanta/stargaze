@@ -605,6 +605,8 @@ cargo test
 cargo test gpu_ -- --ignored --nocapture --test-threads=1
 # Also save small reference renders as PPM images:
 STARGAZE_TEST_IMAGE_DIR=/tmp/stargaze-renders cargo test gpu_scene_smoke -- --ignored --nocapture
+# Detailed icy/volcanic previews (960x720 PNGs, 32 spp, settled picker exposure):
+STARGAZE_TEST_IMAGE_DIR=/tmp/stargaze-surfaces cargo test --release gpu_icy_volcanic_detail_preview -- --ignored --nocapture
 ```
 
 Tests cover WGSL validation and buffer layouts, accumulation invalidation,

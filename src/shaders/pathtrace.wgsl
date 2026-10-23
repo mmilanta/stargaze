@@ -636,59 +636,119 @@ fn rocky_albedo(body: Body, q: vec3<f32>) -> vec3<f32> {
     return mix(color, vec3<f32>(0.92, 0.92, 0.94), ice);
 }
 
-// Europa: bright water ice with mottled, darker chaos regions and a web of
-// reddish-brown cracks (lineae) at two scales; few craters.
+// Local ice plates: nearest-cell distance, distance gap at a fracture, and
+// the plate's stable tone. All 27 neighbours participate, so a moving sample
+// never reveals the underlying lattice at a cell boundary.
+fn ice_plates(p: vec3<f32>) -> vec3<f32> {
+    let base = floor(p);
+    var nearest = 10.0;
+    var second = 10.0;
+    var tone = 0.0;
+    for (var i = 0; i < 27; i += 1) {
+        let cell = base + vec3<f32>(f32(i % 3 - 1), f32((i / 3) % 3 - 1), f32(i / 9 - 1));
+        let delta = cell + 0.2 + 0.6 * hash33(cell) - p;
+        let d = dot(delta, delta);
+        if (d < nearest) {
+            second = nearest;
+            nearest = d;
+            tone = hash31(cell + 57.0);
+        } else {
+            second = min(second, d);
+        }
+    }
+    return vec3<f32>(sqrt(nearest), sqrt(second) - sqrt(nearest), tone);
+}
+
+// Europa: many generations of fine lineae over granular, disrupted ice.
+// Large colour regions stay translucent; the small fractures and embedded
+// ice plates carry the detail instead of broad, flat bands of colour.
 fn icy_albedo(body: Body, q: vec3<f32>) -> vec3<f32> {
     let off = seed_offset(body.axis_y.w);
     let ice = body.material.rgb;
-    let rust = body.surface_color.rgb;
-    let mottle = fbm(q * 3.0 + off, 5);
-    let chaos = smoothstep(0.55, 0.7, fbm(q * 2.5 + off + 5.0, 5));
-    var color = mix(ice, mix(ice, rust, 0.55), chaos) * (0.92 + 0.16 * mottle);
-    // Lineae: long arcs of great (and some small) circles, gently warped,
-    // each fading in and out along its length so families of cracks cross.
-    let bend = vec3<f32>(fbm(q * 2.0 + off + 11.0, 3), fbm(q * 2.0 + off + 23.0, 3), fbm(q * 2.0 + off + 37.0, 3)) - 0.5;
-    var lines = 0.0;
-    var margin = 0.0;
-    for (var i = 0u; i < 16u; i += 1u) {
+    let rust = body.surface_color.rgb * vec3<f32>(0.72, 0.62, 0.56);
+    let warp = vec3<f32>(fbm(q * 3.1 + off + 11.0, 3),
+        fbm(q * 3.1 + off + 23.0, 3), fbm(q * 3.1 + off + 37.0, 3)) - 0.5;
+    let terrain = fbm(q * 4.2 + off + warp, 5);
+    let rubble = fbm(q * 85.0 + off + 7.0 * warp, 4);
+    let chaos = smoothstep(0.42, 0.65, terrain + 0.14 * (rubble - 0.5));
+    let plates = ice_plates(q * 72.0 + off + 4.0 * warp);
+    let seams = 1.0 - smoothstep(0.015, 0.07, plates.y);
+    let dust = chaos * (0.2 + 0.46 * rubble + 0.18 * plates.z);
+    var color = mix(ice, rust, dust);
+    color = mix(color, rust * 0.8, seams * chaos * 0.35);
+    // Frost between the older ridges, with subdued grain visible on zooming.
+    let ridged_plain = ridge(fbm(q * 34.0 + off + 83.0, 3), 0.025);
+    color = mix(color, rust, ridged_plain * (0.1 + 0.14 * chaos));
+    color *= 0.87 + 0.22 * fbm(q * 180.0 + off, 3);
+
+    let warped = q + 0.1 * warp;
+    let roughness = 0.0015 * (rubble - 0.5);
+    var shoulder = 0.0;
+    var fissure = 0.0;
+    var fresh_ridge = 0.0;
+    for (var i = 0u; i < 64u; i += 1u) {
         let h = hash33(off + vec3<f32>(f32(i) * 3.7, 1.0, 2.0));
-        let n = normalize(h * 2.0 - 1.0);
-        // Small circles too: offset the plane from the centre.
-        let shift = (hash31(off + vec3<f32>(f32(i), 9.0, 4.0)) - 0.5) * 0.8;
-        let dist = abs(dot(q + 0.05 * bend, n) - shift);
-        let width = 0.003 + 0.006 * hash31(off + vec3<f32>(5.0, f32(i), 7.0));
-        let along = smoothstep(0.35, 0.55, vnoise(q * 2.5 + h * 50.0));
-        lines = max(lines, (1.0 - smoothstep(width * 0.4, width, dist)) * along);
-        margin = max(margin, (1.0 - smoothstep(width, width * 4.0, dist)) * along * 0.45);
+        // Related fracture families share curvature, but have different
+        // offsets and widths. Fine local bends prevent ruler-straight scars.
+        let family = hash33(off + vec3<f32>(f32(i / 8u) * 17.3, 21.0, 7.0));
+        let n = normalize(family * 2.0 - 1.0 + 0.28 * (h * 2.0 - 1.0));
+        let shift = (hash31(off + vec3<f32>(f32(i), 9.0, 4.0)) - 0.5) * 1.4;
+        let width = select(0.0005 + 0.0011 * h.z, 0.0015 + 0.0022 * h.z, i < 10u)
+            * (0.65 + 0.8 * vnoise(q * 17.0 + h * 29.0));
+        let bend = 0.03 * (vnoise(q * 6.0 + family * 31.0) - 0.5)
+            + 0.008 * (vnoise(q * 24.0 + family * 37.0) - 0.5);
+        let dist = abs(dot(warped, n) - shift + roughness + bend);
+        let along = smoothstep(0.28, 0.62, vnoise(q * 3.5 + h * 50.0));
+        shoulder = max(shoulder, (1.0 - smoothstep(width, width * 4.0, dist)) * along);
+        // Older bands contain an icy centre between their two stained ridges.
+        let double_ridge = abs(dist - width * 0.85);
+        let single = 1.0 - smoothstep(width * 0.25, width, dist);
+        let paired = 1.0 - smoothstep(width * 0.15, width * 0.55, double_ridge);
+        fissure = max(fissure, select(single, paired, i < 10u) * along);
+        fresh_ridge = max(fresh_ridge,
+            (1.0 - smoothstep(width * 0.15, width * 0.35, abs(dist - width * 1.8))) * along);
     }
-    // Fine background ridges (the ridged plains between the major bands).
-    let fine = ridge(fbm(q * 14.0 + off + 83.0, 2), 0.02) * 0.3;
-    color = mix(color, rust, max(max(lines, margin), fine) * 0.9);
-    color *= craters(q, body.surface_color.w, off, 0.0, 0.5, 0.6);
+    color = mix(color, rust, shoulder * 0.17);
+    color = mix(color, rust * 0.7, fissure * 0.8);
+    color = mix(color, ice, fresh_ridge * 0.13);
+    color *= craters(q, body.surface_color.w * 0.2, off, 0.0, 0.3, 0.4);
     return color;
 }
 
-// Io: yellow sulphur plains, orange and white frost patches, reddish poles
-// and dark volcanic vents ringed by red plume deposits.
+// Io: finely mottled sulphur/frost plains with irregular paterae, lobate lava
+// flows and diffuse deposits. The masks are accumulated independently of cell
+// traversal order, so overlapping deposits cannot expose grid boundaries.
 fn volcanic_albedo(body: Body, q: vec3<f32>) -> vec3<f32> {
     let off = seed_offset(body.axis_y.w);
     let sulphur = body.material.rgb;
     let deposit = body.surface_color.rgb;
-    let warp = fbm(q * 2.0 + off, 4) - 0.5;
-    let patches = fbm(q * 3.0 + off + 2.0 * warp, 5);
-    var color = mix(sulphur, deposit, smoothstep(0.45, 0.7, patches));
-    let frost = smoothstep(0.62, 0.72, fbm(q * 4.0 + off + 19.0, 4));
-    color = mix(color, vec3<f32>(0.92, 0.9, 0.82), frost * 0.7);
-    color *= 0.88 + 0.24 * fbm(q * 20.0 + off, 3);
-    color = mix(color, deposit * 0.75, smoothstep(0.6, 0.9, abs(q.z)) * 0.6);
-    // Vents: a sparse cell field with a black core and a red plume ring.
+    let warp = vec3<f32>(fbm(q * 4.7 + off, 3), fbm(q * 4.7 + off + 19.0, 3),
+        fbm(q * 4.7 + off + 41.0, 3)) - 0.5;
+    let terrain = fbm(q * 10.0 + off + 2.0 * warp, 6);
+    let weathered = smoothstep(0.38, 0.65, fbm(q * 3.7 + off + 11.0, 5));
+    let fine = fbm(q * 90.0 + off + 3.0 * warp, 4);
+    let crust = mix(sulphur * vec3<f32>(0.43, 0.51, 0.6), deposit, 0.12);
+    var color = sulphur * (0.7 + 0.5 * terrain);
+    color = mix(color, crust, weathered * (0.45 + 0.5 * terrain));
+    let frost = smoothstep(0.38, 0.74,
+        fbm(q * 6.0 + off + 29.0 + warp, 5) + 0.2 * (fine - 0.5));
+    let frost_color = mix(sulphur, vec3<f32>(0.72, 0.7, 0.62), 0.8);
+    color = mix(color, frost_color, frost * 0.7);
+    let flow_edges = ridge(fbm(q * 35.0 + off + 2.0 * warp, 4), 0.025);
+    color = mix(color, crust, flow_edges * weathered * 0.4);
+    color *= (0.82 + 0.32 * fine) * (0.94 + 0.13 * fbm(q * 210.0 + off, 3));
+
+    var dark = 0.0;
+    var ash = 0.0;
+    var red = 0.0;
+    var white = 0.0;
     let density = body.surface_color.w;
-    let scale = 5.0;
+    let scale = 5.5;
     let p = q * scale + off + 300.0;
     let base = floor(p);
     for (var i = 0; i < 27; i += 1) {
         let cell = base + vec3<f32>(f32(i % 3 - 1), f32((i / 3) % 3 - 1), f32(i / 9 - 1));
-        if (hash31(cell + vec3<f32>(4.0, 41.0, 9.0)) > 0.35 * density) {
+        if (hash31(cell + vec3<f32>(4.0, 41.0, 9.0)) > 0.6 * density) {
             continue;
         }
         let found = cell_centre(cell, cell, scale, off + 300.0);
@@ -697,22 +757,45 @@ fn volcanic_albedo(body: Body, q: vec3<f32>) -> vec3<f32> {
         }
         let centre = found.xyz;
         let size = hash31(cell + vec3<f32>(8.0, 1.0, 3.0));
-        let radius = (0.03 + 0.08 * size * size) / scale;
+        let radius = (0.025 + 0.11 * size * size * size) / scale;
         let offset = q - centre;
-        let d = length(offset) / radius + 0.35 * (vnoise(offset / radius * 2.0 + cell) - 0.5);
-        // Only some vents have a large plume ring; their radius varies.
+        let reach = length(offset) * scale;
+        if (reach > 0.95) { continue; }
+        let cutoff = 1.0 - smoothstep(0.75, 0.95, reach);
+        let tangent = cross(centre, vec3<f32>(0.37, 0.83, 0.41));
+        let east = tangent / max(length(tangent), 1.0e-5);
+        let north = cross(centre, east);
+        let angle = TAU * hash31(cell + 91.0);
+        let u = vec2<f32>(dot(offset, east), dot(offset, north)) / radius;
+        let uv = vec2<f32>(u.x * cos(angle) - u.y * sin(angle),
+            u.x * sin(angle) + u.y * cos(angle));
+        let ragged = fbm(vec3<f32>(uv * 2.7, 0.0) + cell * 7.0, 3) - 0.5;
+        let d = length(uv * vec2<f32>(1.0 / (0.65 + 0.9 * size), 1.0)) + 0.42 * ragged;
+        let pit = 1.0 - smoothstep(0.68, 0.86, d);
+        let age = hash31(cell + 31.0);
+        // Continuous lava lobes with ragged edges, rather than a noise mask
+        // punching disconnected holes through an elliptical footprint.
+        let flow_uv = uv - vec2<f32>(0.2 + 2.3 * age,
+            0.35 * sin(uv.x * 1.3 + angle));
+        let flow_shape = length(flow_uv * vec2<f32>(0.75 - 0.48 * age, 0.85 + 0.35 * size))
+            + 0.65 * ragged
+            + 0.35 * (fbm(vec3<f32>(uv * 1.8, 0.0) + cell * 3.0, 4) - 0.5);
+        let flow = (1.0 - smoothstep(0.72, 0.9, flow_shape)) * smoothstep(0.35, 0.85, age) * 0.85;
+        dark = max(dark, max(pit, flow) * cutoff);
         let plume = hash31(cell + vec3<f32>(2.0, 6.0, 17.0));
-        let ring_radius = 2.0 + 4.0 * plume;
-        let ring = surface_gaussian((d - ring_radius) / (0.25 * ring_radius)) * step(0.7, plume);
-        color = mix(color, vec3<f32>(0.62, 0.22, 0.1), ring * 0.65);
-        // Smaller vents leave a diffuse dark-orange stain instead.
-        color = mix(color, deposit * 0.6, (1.0 - smoothstep(0.5, 2.0, d)) * 0.5);
-        color = mix(color, vec3<f32>(0.05, 0.04, 0.035), 1.0 - smoothstep(0.35, 0.6, d));
-        // Lava flows: dark lobes running out from the vent.
-        let flow = smoothstep(0.55, 0.75, vnoise(offset / radius * 1.2 + cell * 3.0))
-            * (1.0 - smoothstep(0.6, 2.5, d));
-        color = mix(color, vec3<f32>(0.12, 0.08, 0.06), flow * 0.8);
+        let halo_uv = (uv - vec2<f32>(0.5, 0.3)) * vec2<f32>(0.16, 0.23);
+        let halo = exp(-dot(halo_uv, halo_uv)) * cutoff;
+        ash = max(ash, halo * (0.25 + 0.35 * age));
+        white = max(white, halo * step(0.45, plume) * (1.0 - step(0.83, plume)));
+        // A few fresh eruptions leave a diffuse, incomplete red apron.
+        let apron = surface_gaussian((length(uv) + ragged - 3.5) / 1.6)
+            * (0.25 + 0.75 * smoothstep(-1.5, 2.0, uv.y));
+        red = max(red, apron * step(0.83, plume) * cutoff);
     }
+    color = mix(color, crust * 0.7, ash * 0.45);
+    color = mix(color, frost_color, white * 0.4);
+    color = mix(color, deposit * vec3<f32>(0.85, 0.7, 0.65), red * 0.6);
+    color = mix(color, vec3<f32>(0.035, 0.032, 0.026), dark * 0.96);
     return color;
 }
 
