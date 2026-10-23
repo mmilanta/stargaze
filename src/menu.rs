@@ -93,7 +93,7 @@ impl Menu {
         self.offset = 0;
         self.selected = 0;
         self.error = None;
-        match discover(Path::new(concat!(env!("CARGO_MANIFEST_DIR"), "/configs"))) {
+        match discover(&crate::paths::configs()) {
             Ok(entries) => self.entries = entries,
             Err(err) => {
                 self.entries.clear();

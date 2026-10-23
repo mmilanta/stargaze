@@ -72,24 +72,28 @@ pub struct Book {
 
 pub fn key(path: &Path) -> String {
     // Bundled levels keep stable portable keys; external levels use full paths.
-    let configs = Path::new(concat!(env!("CARGO_MANIFEST_DIR"), "/configs"));
+    let configs = crate::paths::configs();
+    bundled_key(path, &configs)
+}
+
+fn bundled_key(path: &Path, configs: &Path) -> String {
+    let configs = configs
+        .canonicalize()
+        .unwrap_or_else(|_| configs.to_owned());
     let absolute = path.canonicalize().unwrap_or_else(|_| path.to_owned());
     absolute
         .strip_prefix(configs)
-        .map(|p| p.to_string_lossy().into_owned())
+        .map(|p| {
+            p.components()
+                .map(|c| c.as_os_str().to_string_lossy())
+                .collect::<Vec<_>>()
+                .join("/")
+        })
         .unwrap_or_else(|_| absolute.to_string_lossy().into_owned())
 }
 
 fn default_path() -> Option<PathBuf> {
-    std::env::var_os("STARGAZE_PROGRESS")
-        .map(PathBuf::from)
-        .or_else(|| {
-            std::env::var_os("XDG_DATA_HOME")
-                .map(PathBuf::from)
-                .filter(|p| p.is_absolute())
-                .or_else(|| std::env::var_os("HOME").map(|p| PathBuf::from(p).join(".local/share")))
-                .map(|p| p.join("stargaze/progress.yaml"))
-        })
+    crate::paths::progress()
 }
 
 impl Book {
@@ -171,6 +175,21 @@ impl Book {
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test]
+    fn bundled_keys_are_portable_and_external_keys_stay_absolute() {
+        let root = crate::paths::configs();
+        assert_eq!(
+            bundled_key(&root.join("1-halo-volcano.yaml"), &root),
+            "1-halo-volcano.yaml"
+        );
+        assert_eq!(
+            bundled_key(&root.join("legacy/halo.yaml"), &root),
+            "legacy/halo.yaml"
+        );
+        let external = std::env::temp_dir().join("external-stargaze-level.yaml");
+        assert_eq!(bundled_key(&external, &root), external.to_string_lossy());
+    }
+
     #[test]
     fn invalid_orientation_is_quarantined_without_erasing_other_levels() {
         let dir =

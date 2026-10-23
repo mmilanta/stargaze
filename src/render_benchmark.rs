@@ -709,8 +709,8 @@ fn capture(
         .collect();
     let linear = map(device, &hdr)?;
     ensure!(
-        linear.chunks_exact(4).all(|v| {
-            let f = f32::from_le_bytes(v.try_into().unwrap());
+        linear.as_chunks::<4>().0.iter().all(|v| {
+            let f = f32::from_le_bytes(*v);
             f.is_finite() && f >= 0.0
         }),
         "nonfinite/negative HDR in {name}"
@@ -828,7 +828,7 @@ fn run_benchmark(cfg: &Config) -> Result<()> {
     let mut cases = vec![];
     for name in &cfg.cases {
         let frames: Vec<_> = (0..cfg.frames.max(cfg.warmup))
-            .map(|i| fixture(name, i, &cfg))
+            .map(|i| fixture(name, i, cfg))
             .collect();
         let mut modes = vec![];
         for moving in [false, true] {
@@ -903,7 +903,7 @@ fn run_benchmark(cfg: &Config) -> Result<()> {
                     &queue,
                     &tracer,
                     &texture,
-                    &cfg,
+                    cfg,
                     &format!("{name}-spp{i}"),
                 )?);
             }
@@ -924,7 +924,7 @@ fn run_benchmark(cfg: &Config) -> Result<()> {
                     &queue,
                     &tracer,
                     &texture,
-                    &cfg,
+                    cfg,
                     &format!("{name}-moving-{i}"),
                 )?);
             }

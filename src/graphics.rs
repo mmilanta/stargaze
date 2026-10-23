@@ -160,14 +160,7 @@ impl Settings {
 }
 
 fn settings_path() -> Option<PathBuf> {
-    if let Some(path) = std::env::var_os("STARGAZE_SETTINGS") {
-        return Some(path.into());
-    }
-    std::env::var_os("XDG_CONFIG_HOME")
-        .map(PathBuf::from)
-        .filter(|p| p.is_absolute())
-        .or_else(|| std::env::var_os("HOME").map(|p| PathBuf::from(p).join(".config")))
-        .map(|p| p.join("stargaze/graphics.yaml"))
+    crate::paths::settings()
 }
 
 #[derive(Default)]

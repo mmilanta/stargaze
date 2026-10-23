@@ -214,6 +214,18 @@ vision is preserved in [`idea.md`](idea.md).
 Requires a recent stable Rust toolchain compatible with wgpu 30
 (tested with Rust 1.98.1).
 
+Prebuilt archives are published on [GitHub Releases](https://github.com/mmilanta/stargaze/releases)
+for Windows x64, Linux x64, and macOS Apple Silicon/Intel. Extract the entire
+archive and keep `configs/` beside the executable; launch `stargaze` (or
+`stargaze.exe`) from any working directory. Other runtime assets are embedded.
+Linux builds target Ubuntu 24.04 or newer compatible systems (glibc 2.39+),
+with a graphical session and working Vulkan/OpenGL drivers. Binaries are
+currently unsigned and macOS builds are not notarized, so OS security prompts
+may apply. `stargaze --version` prints the installed version.
+
+See [contributing and releases](docs/releases.md) for CI, branch protection,
+and the manual semantic-version release process.
+
 ```sh
 cargo run --release
 STARGAZE_SYSTEM=solar cargo run --release
@@ -358,8 +370,20 @@ Leaving offers **Keep & leave**, **Discard & leave**, or **Cancel**. Each level
 keeps its own theory, score history, best score, camera, exposure and observation
 time. Named targets and physical details remain hidden in puzzle mode.
 
-Progress saves to `$XDG_DATA_HOME/stargaze/progress.yaml` (normally
-`~/.local/share/stargaze/progress.yaml`). `STARGAZE_PROGRESS` overrides the path.
+Progress saves to `progress.yaml` in the native per-user data directory:
+
+| Platform | Progress directory | Graphics settings directory |
+| --- | --- | --- |
+| Linux | `$XDG_DATA_HOME/stargaze` (default `~/.local/share/stargaze`) | `$XDG_CONFIG_HOME/stargaze` (default `~/.config/stargaze`) |
+| macOS | `~/Library/Application Support/stargaze` | `~/Library/Application Support/stargaze` |
+| Windows | `%LOCALAPPDATA%\stargaze` | `%APPDATA%\stargaze` |
+
+`STARGAZE_PROGRESS` overrides the complete progress file path, and
+`STARGAZE_SETTINGS` overrides the complete graphics settings file path.
+Existing saves/settings in the old XDG-style locations are copied on first use
+if the native file does not exist; the originals are retained. If copying fails,
+the app keeps using the original file and logs a warning. Explicit overrides
+skip migration. Keep these personal data directories when upgrading the app.
 Saves are versioned and replaced atomically; unreadable saves are preserved.
 The Levels screen shows progress and has a separate confirmed discard action.
 
@@ -414,8 +438,8 @@ For repeatable GPU timings and before/after image comparisons, see the
 baseline, fixed eclipse/atmosphere/terrain views, and a local comparison gallery.
 
 Choose **Apply [Enter]** to apply settings to all maps and save them to
-`$XDG_CONFIG_HOME/stargaze/graphics.yaml` (normally
-`~/.config/stargaze/graphics.yaml`). `STARGAZE_SETTINGS` overrides that file path.
+`graphics.yaml` in the native settings directory listed above.
+`STARGAZE_SETTINGS` overrides that file path.
 The settings screen supports Up/Down to select a row, Left/Right to adjust,
 1/2/3 for presets, Enter to apply, and Esc to discard the draft and return.
 HUD scale ranges from 75% to 200% on top of your display scale. Changing resolution or
