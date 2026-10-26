@@ -109,7 +109,6 @@ pub struct Layout {
     pub air: Rect,
     pub settings: Rect,
     pub hide: Rect,
-    pub draw: Rect,
     pub stop: Rect,
     pub previous_day: Rect,
     pub next_day: Rect,
@@ -159,11 +158,6 @@ impl Layout {
         }
         self
     }
-
-    pub fn exposure_bias_at(&self, x: f64) -> f32 {
-        let fraction = ((x as f32 - self.exposure.x) / self.exposure.w).clamp(0.0, 1.0);
-        ((MIN_EV + fraction * (MAX_EV - MIN_EV)) * 4.0).round() / 4.0
-    }
 }
 
 pub fn layout(w: f32, h: f32, scale: f32) -> Layout {
@@ -191,7 +185,7 @@ impl ToolbarStyle {
             + time_group_width(keys)
             + lock_group_width(keys)
             + exposure_group_width(keys)
-            + toolbar_width("Settings [F11]", keys)
+            + toolbar_width("Settings [P]", keys)
             + 13.0
             + toolbar_width("Hide [H]", keys)
             + 12.0;
@@ -338,8 +332,8 @@ fn layout_mode(w: f32, h: f32, scale: f32, puzzle: bool) -> Layout {
     let hide_start = hide.x - 6.0 * s;
     let settings = style.control(
         bar,
-        hide_start - (7.0 + toolbar_width("Settings [F11]", style.keys)) * s,
-        toolbar_width("Settings [F11]", style.keys),
+        hide_start - (7.0 + toolbar_width("Settings [P]", style.keys)) * s,
+        toolbar_width("Settings [P]", style.keys),
     );
     let settings_start = settings.x - 6.0 * s;
     let targets = style.control(
@@ -370,7 +364,6 @@ fn layout_mode(w: f32, h: f32, scale: f32, puzzle: bool) -> Layout {
         bar,
         home,
         toggle,
-        draw: toggle,
         time_label,
         slower,
         speed,
@@ -1896,7 +1889,7 @@ fn build_bar(v: &mut Vec<UiVertex>, l: &Layout, w: f32, h: f32, state: HudState<
         b(v, l.air, AIR_LABEL, state.air_open);
         b(v, l.targets, "Targets [G]", state.targets_open);
     }
-    b(v, l.settings, "Settings [F11]", false);
+    b(v, l.settings, "Settings [P]", false);
     b(v, l.hide, "Hide [H]", false);
 }
 
@@ -1933,25 +1926,12 @@ mod tests {
     }
 
     #[test]
-    fn exposure_slider_maps_clamps_and_fits_after_time_buttons() {
+    fn exposure_indicator_fits_after_time_buttons() {
         for (w, scale) in [(1400.0, 1.0), (1190.0, 1.6), (581.0, 1.6), (320.0, 2.0)] {
             let l = layout(w, 800.0, scale);
             assert!(l.exposure.x > l.faster.right());
             assert!(l.auto.x > l.exposure.right());
             assert!(l.auto.right() < w);
-            assert_eq!(l.exposure_bias_at(l.exposure.x as f64 - 100.0), MIN_EV);
-            assert_eq!(
-                l.exposure_bias_at(l.exposure.right() as f64 + 100.0),
-                MAX_EV
-            );
-            assert_eq!(
-                l.exposure_bias_at((l.exposure.x + l.exposure.w * 0.5) as f64),
-                0.0
-            );
-            assert_eq!(
-                l.exposure_bias_at((l.exposure.x + l.exposure.w * 0.75) as f64),
-                4.0
-            );
         }
     }
 
@@ -2070,7 +2050,7 @@ mod tests {
                 (l.next_day, "+1d [PgUp]"),
                 (l.hide, "Hide [H]"),
                 (l.targets, "Targets [G]"),
-                (l.settings, "Settings [F11]"),
+                (l.settings, "Settings [P]"),
             ] {
                 let (text_x, _, key_x) = toolbar_content(r, label, l.style);
                 if let Some(key_x) = key_x {

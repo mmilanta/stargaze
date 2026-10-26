@@ -41,8 +41,6 @@ impl App {
     pub(crate) fn open_settings(&mut self) {
         self.graphics.begin();
         self.state.last = Instant::now();
-        self.exposure_dragging = false;
-        self.state.end_sky_press();
     }
 
     pub(crate) fn settings_key(&mut self, key: KeyCode) {
@@ -407,6 +405,24 @@ impl App {
         if !self.show_hud {
             return;
         }
+        if self.observing() {
+            let [x, y] = [vp[0] * 0.5, vp[1] * 0.5];
+            for (a, b) in [
+                ([-6.0, 0.0], [-2.0, 0.0]),
+                ([2.0, 0.0], [6.0, 0.0]),
+                ([0.0, -6.0], [0.0, -2.0]),
+                ([0.0, 2.0], [0.0, 6.0]),
+            ] {
+                ui::line(
+                    v,
+                    [x + a[0] * s, y + a[1] * s],
+                    [x + b[0] * s, y + b[1] * s],
+                    s,
+                    ui::MUTED,
+                    vp,
+                );
+            }
+        }
         self.build_air_panel(v, vp);
         if self.game.is_some() {
             let title = self
@@ -511,7 +527,9 @@ impl App {
                 ui::MUTED,
             );
             if self.targets_open {
-                let r = Self::targets_panel(vp, s, self.state.scene.targets.len());
+                let page = self.target_page.min(self.target_pages() - 1);
+                let targets = &self.state.scene.targets[page * 10..];
+                let r = Self::targets_panel(vp, s, targets.len());
                 ui::push_rect(
                     v,
                     r.x,
@@ -527,23 +545,23 @@ impl App {
                     r.x + 12.0 * s,
                     r.y + 12.0 * s,
                     0.8,
-                    "TARGETS [G]",
+                    &format!("TARGETS [G]  {}/{}", page + 1, self.target_pages()),
                     ui::ACCENT,
                 );
-                for (i, &target) in self.state.scene.targets.iter().take(9).enumerate() {
+                for (i, &target) in targets.iter().take(10).enumerate() {
                     let row = Self::target_row(r, s, i);
                     ui::button(
                         v,
                         row,
-                        &format!("{} [F{}]", self.state.scene.body(target).name, i + 1),
+                        &format!("{} [{}]", self.state.scene.body(target).name, (i + 1) % 10),
                         s,
                         false,
-                        row.contains(self.cursor.0, self.cursor.1),
+                        false,
                         vp,
                     );
                 }
-                let row = Self::target_row(r, s, self.state.scene.targets.len().min(9));
-                ui::button(v, row, "Eclipse [E] / Transit [T]", s, false, false, vp);
+                let row = Self::target_row(r, s, targets.len().min(10));
+                ui::button(v, row, "PgUp/PgDn · E/T", s, false, false, vp);
             }
         }
         if let Some(r) = &self.renderer {
@@ -579,10 +597,6 @@ impl App {
     }
 
     /// The atmosphere panel above the bar's Air button, when open.
-    fn air_panel(&self) -> Option<(Rect, f32)> {
-        let (w, h) = self.renderer.as_ref()?.size();
-        self.air_panel_in([w as f32, h as f32])
-    }
     fn air_panel_in(&self, vp: [f32; 2]) -> Option<(Rect, f32)> {
         if !self.air_open || self.game.is_some() || !self.show_hud || self.menu.open {
             return None;
@@ -651,41 +665,33 @@ impl App {
             crate::AirSlider::Colour => self.state.air.hue = Some(t * 360.0),
         }
     }
-    pub(crate) fn air_click(&mut self) -> bool {
-        let Some((panel, s)) = self.air_panel() else {
-            return false;
-        };
-        let (x, y) = self.cursor;
-        if !panel.contains(x, y) {
+    pub(crate) fn air_key(&mut self, key: KeyCode) -> bool {
+        if !self.air_open || self.game.is_some() || !self.show_hud {
             return false;
         }
-        if Self::air_reset(panel, s).contains(x, y) {
+        if key == KeyCode::Backspace {
             self.state.air = crate::AirTuning::default();
             return true;
         }
-        if self.state.scene.atmosphere.is_none() || self.state.scene.ground.airless() {
-            return true;
-        }
-        for slider in [crate::AirSlider::Density, crate::AirSlider::Colour] {
-            let track = Self::air_track(panel, s, slider);
-            let grab = Rect {
-                x: track.x - 8.0 * s,
-                y: track.y - 12.0 * s,
-                w: track.w + 16.0 * s,
-                h: track.h + 24.0 * s,
-            };
-            if grab.contains(x, y) {
-                self.air_drag = Some(slider);
-                self.air_drag_to(x);
-            }
+        let (slider, step) = match key {
+            KeyCode::BracketLeft => (crate::AirSlider::Density, -0.025),
+            KeyCode::BracketRight => (crate::AirSlider::Density, 0.025),
+            KeyCode::Semicolon => (crate::AirSlider::Colour, -5.0 / 360.0),
+            KeyCode::Quote => (crate::AirSlider::Colour, 5.0 / 360.0),
+            _ => return false,
+        };
+        if self.state.scene.atmosphere.is_some() && !self.state.scene.ground.airless() {
+            let value = self.air_value(slider) + step;
+            self.set_air(
+                slider,
+                if slider == crate::AirSlider::Colour {
+                    value.rem_euclid(1.0)
+                } else {
+                    value
+                },
+            );
         }
         true
-    }
-    pub(crate) fn air_drag_to(&mut self, x: f64) {
-        if let (Some(slider), Some((panel, s))) = (self.air_drag, self.air_panel()) {
-            let track = Self::air_track(panel, s, slider);
-            self.set_air(slider, ((x as f32 - track.x) / track.w).clamp(0.0, 1.0));
-        }
     }
     fn build_air_panel(&self, v: &mut Vec<UiVertex>, vp: [f32; 2]) {
         let Some((r, s)) = self.air_panel_in(vp) else {
@@ -726,7 +732,7 @@ impl App {
                 let t = self.air_value(slider);
                 let (label, value) = match slider {
                     crate::AirSlider::Density => (
-                        "Density",
+                        "Air [ ]",
                         if self.state.air.density <= 0.005 {
                             "off".to_string()
                         } else {
@@ -734,7 +740,7 @@ impl App {
                         },
                     ),
                     crate::AirSlider::Colour => (
-                        "Colour",
+                        "Hue ; '",
                         self.state
                             .air
                             .hue
@@ -778,25 +784,13 @@ impl App {
                     track.y + track.h * 0.5 - knob,
                     2.0 * knob,
                     2.0 * knob,
-                    if self.air_drag == Some(slider) {
-                        ui::ACCENT
-                    } else {
-                        ui::INK
-                    },
+                    ui::INK,
                     vp,
                 );
             }
         }
         let reset = Self::air_reset(r, s);
-        ui::button(
-            v,
-            reset,
-            "Reset",
-            s,
-            false,
-            reset.contains(self.cursor.0, self.cursor.1),
-            vp,
-        );
+        ui::button(v, reset, "Reset [Bksp]", s, false, false, vp);
     }
 
     fn targets_panel(vp: [f32; 2], s: f32, n: usize) -> Rect {
@@ -804,7 +798,7 @@ impl App {
             x: vp[0] - 254.0 * s,
             y: 60.0 * s,
             w: 238.0 * s,
-            h: (70.0 + n.min(9) as f32 * 34.0) * s,
+            h: (70.0 + n.min(10) as f32 * 34.0) * s,
         }
     }
     fn target_row(r: Rect, s: f32, i: usize) -> Rect {
@@ -814,36 +808,6 @@ impl App {
             w: r.w - 16.0 * s,
             h: 28.0 * s,
         }
-    }
-    pub(crate) fn targets_click(&mut self) -> bool {
-        if !self.targets_open || self.game.is_some() || !self.show_hud {
-            return false;
-        }
-        let Some(r) = &self.renderer else {
-            return false;
-        };
-        let (w, h) = r.size();
-        let vp = [w as f32, h as f32];
-        let s = self.scale.min(vp[0] / 1280.0);
-        let panel = Self::targets_panel(vp, s, self.state.scene.targets.len());
-        let (x, y) = self.cursor;
-        if !panel.contains(x, y) {
-            return false;
-        }
-        for i in 0..self.state.scene.targets.len().min(9) {
-            if Self::target_row(panel, s, i).contains(x, y) {
-                self.state.aim_target(i);
-                return true;
-            }
-        }
-        if Self::target_row(panel, s, self.state.scene.targets.len().min(9)).contains(x, y) {
-            if x < (panel.x + panel.w * 0.5) as f64 {
-                self.find_event(false);
-            } else {
-                self.find_event(true);
-            }
-        }
-        true
     }
     pub(crate) fn find_event(&mut self, transit: bool) {
         let found = if transit {
