@@ -1352,3 +1352,6 @@ fn gpu_night_ground_has_no_catalogue_fireflies() {
         );
     }
 }
+
+#[path = "noise_tests.rs"]
+mod noise;
