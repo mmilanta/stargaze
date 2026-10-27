@@ -16,7 +16,7 @@ impl Entry {
         match self.path.file_stem().and_then(|s| s.to_str()) {
             Some("1-halo-volcano") => "Ember summit".into(),
             Some("2-erg-dunes") => "Shadow season".into(),
-            Some("3-corona-valley") => "Two-sun valley".into(),
+            Some("3-umbra-valley") => "The long shadow".into(),
             Some("puzzle") => "First field study".into(),
             Some("halo") => "Amber horizon".into(),
             Some("median-resonance") => "Clockwork sky".into(),
@@ -687,7 +687,7 @@ fn build_controls(v: &mut Vec<UiVertex>, vp: [f32; 2], l: &Layout, scroll: f32) 
                 ("scroll = -", "zoom (to 0.001°)"),
                 ("← →", "signed speed"),
                 ("Space", "stop / resume"),
-                ("PgDn PgUp", "−1 / +1 local day"),
+                ("PgDn PgUp", "−1 / +1 day"),
                 ("R", "horizon level / stars fixed"),
                 (", .", "exposure ±0.25 EV"),
                 ("A", "auto exposure"),
