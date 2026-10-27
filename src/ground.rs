@@ -24,8 +24,8 @@ pub enum Theme {
     Craters = 2,
     /// Snowfield plateau ringed by jagged peaks.
     Alpine = 3,
-    /// Summit crater rim of Stromboli above a sea of dark lava rock, with
-    /// conical volcanoes all round the horizon (real Aeolian elevation data).
+    /// Stromboli's measured summit and vent complex above a lava plain, with
+    /// surveyed Aeolian volcanoes on the horizon.
     Basalt = 4,
     /// Endless sand sea, seen from the crest of a high dune.
     Dunes = 5,

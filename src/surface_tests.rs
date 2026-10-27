@@ -1,7 +1,7 @@
 //! Actual shader checks for every procedural planet material and editor scene.
 use super::*;
 
-fn save_surface(name: &str, size: (u32, u32), pixels: &[[f32; 4]], exposure: f32) {
+pub(super) fn save_surface(name: &str, size: (u32, u32), pixels: &[[f32; 4]], exposure: f32) {
     let Ok(dir) = std::env::var("STARGAZE_TEST_IMAGE_DIR") else {
         return;
     };
@@ -32,6 +32,30 @@ fn save_surface(name: &str, size: (u32, u32), pixels: &[[f32; 4]], exposure: f32
         .unwrap()
         .write_image_data(&data)
         .unwrap();
+}
+
+pub(super) fn read_exposure(
+    device: &wgpu::Device,
+    queue: &wgpu::Queue,
+    tracer: &PathTracer,
+) -> f32 {
+    let readback = device.create_buffer(&wgpu::BufferDescriptor {
+        label: Some("preview-exposure"),
+        size: 4,
+        usage: wgpu::BufferUsages::COPY_DST | wgpu::BufferUsages::MAP_READ,
+        mapped_at_creation: false,
+    });
+    let mut encoder = device.create_command_encoder(&Default::default());
+    encoder.copy_buffer_to_buffer(&tracer.exposure, 0, &readback, 0, 4);
+    queue.submit(Some(encoder.finish()));
+    let (send, receive) = std::sync::mpsc::channel();
+    readback
+        .slice(..)
+        .map_async(wgpu::MapMode::Read, move |r| send.send(r).unwrap());
+    device.poll(wgpu::PollType::wait_indefinitely()).unwrap();
+    receive.recv().unwrap().unwrap();
+    let data = readback.slice(..).get_mapped_range().unwrap();
+    bytemuck::cast_slice::<u8, f32>(&data)[0]
 }
 
 fn editor_frame(style: Option<crate::sim::SurfaceStyle>, size: (u32, u32)) -> Frame {
@@ -214,23 +238,7 @@ fn gpu_icy_volcanic_detail_preview() {
             // Accumulate 32 samples, then let the picker's actual GPU exposure
             // settle. A fixed exposure of 1 washes out the material colours.
             let pixels = sample(&device, &queue, &mut tracer, &frame, 64);
-            let readback = device.create_buffer(&wgpu::BufferDescriptor {
-                label: Some("surface-preview-exposure"),
-                size: 4,
-                usage: wgpu::BufferUsages::COPY_DST | wgpu::BufferUsages::MAP_READ,
-                mapped_at_creation: false,
-            });
-            let mut encoder = device.create_command_encoder(&Default::default());
-            encoder.copy_buffer_to_buffer(&tracer.exposure, 0, &readback, 0, 4);
-            queue.submit(Some(encoder.finish()));
-            let (send, receive) = std::sync::mpsc::channel();
-            readback
-                .slice(..)
-                .map_async(wgpu::MapMode::Read, move |r| send.send(r).unwrap());
-            device.poll(wgpu::PollType::wait_indefinitely()).unwrap();
-            receive.recv().unwrap().unwrap();
-            let data = readback.slice(..).get_mapped_range().unwrap();
-            let exposure = bytemuck::cast_slice::<u8, f32>(&data)[0];
+            let exposure = read_exposure(&device, &queue, &tracer);
             eprintln!(
                 "{} seed={seed} rotation={rotation}, exposure={exposure}: {:?}",
                 style.name(),

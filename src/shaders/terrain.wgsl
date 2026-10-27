@@ -9,11 +9,13 @@ fn terrain_cells() -> u32 {
 }
 fn terrain_width() -> u32 { return terrain_cells() + 1u; }
 fn terrain_vertices() -> u32 { return terrain_width() * terrain_width(); }
+fn terrain_compact() -> bool { return terrain_cells() > 1024u; }
+fn terrain_vertex_stride() -> u32 { return select(6u, 2u, terrain_compact()); }
 fn terrain_nodes() -> u32 {
     let leaves = terrain_cells() / 2u;
     return (4u * leaves * leaves - 1u) / 3u;
 }
-fn terrain_bounds() -> u32 { return 3u * terrain_vertices(); }
+fn terrain_bounds() -> u32 { return select(3u, 1u, terrain_compact()) * terrain_vertices(); }
 fn terrain_cache() -> u32 { return terrain_bounds() + 2u * terrain_nodes(); }
 fn terrain_vertex_cache() -> u32 { return terrain_cache() + 6u * terrain_nodes(); }
 /// Ground theme id (0 forest, 1 desert, 2 craters, 3 alpine, 4 basalt, 5 dunes).
@@ -42,6 +44,17 @@ fn terrain_normal_uncached(x: u32, z: u32) -> vec3<f32> {
     let p = vec2<f32>(terrain_coordinate(x), terrain_coordinate(z));
     let r = settings.g.ground_up.w;
     let curve_gradient = p / sqrt(max(r * r - dot(p, p), 1.0));
+    if (terrain_compact()) {
+        let lo = vec2<u32>(max(vec2<i32>(i32(x), i32(z)) - 1, vec2<i32>(0)));
+        let hi = min(vec2<u32>(x, z) + 1u, vec2<u32>(terrain_cells()));
+        let dx = (ground_data.terrain[z * terrain_width() + hi.x]
+            - ground_data.terrain[z * terrain_width() + lo.x])
+            / ((terrain_coordinate(hi.x) - terrain_coordinate(lo.x)) / terrain_scale());
+        let dz = (ground_data.terrain[hi.y * terrain_width() + x]
+            - ground_data.terrain[lo.y * terrain_width() + x])
+            / ((terrain_coordinate(hi.y) - terrain_coordinate(lo.y)) / terrain_scale());
+        return normalize(vec3<f32>(-dx + curve_gradient.x, 1.0, -dz + curve_gradient.y));
+    }
     return normalize(vec3<f32>(
         -ground_data.terrain[terrain_vertices() + index] + curve_gradient.x, 1.0,
         -ground_data.terrain[2u * terrain_vertices() + index] + curve_gradient.y));
@@ -82,12 +95,23 @@ fn terrain_bounds_uncached(node: vec4<u32>) -> TerrainBounds {
 }
 
 fn terrain_vertex(x: u32, z: u32) -> vec3<f32> {
-    let i = terrain_vertex_cache() + (z * terrain_width() + x) * 6u;
+    let i = terrain_vertex_cache() + (z * terrain_width() + x) * terrain_vertex_stride();
+    if (terrain_compact()) {
+        return vec3<f32>(terrain_coordinate(x), ground_data.terrain[i], terrain_coordinate(z));
+    }
     return vec3<f32>(ground_data.terrain[i], ground_data.terrain[i + 1u], ground_data.terrain[i + 2u]);
 }
 fn terrain_normal(x: u32, z: u32) -> vec3<f32> {
-    let i = terrain_vertex_cache() + (z * terrain_width() + x) * 6u + 3u;
-    return vec3<f32>(ground_data.terrain[i], ground_data.terrain[i + 1u], ground_data.terrain[i + 2u]);
+    let i = terrain_vertex_cache() + (z * terrain_width() + x) * terrain_vertex_stride();
+    if (terrain_compact()) {
+        // Two 12-bit normal components stored as an exact f32 integer,
+        // avoiding NaN bit patterns in a float storage buffer.
+        let packed = u32(ground_data.terrain[i + 1u]);
+        let xz = vec2<f32>(f32(packed & 4095u), f32(packed >> 12u)) / 4095.0 * 2.0 - 1.0;
+        return normalize(vec3<f32>(xz.x, sqrt(max(1.0-dot(xz,xz), 1.0e-6)), xz.y));
+    }
+    let n = i + 3u;
+    return vec3<f32>(ground_data.terrain[n], ground_data.terrain[n + 1u], ground_data.terrain[n + 2u]);
 }
 
 // Node is (heap index, first x, first z, number of cells along one edge).
@@ -200,7 +224,7 @@ fn terrain_query(o: vec3<f32>, d: vec3<f32>, initial_limit: f32, occlusion: bool
             }
             for (var i = 0u; i < 4u; i += 1u) {
                 if (distances[i] < limit) {
-                    // Nine internal levels (1024 cells) need at most 3*9+1 = 28 slots.
+                    // Ten internal levels (2048 cells) need at most 3*10+1 = 31 slots.
                     stack[count] = vec2<u32>(children[i], bitcast<u32>(distances[i])); count += 1u;
                 }
             }
@@ -217,7 +241,12 @@ fn terrain_hit(o: vec3<f32>, d: vec3<f32>, limit: f32) -> vec4<f32> {
 // the same curvature, normals and conservative bounds once, not for every ray.
 @compute @workgroup_size(64)
 fn cache_terrain_geometry(@builtin(global_invocation_id) id: vec3<u32>) {
-    let index = id.x;
+    // Each dispatch row covers one vertex row, padded to 64 invocations.
+    // Reject padding before flattening so rows never overlap.
+    if (id.x >= terrain_width() || id.y >= terrain_width()) {
+        return;
+    }
+    let index = id.y * terrain_width() + id.x;
     if (index < terrain_nodes()) {
         let level = firstLeadingBit(3u * index + 1u) / 2u;
         let size = terrain_cells() >> level;
@@ -238,7 +267,14 @@ fn cache_terrain_geometry(@builtin(global_invocation_id) id: vec3<u32>) {
         let z = index / terrain_width();
         let vertex = terrain_vertex_uncached(x, z);
         let normal = terrain_normal_uncached(x, z);
-        let i = terrain_vertex_cache() + index * 6u;
+        let i = terrain_vertex_cache() + index * terrain_vertex_stride();
+        if (terrain_compact()) {
+            ground_data.terrain[i] = vertex.y;
+            let xz = vec2<u32>(round(clamp(normal.xz * 0.5 + 0.5,
+                vec2<f32>(0.0), vec2<f32>(1.0)) * 4095.0));
+            ground_data.terrain[i + 1u] = f32(xz.x | (xz.y << 12u));
+            return;
+        }
         ground_data.terrain[i] = vertex.x;
         ground_data.terrain[i + 1u] = vertex.y;
         ground_data.terrain[i + 2u] = vertex.z;
