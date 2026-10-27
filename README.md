@@ -245,7 +245,7 @@ cargo run --release -- --check-config configs/legacy/halo.yaml
 The menu lists the levels in `configs/` (one per explore ground, numbered in
 play order); the default launch, with or without `--game`, opens the first,
 `configs/1-halo-volcano.yaml`: Calyx and Halo over the volcano ground.
-`configs/3-corona-valley.yaml` puts the desert valley on Quebrada, a freely
+`configs/3-corona-valley.yaml` puts the ice field ground on Quebrada, a freely
 spinning planet of the red dwarf Brasa, which orbits Corona, a ringed white star.
 It opens just before the neighbouring planet Puna hides Corona's disc but not its rings. The
 earlier systems live in `configs/legacy/` (still used by presets, tests and

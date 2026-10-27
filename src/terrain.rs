@@ -26,7 +26,16 @@ pub const fn bounds_offset(cells: usize) -> usize {
 /// Grid cells per side for a ground. The airless crater field has no
 /// atmosphere to pay for, so it spends the time on a grid twice as fine.
 pub fn cells(theme: crate::ground::Theme) -> usize {
-    if theme == crate::ground::Theme::Craters {
+    // The volcano field spends it on gullies, craters and small cones, the
+    // dune sea on knife-edge crests and the small dunes riding on the large,
+    // the ice field on crevasses and granite spires.
+    if matches!(
+        theme,
+        crate::ground::Theme::Craters
+            | crate::ground::Theme::Basalt
+            | crate::ground::Theme::Dunes
+            | crate::ground::Theme::Alpine
+    ) {
         MAX_CELLS
     } else {
         CELLS
@@ -55,8 +64,9 @@ pub fn for_theme(theme: crate::ground::Theme) -> &'static Terrain {
 }
 
 /// Terrain height under the observer, in metres for a host of `radius`.
-/// Zero for grounds with a levelled lookout; the dune crest and crater
-/// plain lift the eye onto the surface instead.
+/// Zero for grounds with a levelled lookout (the forest and desert); the
+/// dune crest, crater plain, volcano summit and nunatak lift the eye onto
+/// the surface instead.
 pub fn lookout_height(theme: crate::ground::Theme, radius: f64) -> f64 {
     f64::from(for_theme(theme).height(0.0, 0.0) * scale(radius))
 }
@@ -299,14 +309,58 @@ fn patagonia(x: f32, z: f32) -> f32 {
     dem_sample(PATAGONIA, 0, PATAGONIA_SAMPLES, fx, fz)
 }
 
-fn alpine_elevation(x: f32, z: f32, _seed: u32) -> f32 {
+const ALPINE_CELLS: usize = MAX_CELLS;
+
+/// Direction the ice flows towards (radians east of north): west-south-west,
+/// off the ice-field plateau. Crevasses open across it (drawn by the
+/// shader); snow drifts and sastrugi run along it. Mirrored by ICE_FLOW in ground.wgsl.
+pub const ICE_FLOW: f32 = 4.4;
+
+/// Height and base radius of the nunatak under the lookout: a rocky peak
+/// rising out of the ice. Mirrored by lookout_hill in ground.wgsl, which
+/// measures the ice from its slopes and treats it as mountain.
+pub const LOOKOUT_HILL: (f32, f32) = (180.0, 700.0);
+
+/// Concave all round, steepest just below the small summit, so from the
+/// top the eye sees straight down onto the ice field instead of over a
+/// rounded shoulder.
+fn lookout_hill(r: f32) -> f32 {
+    let u = (r.hypot(30.0) / LOOKOUT_HILL.1).min(1.0);
+    LOOKOUT_HILL.0 * (1.0 - u) * (1.0 - u)
+}
+
+fn alpine_elevation(x: f32, z: f32, seed: u32) -> f32 {
     // Real terrain, unexaggerated, measured from the ice at the lookout. The
     // host sphere stands in for the ice field: ground below the ice level
     // (valleys beyond the peaks) is levelled to it, and the tile edge fades
     // only over its last kilometre so Fitz Roy (~15 km east) stays.
+    let cells = ALPINE_CELLS;
     let relative = (patagonia(x, z) - patagonia(0.0, 0.0)).max(0.0);
+    // The 50 m samples round granite spires into domes: ridged crags and
+    // broken rock restore the jagged detail on the mountains only.
+    let r = x.hypot(z);
+    let hill = lookout_hill(r);
+    let rock = smooth(20.0, 200.0, relative);
+    let crags = 70.0 * ridges(x / 380.0 + 1.3, z / 380.0 - 2.1, seed ^ 0xa1).powf(1.5) - 18.0;
+    let broken = 7.0 * fbm(x / 70.0, z / 70.0, seed ^ 0xa2, 3);
+    // Ribs and gullies cut into the nunatak, never rising above the summit.
+    let ribs = smooth(10.0, 80.0, hill)
+        * (16.0 * ridges(x / 140.0 + 7.0, z / 140.0, seed ^ 0xa5) - 13.0)
+        * detail(x, z, 60.0, cells);
+    let mountains = relative
+        + ribs
+        + rock * (crags * detail(x, z, 180.0, cells) + broken * detail(x, z, 70.0, cells));
+    // The ice: broad swells and drifts elongated along the flow. Crevasses
+    // are far narrower than the distant grid cells, so the shader draws them.
+    let (fx, fz) = (ICE_FLOW.sin(), ICE_FLOW.cos());
+    let (along, across) = (x * fx + z * fz, x * fz - z * fx);
+    let swell = 5.0
+        + 4.0 * fbm(x / 1_800.0, z / 1_800.0, seed ^ 0xa3, 3)
+        + 1.2 * fbm(along / 260.0, across / 70.0, seed ^ 0xa4, 2) * detail(x, z, 70.0, cells);
+    // The lookout stands on a nunatak, looking down over the crevasse
+    // fields and blue ice; crags break its flanks but not its summit.
     let fade = 1.0 - smooth(EXTENT - 1_000.0, EXTENT, x.abs().max(z.abs()));
-    relative * fade * smooth(12.0, 85.0, x.hypot(z))
+    ((mountains + swell).max(0.0) * smooth(12.0, 85.0, r) + hill) * fade
 }
 
 /// Real elevation of six Aeolian volcanoes, above sea level only: 320 x 320
@@ -341,6 +395,183 @@ const AEOLIAN_CONES: [(f32, f32, f32, f32); 3] = [
     (-362.0, 462.0, 745.0, 1_820.0),
 ];
 
+/// One size class of procedural volcanoes on a jittered grid.
+pub struct VolcanoClass {
+    /// Grid cell in metres; each cell holds at most one cone.
+    pub cell: f32,
+    /// Probability that a cell holds a cone.
+    pub chance: f32,
+    /// Summit height range in metres.
+    pub height: (f32, f32),
+    /// Base radius as a multiple of the height.
+    pub spread: (f32, f32),
+    /// Summit crater radius as a fraction of the base radius.
+    pub crater: (f32, f32),
+    /// Cones keep their whole base this far from the lookout.
+    pub clear: f32,
+}
+
+/// Large stratovolcanoes, medium scoria cones and small spatter cones. The
+/// largest base (1.3 x radius with its lobes) stays within the 1.2 cells a
+/// 3x3 neighbourhood search covers, so no cone is ever cut at a cell edge.
+/// Mirrored by `basalt_cone` in ground.wgsl, which colours each cone.
+pub const VOLCANO_CLASSES: [VolcanoClass; 3] = [
+    VolcanoClass {
+        cell: 5_200.0,
+        chance: 0.62,
+        height: (360.0, 1_050.0),
+        spread: (2.4, 3.4),
+        crater: (0.05, 0.11),
+        clear: 2_600.0,
+    },
+    VolcanoClass {
+        cell: 2_000.0,
+        chance: 0.55,
+        height: (80.0, 300.0),
+        spread: (2.6, 3.6),
+        crater: (0.12, 0.24),
+        clear: 1_100.0,
+    },
+    VolcanoClass {
+        cell: 720.0,
+        chance: 0.42,
+        height: (12.0, 60.0),
+        spread: (2.6, 3.8),
+        crater: (0.16, 0.3),
+        clear: 420.0,
+    },
+];
+
+/// A procedural volcano: summit position, height, base radius, summit crater
+/// radius (all metres), breach depth (0-1) and breach direction (radians).
+#[derive(Clone, Copy, Debug)]
+pub struct Cone {
+    pub x: f32,
+    pub z: f32,
+    pub height: f32,
+    pub radius: f32,
+    pub crater: f32,
+    pub breach: f32,
+    pub breach_angle: f32,
+    /// Flank exponent: near 1.3 a straight scoria cone, near 2 a concave
+    /// stratovolcano.
+    pub shape: f32,
+    pub key: u32,
+}
+
+/// The cone owned by grid cell (ix, iz) of `class`, if any. The WGSL
+/// material mirrors this exactly (same hash and arithmetic).
+pub fn volcano_cone(class: usize, ix: i32, iz: i32) -> Option<Cone> {
+    let c = &VOLCANO_CLASSES[class];
+    let key = hash(
+        (ix as u32).wrapping_mul(0x8da6_b343)
+            ^ (iz as u32).wrapping_mul(0xd816_3841)
+            ^ (0x5eed_0000 + class as u32 * 0x9e37),
+    );
+    let more = hash(key ^ 0x68e3_1da4);
+    let unit = |k: u32, shift: u32| ((k >> shift) & 255) as f32 / 255.0;
+    if unit(key, 16) > c.chance {
+        return None;
+    }
+    let x = (ix as f32 + 0.2 + 0.6 * unit(key, 0)) * c.cell;
+    let z = (iz as f32 + 0.2 + 0.6 * unit(key, 8)) * c.cell;
+    let height = c.height.0 + (c.height.1 - c.height.0) * unit(key, 24).powf(1.6);
+    let radius = height * (c.spread.0 + (c.spread.1 - c.spread.0) * unit(more, 0));
+    if x.hypot(z) < c.clear + radius || x.abs().max(z.abs()) + 1.3 * radius > EXTENT - 1_000.0 {
+        return None;
+    }
+    Some(Cone {
+        x,
+        z,
+        height,
+        radius,
+        crater: radius * (c.crater.0 + (c.crater.1 - c.crater.0) * unit(more, 8)),
+        // About a third of the cones open into a horseshoe on one side.
+        breach: ((unit(more, 16) - 0.62) / 0.38).max(0.0),
+        breach_angle: unit(more, 24) * std::f32::consts::TAU,
+        shape: [1.75, 1.35, 1.25][class] + 0.45 * ((key >> 4) & 15) as f32 / 15.0,
+        key,
+    })
+}
+
+/// Height of one procedural volcano above its base at (x, z): a concave
+/// flank with an irregular, lobed footprint, a summit crater (sometimes
+/// breached) and radial erosion gullies.
+fn volcano(x: f32, z: f32, v: &Cone, cells: usize) -> f32 {
+    let (dx, dz) = (x - v.x, z - v.z);
+    let r = dx.hypot(dz);
+    if r >= 1.3 * v.radius {
+        return 0.0;
+    }
+    let seed = v.key;
+    // Lava lobes and flank collapses break up the circular footprint.
+    let lobes =
+        1.0 + 0.2 * noise(dx / v.radius * 1.4 + 3.1, dz / v.radius * 1.4, seed).clamp(-1.0, 1.0);
+    let t = r / (v.radius * lobes);
+    if t >= 1.0 {
+        return 0.0;
+    }
+    let rim = v.crater / v.radius;
+    // Concave profile: steep upper cone, a long gentle apron at the base.
+    let s = ((1.0 - t) / (1.0 - rim)).clamp(0.0, 1.0);
+    let mut flank = v.height * s.powf(v.shape);
+    // Horseshoe breach: the rim and upper flank sag towards one side.
+    let (ux, uz) = (dx / r.max(1e-3), dz / r.max(1e-3));
+    let facing = (ux * v.breach_angle.sin() + uz * v.breach_angle.cos()).max(0.0);
+    let sag = v.breach * facing.powi(3) * (1.0 - smooth(rim, 4.0 * rim, t));
+    flank -= 0.45 * v.height * sag;
+    // Summit crater: a bowl whose floor sits a third of a radius deep.
+    let depth = (0.9 * v.crater).min(0.35 * v.height);
+    let u = t / rim;
+    let bowl = v.height - depth * (1.0 - u * u) - 0.45 * v.height * sag;
+    let mut h = smooth_min(flank, bowl, (0.25 * depth).max(rounding_width(x, z, cells)));
+    // Radial gullies: noise sampled on a circle varies quickly around the
+    // cone and slowly downhill, carving channels between sharp spurs.
+    let count = 3.0 + 0.02 * v.radius.min(400.0) + v.radius / 900.0;
+    let n = 1.6
+        * fbm(
+            ux * count + r / (0.5 * v.radius) + 9.0,
+            uz * count - 4.0,
+            seed ^ 0x9a11,
+            2,
+        );
+    let groove = 1.0 - smooth(0.0, 0.4, n.abs());
+    let envelope = smooth(rim, 1.6 * rim + 0.08, t) * (1.0 - smooth(0.55, 1.0, t));
+    let width = 0.6 * r.max(v.crater) / count;
+    h -= 0.11 * v.height * groove * envelope * detail(x, z, width, cells);
+    // Loose scoria and blocky lava roughen every flank.
+    h += 0.025
+        * v.height
+        * fbm(
+            dx / (0.18 * v.radius),
+            dz / (0.18 * v.radius),
+            seed ^ 0x77,
+            3,
+        )
+        * envelope.max(smooth(1.0, 0.5, t))
+        * detail(x, z, 0.2 * v.radius, cells);
+    h.max(0.0) * smooth(1.0, 0.82, t)
+}
+
+/// Every procedural cone of `class` whose base may cover (x, z).
+fn volcano_class(x: f32, z: f32, class: usize, cells: usize) -> f32 {
+    let cell = VOLCANO_CLASSES[class].cell;
+    let (gx, gz) = ((x / cell).floor() as i32, (z / cell).floor() as i32);
+    let mut h: f32 = 0.0;
+    for dz in -1..=1 {
+        for dx in -1..=1 {
+            if let Some(cone) = volcano_cone(class, gx + dx, gz + dz) {
+                // Where two cones of a class meet, the taller one wins, so
+                // their flanks merge into saddles instead of stacking.
+                h = h.max(volcano(x, z, &cone, cells));
+            }
+        }
+    }
+    h
+}
+
+const BASALT_CELLS: usize = MAX_CELLS;
+
 fn basalt_elevation(x: f32, z: f32, seed: u32) -> f32 {
     // Real Aeolian volcanoes rising from a sea of dark lava rock instead of
     // water. The observer stands on the summit of Stromboli (~900 m), on the
@@ -348,8 +579,32 @@ fn basalt_elevation(x: f32, z: f32, seed: u32) -> f32 {
     // out on the horizon in every direction stand eight conical islands of
     // different sizes: real Stromboli, Alicudi and Filicudi, turned and
     // scaled, each blended with an ideal cone so it reads as a volcano while
-    // keeping its gullies and irregularities.
+    // keeping its gullies and irregularities. Between them a whole volcanic
+    // field of procedural stratovolcanoes, scoria and spatter cones of every
+    // size rises from the lava, the smaller ones also as parasitic vents on
+    // the flanks of the larger.
+    let cells = BASALT_CELLS;
     let mut volcanoes = aeolian(0, x - 12.0, z - 612.0);
+    // Gullies and loose scoria on Stromboli's real, but smooth (25 m) slopes.
+    let r = x.hypot(z);
+    if r > 1.0 {
+        let n = fbm(x / r * 12.0 + r / 700.0, z / r * 12.0, seed ^ 0x5701, 2) * 1.6;
+        let groove = 1.0 - smooth(0.0, 0.4, n.abs());
+        let envelope = smooth(350.0, 850.0, r) * (1.0 - smooth(2_400.0, 3_600.0, r));
+        // Gullies of irregular depth, not evenly spaced ribs.
+        let depth = (0.75 + 0.6 * noise(x / r * 2.5 + 7.0, z / r * 2.5, seed ^ 0x77e)).max(0.2);
+        volcanoes -= 11.0
+            * depth
+            * groove
+            * envelope
+            * detail(x, z, 0.08 * r, cells)
+            * smooth(20.0, 120.0, volcanoes);
+        volcanoes += 6.0
+            * fbm(x / 140.0, z / 140.0, seed ^ 0x3a7, 3)
+            * smooth(150.0, 400.0, r)
+            * smooth(20.0, 120.0, volcanoes)
+            * detail(x, z, 140.0, cells);
+    }
     // The small summit crater: a bowl with a raised rim through the lookout.
     let u = x.hypot(z - 120.0) / 120.0;
     volcanoes += smooth_min(
@@ -379,11 +634,20 @@ fn basalt_elevation(x: f32, z: f32, seed: u32) -> f32 {
         let real = aeolian(index, lx, lz);
         volcanoes = volcanoes.max(size * (real + 0.6 * (cone - real)));
     }
-    // The lava sea: flat at large scale, blocky and broken up close by.
+    // Large procedural stratovolcanoes merge with the real ones; medium
+    // and small cones sit on whatever lies beneath them.
+    volcanoes = volcanoes.max(volcano_class(x, z, 0, cells));
+    // Spatter cones near the lookout stay small, keeping the view open.
+    let parasitic = smooth(500.0, 1_400.0, r);
+    volcanoes += parasitic * (volcano_class(x, z, 1, cells) + volcano_class(x, z, 2, cells));
+    // The lava sea: overlapping flows with pressure ridges and tumuli, flat
+    // at large scale, blocky and broken up close by.
+    let flows = ridges(x / 1_900.0 + 3.3, z / 1_900.0 - 8.1, seed ^ 0x10fa);
     let sea = 20.0
         + 4.0 * fbm(x / 600.0, z / 600.0, seed, 3)
-        + 2.5 * fbm(x / 45.0, z / 45.0, seed ^ 0xbeef, 3).abs() * detail(x, z, 45.0, CELLS)
-        + 0.8 * fbm(x / 9.0, z / 9.0, seed ^ 0x0f, 2) * detail(x, z, 9.0, CELLS);
+        + 7.0 * flows * detail(x, z, 300.0, cells)
+        + 2.5 * fbm(x / 45.0, z / 45.0, seed ^ 0xbeef, 3).abs() * detail(x, z, 45.0, cells)
+        + 0.8 * fbm(x / 9.0, z / 9.0, seed ^ 0x0f, 2) * detail(x, z, 9.0, cells);
     // Fade only over the last kilometre, so the horizon cones stay whole.
     let fade = 1.0 - smooth(EXTENT - 1_000.0, EXTENT, x.abs().max(z.abs()));
     (sea + volcanoes).max(0.0) * fade
@@ -421,8 +685,11 @@ fn detail(x: f32, z: f32, feature: f32, cells: usize) -> f32 {
 }
 
 /// Distance from a crest, rounded over `rounding_width`.
+/// Dune crests round over a little more than other edges: on a crest
+/// running diagonally across the grid, a sharper rounding leaves the shading
+/// terminator stepping from triangle to triangle.
 fn rounded(distance: f32, x: f32, z: f32) -> f32 {
-    let width = rounding_width(x, z, CELLS);
+    let width = (2.4 * cell_size(x, z, DUNE_CELLS)).max(1.0);
     distance.hypot(width) - width
 }
 
@@ -546,7 +813,7 @@ fn dune_elevation(x: f32, z: f32, seed: u32) -> f32 {
     let ridge = 40.0 * wave * wave * strength;
     let floor = 7.0
         + 3.0 * fbm(x / 900.0, z / 900.0, seed, 3)
-        + 0.5 * fbm(x / 40.0, z / 40.0, seed ^ 0x6d, 3) * detail(x, z, 40.0, CELLS);
+        + 0.5 * fbm(x / 40.0, z / 40.0, seed ^ 0x6d, 3) * detail(x, z, 40.0, DUNE_CELLS);
     let mut height = h.max(floor + ridge.max(0.0));
     // Flat pans where the Tsauchab floods end, with irregular shores; dunes
     // rise straight out of them.
@@ -556,6 +823,97 @@ fn dune_elevation(x: f32, z: f32, seed: u32) -> f32 {
         height = height * flat + DUNE_PAN_LEVEL * (1.0 - flat);
     }
     height.max(0.0) * edge(x, z)
+}
+
+const DUNE_CELLS: usize = MAX_CELLS;
+
+/// Direction the prevailing wind blows towards (radians east of north). It
+/// drives sand up the windward slopes onto slip faces to the north-east, like
+/// Big Daddy's above Deadvlei. Mirrored by DUNE_WIND in ground.wgsl.
+pub const DUNE_WIND: f32 = 0.61;
+
+/// Small transverse dunes superimposed on the large ones (compound dunes):
+/// sinuous, crescent-segmented crests with a long gentle windward slope and a
+/// short slip face, `wavelength` metres apart. Returns height in metres.
+fn small_dunes(x: f32, z: f32, wavelength: f32, height: f32, seed: u32) -> f32 {
+    let (wx, wz) = (DUNE_WIND.sin(), DUNE_WIND.cos());
+    let along = x * wx + z * wz;
+    let across = x * wz - z * wx;
+    // Crests meander and bend into crescents whose horns point downwind.
+    let warp = 0.9 * wavelength * fbm(x / (4.0 * wavelength), z / (4.0 * wavelength), seed, 3)
+        + 0.25
+            * wavelength
+            * (across / (1.3 * wavelength) + 2.0 * noise(x / 3_000.0, z / 3_000.0, seed ^ 5))
+                .sin()
+                .abs();
+    let phase = (along - warp) / wavelength;
+    let f = phase - phase.floor();
+    // Crest at f = LEE; the slip face drops over the remaining fraction.
+    const LEE: f32 = 0.82;
+    let distance = if f < LEE {
+        (LEE - f) * wavelength
+    } else {
+        (f - LEE) * wavelength
+    };
+    let slope = if f < LEE {
+        height / (LEE * wavelength)
+    } else {
+        height / ((1.0 - LEE) * wavelength)
+    };
+    let crest = (height - slope * rounded(distance, x, z)).max(0.0);
+    // Crest segments of varying height: some crescents die out entirely.
+    let segments = smooth(
+        -0.15,
+        0.45,
+        fbm(
+            across / (2.2 * wavelength) + 3.0 * phase.floor(),
+            along / (6.0 * wavelength),
+            seed ^ 0x2b,
+            2,
+        ) + 0.15,
+    );
+    crest * segments * detail(x, z, 0.5 * wavelength, DUNE_CELLS)
+}
+
+/// Adds the small dunes where the large ones leave gentle ground: windward
+/// flanks and corridors, never on slip faces, the pans or Big Daddy's crest.
+fn superimpose_dunes(heights: &mut [f32], coordinates: &[f32], seed: u32) {
+    let n = coordinates.len();
+    let base = heights.to_vec();
+    for z in 0..n {
+        for x in 0..n {
+            let (px, pz) = (coordinates[x], coordinates[z]);
+            // Steepest one-sided slope: a central difference reads a knife
+            // crest as flat ground.
+            let i = z * n + x;
+            let step = |j: usize, a: usize, b: usize| {
+                ((base[j] - base[i]) / (coordinates[a] - coordinates[b]).abs().max(1e-3)).abs()
+            };
+            let gx = step(z * n + x.saturating_sub(1), x, x.saturating_sub(1)).max(step(
+                z * n + (x + 1).min(n - 1),
+                (x + 1).min(n - 1),
+                x,
+            ));
+            let gz = step(z.saturating_sub(1) * n + x, z, z.saturating_sub(1)).max(step(
+                (z + 1).min(n - 1) * n + x,
+                (z + 1).min(n - 1),
+                z,
+            ));
+            let gentle = 1.0 - smooth(0.12, 0.3, gx.hypot(gz));
+            let mut mask = gentle * smooth(120.0, 400.0, px.hypot(pz)) * edge(px, pz);
+            for [cx, cz, radius] in DUNE_PANS {
+                mask *= smooth(radius + 100.0, radius + 450.0, (px - cx).hypot(pz - cz));
+            }
+            if mask <= 0.0 {
+                continue;
+            }
+            let field = 0.6 + 0.6 * fbm(px / 3_500.0, pz / 3_500.0, seed ^ 0x51, 2);
+            let dunes = small_dunes(px, pz, 260.0, 22.0 * field.clamp(0.2, 1.0), seed ^ 0xd00e)
+                + small_dunes(px, pz, 47.0, 2.2, seed ^ 0x7e11)
+                    * smooth(4_000.0, 1_500.0, px.hypot(pz));
+            heights[z * n + x] += mask * dunes;
+        }
+    }
 }
 
 /// Talus relaxation transports material between neighbouring samples. The
@@ -618,6 +976,9 @@ impl Terrain {
                 }
             })
             .collect();
+        if theme == crate::ground::Theme::Dunes {
+            superimpose_dunes(&mut heights, &coordinates, seed);
+        }
         // Talus erosion suits the gently levelled forest and desert lookouts.
         // Elsewhere the centre rows and columns (0.24 m wide) would collect
         // material into thin ridges running out to the horizon.
@@ -780,14 +1141,97 @@ mod tests {
                 assert!((terrain.height(x + 0.001, z) - terrain.height(x - 0.001, z)).abs() < 0.1);
             }
         }
-        // Levelled lookouts keep the eye at its configured height; the dune
-        // sea and crater plain lift it onto the surface.
-        assert_eq!(lookout_height(Theme::Alpine, 6.371e6), 0.0);
+        // The dune crest, crater plain, volcano summit and nunatak lift the
+        // eye onto the surface.
+        assert!(lookout_height(Theme::Alpine, 6.371e6) > 150.0);
         assert!(lookout_height(Theme::Basalt, 6.371e6) > 200.0);
         assert!(lookout_height(Theme::Dunes, 6.371e6) > 300.0);
         assert!(lookout_height(Theme::Craters, 6.371e6) > 20.0);
-        assert!(for_theme(Theme::Alpine).data[BOUNDS_OFFSET + 1] > 1_500.0);
+        let alpine = for_theme(Theme::Alpine);
+        assert!(alpine.data[bounds_offset(alpine.cells) + 1] > 1_500.0);
         assert_eq!(for_theme(Theme::Craters).cells, MAX_CELLS);
+    }
+
+    #[test]
+    fn volcano_field_has_many_cones_of_every_size_clear_of_the_lookout() {
+        let mut counts = [0; 3];
+        for (class, c) in VOLCANO_CLASSES.iter().enumerate() {
+            let reach = (EXTENT / c.cell).ceil() as i32;
+            let mut heights = Vec::new();
+            for iz in -reach..reach {
+                for ix in -reach..reach {
+                    let Some(cone) = volcano_cone(class, ix, iz) else {
+                        continue;
+                    };
+                    // Whole base inside the grid cells a 3x3 search covers.
+                    let cell_x = cone.x / c.cell - ix as f32;
+                    let cell_z = cone.z / c.cell - iz as f32;
+                    let margin = 1.3 * cone.radius / c.cell;
+                    assert!(cell_x - margin >= -1.0 && cell_x + margin <= 2.0);
+                    assert!(cell_z - margin >= -1.0 && cell_z + margin <= 2.0);
+                    assert!(cone.x.hypot(cone.z) >= c.clear + cone.radius);
+                    assert!(cone.crater < 0.35 * cone.radius && cone.height > 0.0);
+                    heights.push(cone.height);
+                }
+            }
+            counts[class] = heights.len();
+            let (lo, hi) = heights
+                .iter()
+                .fold((f32::MAX, 0.0_f32), |(a, b), h| (a.min(*h), b.max(*h)));
+            assert!(hi > 2.0 * lo, "class {class} sizes {lo}..{hi}");
+        }
+        assert!(
+            counts[0] >= 10 && counts[1] >= 80 && counts[2] >= 500,
+            "{counts:?}"
+        );
+    }
+
+    #[test]
+    fn wgsl_volcano_materials_mirror_the_generated_classes() {
+        let shader = include_str!("shaders/ground.wgsl");
+        let field = |f: fn(&VolcanoClass) -> f32| {
+            VOLCANO_CLASSES
+                .iter()
+                .map(|c| format!("{:?}", f(c)))
+                .collect::<Vec<_>>()
+                .join(", ")
+        };
+        for (name, values) in [
+            ("cells", field(|c| c.cell)),
+            ("chance", field(|c| c.chance)),
+            ("low", field(|c| c.height.0)),
+            ("high", field(|c| c.height.1)),
+            ("spread_low", field(|c| c.spread.0)),
+            ("spread_high", field(|c| c.spread.1)),
+            ("crater_low", field(|c| c.crater.0)),
+            ("crater_high", field(|c| c.crater.1)),
+            ("clear", field(|c| c.clear)),
+        ] {
+            let line = format!("var {name} = array<f32, 3>({values});");
+            assert!(shader.contains(&line), "ground.wgsl lacks `{line}`");
+        }
+    }
+
+    #[test]
+    fn wgsl_dune_and_ice_materials_mirror_the_terrain_constants() {
+        let shader = include_str!("shaders/ground.wgsl");
+        for line in [
+            format!("const DUNE_WIND: f32 = {DUNE_WIND:?};"),
+            format!("const DUNE_PAN_LEVEL: f32 = {DUNE_PAN_LEVEL:?};"),
+            format!(
+                "var pans = array<vec3<f32>, 2>({});",
+                DUNE_PANS
+                    .map(|[x, z, r]| format!("vec3<f32>({x:?}, {z:?}, {r:?})"))
+                    .join(", ")
+            ),
+            format!("const ICE_FLOW: f32 = {ICE_FLOW:?};"),
+            format!(
+                "const LOOKOUT_HILL: vec2<f32> = vec2<f32>({:?}, {:?});",
+                LOOKOUT_HILL.0, LOOKOUT_HILL.1
+            ),
+        ] {
+            assert!(shader.contains(&line), "ground.wgsl lacks `{line}`");
+        }
     }
 
     #[test]

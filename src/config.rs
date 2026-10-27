@@ -762,7 +762,7 @@ mod tests {
     #[test]
     fn corona_level_opens_before_puna_occults_the_ringed_star_at_night() {
         let scene = parse(CORONA).unwrap();
-        assert_eq!(scene.ground, crate::ground::Theme::Desert);
+        assert_eq!(scene.ground, crate::ground::Theme::Alpine);
         let id = |name: &str| scene.bodies.iter().position(|b| b.name == name).unwrap();
         let (corona, brasa, puna) = (id("Corona"), id("Brasa"), id("Puna"));
         assert_eq!(scene.body(corona).kind, BodyKind::Star);

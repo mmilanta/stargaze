@@ -1,12 +1,13 @@
 # Stargaze system format v1. Distances and angles use explicit units.
 # Orbit angles are measured in the shared ecliptic frame, including moon orbits.
-# Level 3 — the desert valley ground. A wide binary: Corona, a white star
+# Level 3 — the ice field ground. A wide binary: Corona, a white star
 # wearing a dusty ring (2-5 stellar radii, tilted 25 degrees), and Brasa, a
-# red dwarf 4 AU away. You stand in a desert valley on Quebrada, the middle
-# of three planets circling Brasa in a resonance chain (periods 15, 22.5 and
-# 33.75 days, each 3:2 with the next). Quebrada spins freely every 1.15 days
-# and is not tidally locked: red Brasa gives the day, while Corona, ~1/6 as
-# bright and its rings ~0.9 degrees across, gives a second, paler white day.
+# red dwarf 4 AU away. You stand on a rocky nunatak above a crevassed ice
+# field on Quebrada, the middle of three planets circling Brasa in a
+# resonance chain (periods 15, 22.5 and 33.75 days, each 3:2 with the next).
+# Quebrada spins freely every 1.15 days and is not tidally locked: red Brasa
+# gives the day, while Corona, ~1/6 as bright and its rings ~0.9 degrees
+# across, gives a second, paler white day.
 # Every 67.5 days the big outer neighbour Puna overtakes Quebrada. When that
 # happens with Corona behind it, Puna hides the star's disc but not its
 # rings: a black disc inside a blazing ring, while the sky goes dark.
@@ -32,7 +33,7 @@ camera:
   direction: {azimuth_deg: 278, altitude_deg: 28}
   fov_deg: 60
   atmosphere: earthlike
-  ground: desert
+  ground: alpine
 targets: [corona, puna, salar, brasa, ocre, ceniza, tormenta, alba, chispa]
 bodies:
   # The primary: a white F-type star, 1.3 solar radii, 2.5 suns' luminosity,
