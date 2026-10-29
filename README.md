@@ -56,18 +56,6 @@ All scene visibility and illumination are traced in a WGSL compute shader:
   This is an illustrative landscape on every host, including airless worlds
   and the Saturn observatory; it is not a biome model. Set `STARGAZE_GROUND=0`
   to restore the original planetary material and omit the scenery.
-- **Procedural surfaces:** a body's `surface` style paints it in its own
-  rotating frame: turbulent gas giant belts with oval storms, cratered moons
-  with maria and ray craters, Mars-like rocky worlds with polar caps, icy moons
-  crossed by long cracks, Io-like volcanic moons, and terran worlds with oceans,
-  continents and clouds. Everything is computed in the shader from noise, with
-  no texture images. Other bodies keep a softly mottled albedo, also attached
-  to the body's frame and different for each body.
-- **Texture editor:** `cargo run --release -- --texture [STYLE]` opens one
-  planet with sliders for its rotation (with automatic play), the light angle,
-  axis tilt and every surface parameter of the chosen style. Scroll zooms,
-  `[`/`]` change style, and **Print YAML** writes the `albedo` and `surface`
-  lines for a config to the terminal.
 - **Rings:** an analytic, zero-thickness equatorial annulus around a body.
   Rays intersect the ring plane and are kept between the inner and outer
   radius. The sheet is a plane-parallel particulate slab: ray and shadow rays

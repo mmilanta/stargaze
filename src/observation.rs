@@ -11,8 +11,7 @@ pub(crate) struct MouseLook {
 
 impl App {
     pub(crate) fn observing(&self) -> bool {
-        self.texture.is_none()
-            && self.world_visible()
+        self.world_visible()
             && self.discard.is_none()
             && !self
                 .game

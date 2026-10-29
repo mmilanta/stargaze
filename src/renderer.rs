@@ -41,10 +41,6 @@ pub struct Sphere {
     pub ring_plane: [f32; 4], // xyz = unit pole in telescope space, w = inner radius / body radius
     pub ring_params: [f32; 4], // outer radius / body radius (0 = absent), optical depth, banded, unused
     pub ring_color: [f32; 4],  // rgb = single-scattering albedo
-    pub axis_x: [f32; 4],      // xyz = body-fixed X axis in telescope space, w = surface style
-    pub axis_y: [f32; 4],      // xyz = body-fixed Y axis in telescope space, w = seed
-    pub surface_color: [f32; 4], // rgb = secondary albedo, w = turbulence (gas giant) or craters
-    pub surface_params: [f32; 4], // gas giant: bands, storms; solid: ice caps, ocean, clouds
 }
 
 pub struct Frame {
