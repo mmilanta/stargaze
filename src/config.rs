@@ -673,6 +673,7 @@ mod tests {
         let (star, giant) = (id("Lucero"), id("Umbra"));
         let host = scene.body(scene.host);
         assert!(host.tidally_locked);
+        assert_eq!(scene.ground, crate::ground::Theme::Alpine);
         assert_eq!(scene.day_length_days, Some(1.0));
         assert_eq!(scene.body(star).parent, scene.body(giant).parent);
         assert_eq!(scene.body(star).period_days, scene.body(giant).period_days);

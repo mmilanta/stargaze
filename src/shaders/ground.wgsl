@@ -477,52 +477,6 @@ fn basalt_floor(p: vec3<f32>, distance: f32, normal: vec3<f32>) -> vec3<f32> {
     return color;
 }
 
-// Volcanic field: overlapping lava flows of different ages around cones of
-// every size, ash blown over the plain, each cone with its own rock.
-fn basalt_floor(p: vec3<f32>, distance: f32, normal: vec3<f32>) -> vec3<f32> {
-    let scale = terrain_scale();
-    let q = vec3<f32>(p.x, p.y - terrain_curvature(p.xz), p.z) / scale;
-    let footprint = distance * 2.0 * settings.g.cam_forward.w / max(settings.g.viewport.y, 1.0) / scale;
-    let detail = 1.0 - smoothstep(0.025, 0.2, footprint);
-    let slope = 1.0 - max(normal.y, 0.0);
-    // Lava sea: warped flow lobes, from fresh glassy black to weathered,
-    // ash-dusted brown, with rusty oxidised crusts.
-    let warp = vec3<f32>(vnoise(q * 0.0006), 0.0, vnoise(q * 0.0006 + vec3<f32>(31.0, 0.0, 7.0)));
-    let age = fbm((q + warp * 1400.0) * 0.0011 + vec3<f32>(0.0, 0.0, 3.0), 3);
-    let middle = vnoise(q * 0.12);
-    let grain = vnoise(q * 5.0);
-    let old_flow = mix(vec3<f32>(0.058, 0.05, 0.044), vec3<f32>(0.085, 0.074, 0.062), middle);
-    let aa = mix(vec3<f32>(0.04, 0.037, 0.036), vec3<f32>(0.052, 0.046, 0.043), middle);
-    let fresh = vec3<f32>(0.021, 0.02, 0.022) * (0.85 + 0.3 * middle);
-    var color = mix(old_flow, aa, smoothstep(0.42, 0.47, age));
-    color = mix(color, fresh, smoothstep(0.58, 0.61, age));
-    let rust = vec3<f32>(0.11, 0.05, 0.03);
-    color = mix(color, rust, smoothstep(0.66, 0.8, vnoise(q * 0.004 + vec3<f32>(5.0, 9.0, 2.0)))
-        * 0.45 * (1.0 - smoothstep(0.58, 0.61, age)));
-    // Each cone with its own rock, and its tephra blanket on the plain.
-    let large = basalt_large(q.xz);
-    if (large.radius > 0.0) {
-        let t = length(q.xz - large.centre) / large.radius;
-        color = mix(color, vec3<f32>(0.078, 0.072, 0.066), smoothstep(1.25, 0.9, t) * 0.5);
-        color = mix(color, basalt_cone_color(q, large, t, slope, detail), smoothstep(1.0, 0.7, t));
-    }
-    // Scoria then spatter cones, which sit on top of everything else.
-    for (var kind = 1u; kind < 3u; kind += 1u) {
-        let cone = basalt_nearest(q.xz, kind);
-        if (cone.radius > 0.0) {
-            let t = length(q.xz - cone.centre) / cone.radius;
-            // Spatter cones too small for the distant grid stay subtle there.
-            let visible = select(1.0, 1.0 - smoothstep(0.2, 0.6, footprint * 40.0 / cone.height), kind == 2u);
-            color = mix(color, basalt_cone_color(q, cone, t, slope, detail),
-                smoothstep(1.0, 0.75, t) * visible);
-        }
-    }
-    // Glassy, rougher rock on steeper ground reads slightly lighter.
-    color *= 1.0 + 0.25 * smoothstep(0.1, 0.4, slope);
-    color *= 1.0 + (vnoise(q * 0.7) - 0.5) * 0.35 * (1.0 - smoothstep(0.2, 1.5, footprint));
-    color *= 1.0 + (grain - 0.5) * 0.45 * detail;
-    return color;
-}
 // Mirrors DUNE_WIND, DUNE_PAN_LEVEL and DUNE_PANS in terrain.rs.
 const DUNE_WIND: f32 = 0.61;
 const DUNE_PAN_LEVEL: f32 = 2.0;

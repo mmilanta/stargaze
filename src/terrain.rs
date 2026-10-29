@@ -943,6 +943,8 @@ mod tests {
         assert!(alpine.data[bounds_offset(alpine.cells) + 1] > 1_500.0);
         assert_eq!(for_theme(Theme::Craters).cells, CRATER_CELLS);
         assert_eq!(for_theme(Theme::Basalt).cells, MAX_CELLS);
+        assert_eq!(for_theme(Theme::Alpine).cells, 1024);
+        assert_eq!(for_theme(Theme::Dunes).cells, 1024);
     }
 
     #[test]
