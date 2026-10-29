@@ -33,6 +33,8 @@ pub fn cells(theme: crate::ground::Theme) -> usize {
     match theme {
         crate::ground::Theme::Basalt => MAX_CELLS,
         crate::ground::Theme::Craters => CRATER_CELLS,
+        crate::ground::Theme::Alpine => ALPINE_CELLS,
+        crate::ground::Theme::Dunes => DUNE_CELLS,
         _ => CELLS,
     }
 }
@@ -60,8 +62,9 @@ pub fn for_theme(theme: crate::ground::Theme) -> &'static Terrain {
 }
 
 /// Terrain height under the observer, in metres for a host of `radius`.
-/// Zero for grounds with a levelled lookout; the dune crest and crater
-/// plain lift the eye onto the surface instead.
+/// Zero for grounds with a levelled lookout (the forest and desert); the
+/// dune crest, crater plain, volcano summit and nunatak lift the eye onto
+/// the surface instead.
 pub fn lookout_height(theme: crate::ground::Theme, radius: f64) -> f64 {
     f64::from(for_theme(theme).height(0.0, 0.0) * scale(radius))
 }
@@ -298,14 +301,58 @@ fn patagonia(x: f32, z: f32) -> f32 {
     dem_sample(PATAGONIA, 0, PATAGONIA_SAMPLES, fx, fz)
 }
 
-fn alpine_elevation(x: f32, z: f32, _seed: u32) -> f32 {
+const ALPINE_CELLS: usize = 1024;
+
+/// Direction the ice flows towards (radians east of north): west-south-west,
+/// off the ice-field plateau. Crevasses open across it (drawn by the
+/// shader); snow drifts and sastrugi run along it. Mirrored by ICE_FLOW in ground.wgsl.
+pub const ICE_FLOW: f32 = 4.4;
+
+/// Height and base radius of the nunatak under the lookout: a rocky peak
+/// rising out of the ice. Mirrored by lookout_hill in ground.wgsl, which
+/// measures the ice from its slopes and treats it as mountain.
+pub const LOOKOUT_HILL: (f32, f32) = (180.0, 700.0);
+
+/// Concave all round, steepest just below the small summit, so from the
+/// top the eye sees straight down onto the ice field instead of over a
+/// rounded shoulder.
+fn lookout_hill(r: f32) -> f32 {
+    let u = (r.hypot(30.0) / LOOKOUT_HILL.1).min(1.0);
+    LOOKOUT_HILL.0 * (1.0 - u) * (1.0 - u)
+}
+
+fn alpine_elevation(x: f32, z: f32, seed: u32) -> f32 {
     // Real terrain, unexaggerated, measured from the ice at the lookout. The
     // host sphere stands in for the ice field: ground below the ice level
     // (valleys beyond the peaks) is levelled to it, and the tile edge fades
     // only over its last kilometre so Fitz Roy (~15 km east) stays.
+    let cells = ALPINE_CELLS;
     let relative = (patagonia(x, z) - patagonia(0.0, 0.0)).max(0.0);
+    // The 50 m samples round granite spires into domes: ridged crags and
+    // broken rock restore the jagged detail on the mountains only.
+    let r = x.hypot(z);
+    let hill = lookout_hill(r);
+    let rock = smooth(20.0, 200.0, relative);
+    let crags = 70.0 * ridges(x / 380.0 + 1.3, z / 380.0 - 2.1, seed ^ 0xa1).powf(1.5) - 18.0;
+    let broken = 7.0 * fbm(x / 70.0, z / 70.0, seed ^ 0xa2, 3);
+    // Ribs and gullies cut into the nunatak, never rising above the summit.
+    let ribs = smooth(10.0, 80.0, hill)
+        * (16.0 * ridges(x / 140.0 + 7.0, z / 140.0, seed ^ 0xa5) - 13.0)
+        * detail(x, z, 60.0, cells);
+    let mountains = relative
+        + ribs
+        + rock * (crags * detail(x, z, 180.0, cells) + broken * detail(x, z, 70.0, cells));
+    // The ice: broad swells and drifts elongated along the flow. Crevasses
+    // are far narrower than the distant grid cells, so the shader draws them.
+    let (fx, fz) = (ICE_FLOW.sin(), ICE_FLOW.cos());
+    let (along, across) = (x * fx + z * fz, x * fz - z * fx);
+    let swell = 5.0
+        + 4.0 * fbm(x / 1_800.0, z / 1_800.0, seed ^ 0xa3, 3)
+        + 1.2 * fbm(along / 260.0, across / 70.0, seed ^ 0xa4, 2) * detail(x, z, 70.0, cells);
+    // The lookout stands on a nunatak, looking down over the crevasse
+    // fields and blue ice; crags break its flanks but not its summit.
     let fade = 1.0 - smooth(EXTENT - 1_000.0, EXTENT, x.abs().max(z.abs()));
-    relative * fade * smooth(12.0, 85.0, x.hypot(z))
+    ((mountains + swell).max(0.0) * smooth(12.0, 85.0, r) + hill) * fade
 }
 
 /// Real elevation of six Aeolian volcanoes, above sea level only: 320 x 320
@@ -428,8 +475,11 @@ fn detail(x: f32, z: f32, feature: f32, cells: usize) -> f32 {
 }
 
 /// Distance from a crest, rounded over `rounding_width`.
+/// Dune crests round over a little more than other edges: on a crest
+/// running diagonally across the grid, a sharper rounding leaves the shading
+/// terminator stepping from triangle to triangle.
 fn rounded(distance: f32, x: f32, z: f32) -> f32 {
-    let width = rounding_width(x, z, CELLS);
+    let width = (2.4 * cell_size(x, z, DUNE_CELLS)).max(1.0);
     distance.hypot(width) - width
 }
 
@@ -553,7 +603,7 @@ fn dune_elevation(x: f32, z: f32, seed: u32) -> f32 {
     let ridge = 40.0 * wave * wave * strength;
     let floor = 7.0
         + 3.0 * fbm(x / 900.0, z / 900.0, seed, 3)
-        + 0.5 * fbm(x / 40.0, z / 40.0, seed ^ 0x6d, 3) * detail(x, z, 40.0, CELLS);
+        + 0.5 * fbm(x / 40.0, z / 40.0, seed ^ 0x6d, 3) * detail(x, z, 40.0, DUNE_CELLS);
     let mut height = h.max(floor + ridge.max(0.0));
     // Flat pans where the Tsauchab floods end, with irregular shores; dunes
     // rise straight out of them.
@@ -563,6 +613,97 @@ fn dune_elevation(x: f32, z: f32, seed: u32) -> f32 {
         height = height * flat + DUNE_PAN_LEVEL * (1.0 - flat);
     }
     height.max(0.0) * edge(x, z)
+}
+
+const DUNE_CELLS: usize = 1024;
+
+/// Direction the prevailing wind blows towards (radians east of north). It
+/// drives sand up the windward slopes onto slip faces to the north-east, like
+/// Big Daddy's above Deadvlei. Mirrored by DUNE_WIND in ground.wgsl.
+pub const DUNE_WIND: f32 = 0.61;
+
+/// Small transverse dunes superimposed on the large ones (compound dunes):
+/// sinuous, crescent-segmented crests with a long gentle windward slope and a
+/// short slip face, `wavelength` metres apart. Returns height in metres.
+fn small_dunes(x: f32, z: f32, wavelength: f32, height: f32, seed: u32) -> f32 {
+    let (wx, wz) = (DUNE_WIND.sin(), DUNE_WIND.cos());
+    let along = x * wx + z * wz;
+    let across = x * wz - z * wx;
+    // Crests meander and bend into crescents whose horns point downwind.
+    let warp = 0.9 * wavelength * fbm(x / (4.0 * wavelength), z / (4.0 * wavelength), seed, 3)
+        + 0.25
+            * wavelength
+            * (across / (1.3 * wavelength) + 2.0 * noise(x / 3_000.0, z / 3_000.0, seed ^ 5))
+                .sin()
+                .abs();
+    let phase = (along - warp) / wavelength;
+    let f = phase - phase.floor();
+    // Crest at f = LEE; the slip face drops over the remaining fraction.
+    const LEE: f32 = 0.82;
+    let distance = if f < LEE {
+        (LEE - f) * wavelength
+    } else {
+        (f - LEE) * wavelength
+    };
+    let slope = if f < LEE {
+        height / (LEE * wavelength)
+    } else {
+        height / ((1.0 - LEE) * wavelength)
+    };
+    let crest = (height - slope * rounded(distance, x, z)).max(0.0);
+    // Crest segments of varying height: some crescents die out entirely.
+    let segments = smooth(
+        -0.15,
+        0.45,
+        fbm(
+            across / (2.2 * wavelength) + 3.0 * phase.floor(),
+            along / (6.0 * wavelength),
+            seed ^ 0x2b,
+            2,
+        ) + 0.15,
+    );
+    crest * segments * detail(x, z, 0.5 * wavelength, DUNE_CELLS)
+}
+
+/// Adds the small dunes where the large ones leave gentle ground: windward
+/// flanks and corridors, never on slip faces, the pans or Big Daddy's crest.
+fn superimpose_dunes(heights: &mut [f32], coordinates: &[f32], seed: u32) {
+    let n = coordinates.len();
+    let base = heights.to_vec();
+    for z in 0..n {
+        for x in 0..n {
+            let (px, pz) = (coordinates[x], coordinates[z]);
+            // Steepest one-sided slope: a central difference reads a knife
+            // crest as flat ground.
+            let i = z * n + x;
+            let step = |j: usize, a: usize, b: usize| {
+                ((base[j] - base[i]) / (coordinates[a] - coordinates[b]).abs().max(1e-3)).abs()
+            };
+            let gx = step(z * n + x.saturating_sub(1), x, x.saturating_sub(1)).max(step(
+                z * n + (x + 1).min(n - 1),
+                (x + 1).min(n - 1),
+                x,
+            ));
+            let gz = step(z.saturating_sub(1) * n + x, z, z.saturating_sub(1)).max(step(
+                (z + 1).min(n - 1) * n + x,
+                (z + 1).min(n - 1),
+                z,
+            ));
+            let gentle = 1.0 - smooth(0.12, 0.3, gx.hypot(gz));
+            let mut mask = gentle * smooth(120.0, 400.0, px.hypot(pz)) * edge(px, pz);
+            for [cx, cz, radius] in DUNE_PANS {
+                mask *= smooth(radius + 100.0, radius + 450.0, (px - cx).hypot(pz - cz));
+            }
+            if mask <= 0.0 {
+                continue;
+            }
+            let field = 0.6 + 0.6 * fbm(px / 3_500.0, pz / 3_500.0, seed ^ 0x51, 2);
+            let dunes = small_dunes(px, pz, 260.0, 22.0 * field.clamp(0.2, 1.0), seed ^ 0xd00e)
+                + small_dunes(px, pz, 47.0, 2.2, seed ^ 0x7e11)
+                    * smooth(4_000.0, 1_500.0, px.hypot(pz));
+            heights[z * n + x] += mask * dunes;
+        }
+    }
 }
 
 /// Talus relaxation transports material between neighbouring samples. The
@@ -625,6 +766,9 @@ impl Terrain {
                 }
             })
             .collect();
+        if theme == crate::ground::Theme::Dunes {
+            superimpose_dunes(&mut heights, &coordinates, seed);
+        }
         // Talus erosion suits the gently levelled forest and desert lookouts.
         // Elsewhere the centre rows and columns (0.24 m wide) would collect
         // material into thin ridges running out to the horizon.
@@ -789,15 +933,38 @@ mod tests {
                 assert!((terrain.height(x + 0.001, z) - terrain.height(x - 0.001, z)).abs() < 0.1);
             }
         }
-        // Levelled lookouts keep the eye at its configured height; the dune
-        // sea and crater plain lift it onto the surface.
-        assert_eq!(lookout_height(Theme::Alpine, 6.371e6), 0.0);
+        // The dune crest, crater plain, volcano summit and nunatak lift the
+        // eye onto the surface.
+        assert!(lookout_height(Theme::Alpine, 6.371e6) > 150.0);
         assert!(lookout_height(Theme::Basalt, 6.371e6) > 200.0);
         assert!(lookout_height(Theme::Dunes, 6.371e6) > 300.0);
         assert!(lookout_height(Theme::Craters, 6.371e6) > 20.0);
-        assert!(for_theme(Theme::Alpine).data[BOUNDS_OFFSET + 1] > 1_500.0);
+        let alpine = for_theme(Theme::Alpine);
+        assert!(alpine.data[bounds_offset(alpine.cells) + 1] > 1_500.0);
         assert_eq!(for_theme(Theme::Craters).cells, CRATER_CELLS);
         assert_eq!(for_theme(Theme::Basalt).cells, MAX_CELLS);
+    }
+
+    #[test]
+    fn wgsl_dune_and_ice_materials_mirror_the_terrain_constants() {
+        let shader = include_str!("shaders/ground.wgsl");
+        for line in [
+            format!("const DUNE_WIND: f32 = {DUNE_WIND:?};"),
+            format!("const DUNE_PAN_LEVEL: f32 = {DUNE_PAN_LEVEL:?};"),
+            format!(
+                "var pans = array<vec3<f32>, 2>({});",
+                DUNE_PANS
+                    .map(|[x, z, r]| format!("vec3<f32>({x:?}, {z:?}, {r:?})"))
+                    .join(", ")
+            ),
+            format!("const ICE_FLOW: f32 = {ICE_FLOW:?};"),
+            format!(
+                "const LOOKOUT_HILL: vec2<f32> = vec2<f32>({:?}, {:?});",
+                LOOKOUT_HILL.0, LOOKOUT_HILL.1
+            ),
+        ] {
+            assert!(shader.contains(&line), "ground.wgsl lacks `{line}`");
+        }
     }
 
     #[test]

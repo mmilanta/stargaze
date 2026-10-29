@@ -52,6 +52,64 @@ preserves the original landscape. Switching themes uploads the selected source
 heightfield and invalidates the curved geometry cache, even at the same host
 radius. Both presets use the same GPU buffer. See [the desert level](atacama.md).
 
+## Measured volcano terrain
+
+`camera.ground: basalt` (Level 1) uses the measured 2023 Stromboli survey:
+a 5 m whole-island grid and a nested 1 m summit grid, with surveyed Aeolian
+islands on the horizon. The 2048-cell intersection mesh preserves cliffs and
+geometric shadows; a filtered elevation atlas supplies measured shading
+normals. Charcoal scoria, weathered ash and exposed lava vary with slope and
+pixel footprint. The survey normals supply the surface relief without an
+additional procedural bump layer. See `assets/terrain/README.md` for survey
+attribution and generation details.
+
+## Dune sea
+
+`camera.ground: dunes` (Level 2) stands on Big Daddy above Deadvlei, with
+star dunes on a jittered grid around it. The ground uses the 1024-cell grid,
+and crests round over 2.4 cells rather than 1.5. That keeps them knife-sharp
+but stops the shading terminator stepping from triangle to triangle on
+crests that run diagonally across the grid. After the large dunes are
+generated, a second pass adds compound dunes where they leave gentle ground
+(the steepest one-sided slope stays under ~0.3, so slip faces and crests stay
+clean). These are sinuous transverse ridges 260 m apart and up to 22 m high.
+Near the lookout, 47 m ripples of 2 m sit on top. Both have a long windward
+slope and a short slip face facing the prevailing wind (`DUNE_WIND`,
+north-east, like Big Daddy's) and break into crescent segments. They stay off
+the pans and the summit.
+
+`dune_floor` paints darker, redder plinths and apricot upper dunes. Slip faces
+have paler, freshly avalanched sand in grain-flow tongues running downhill.
+Gentle low ground carries dark heavy-mineral lag, and corridors are pale buff
+gravel with dark pebbles. The pans are white clay with darker damp shores.
+Desiccation cracks there widen and fade with the pixel footprint, so the
+network still greys the clay where single cracks vanish. Wind ripples are a
+normal perturbation: sinuous, asymmetric crests 12 cm apart with forks and
+ends, plus coarser 0.8 m ripples on the corridors. There are none on slip
+faces or pans, and each band fades once a pixel covers it.
+
+## Ice field
+
+`camera.ground: alpine` (Level 3) uses the real Patagonian elevation data on
+the 1024-cell grid. The lookout now stands on a 180 m nunatak with concave
+flanks, so the eye looks straight down onto the ice instead of across it from
+2 m. Ridged crags and broken rock restore the jagged detail the 50 m samples
+round off the granite. Ribs and gullies cut the nunatak without rising above
+its summit. The ice has broad swells and drifts elongated along the flow
+(`ICE_FLOW`, west-south-west).
+
+Crevasses are drawn by `alpine_floor`, not the heightfield: cracks a few
+metres wide alias into dashed blocks on distant cells, while the shader
+antialiases them by pixel footprint at any distance. They are lens-shaped,
+staggered rows across the flow, open where the ice is under tension (in
+patches and round the nunatak's foot), with blue walls fading to darkness and
+bright snow lips. The rest of the ice is wind-packed crust and powder, bare
+blue glacier ice with white fractures, and dirty, rock-strewn ice under the
+mountains. Granite has joints and lichen, with snow on every ledge that holds
+it and wind-scoured outcrops on the nunatak. Sastrugi and drift ridges are a
+three-band normal perturbation stretched along the wind. `ground.wgsl`
+mirrors the wind, pan, flow and nunatak constants; a unit test checks them.
+
 ## References
 
 - Ken Perlin, [Improving Noise (2002)](https://mrl.cs.nyu.edu/~perlin/paper445.pdf):

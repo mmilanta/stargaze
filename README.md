@@ -245,7 +245,7 @@ cargo run --release -- --check-config configs/legacy/halo.yaml
 The menu lists the levels in `configs/` (one per explore ground, numbered in
 play order); the default launch, with or without `--game`, opens the first,
 `configs/1-halo-volcano.yaml`: Calyx and Halo over the volcano ground.
-`configs/3-umbra-valley.yaml` puts the desert valley on Mirador, a tidally locked
+`configs/3-umbra-valley.yaml` puts the ice field on Mirador, a tidally locked
 outer planet with two moons. A compact white star and a much larger ringed giant
 orbit their shared centre; the giant eclipses the star once per simulated day.
 Two inner planets and the moons add frequent transits. Page Up / Page Down move

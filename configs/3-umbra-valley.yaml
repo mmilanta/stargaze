@@ -16,7 +16,7 @@ camera:
   look_at: lucero
   fov_deg: 70
   atmosphere: earthlike
-  ground: desert
+  ground: alpine
 targets: [lucero, umbra, ascua, cobre, nacar, pizarra]
 bodies:
   - id: centre
