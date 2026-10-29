@@ -246,7 +246,6 @@ fn state(scene: crate::sim::Scene, time: f64) -> crate::State {
         last: Instant::now(),
         view_lock: None,
         air: Default::default(),
-        no_ground: false,
     }
 }
 
@@ -260,10 +259,6 @@ fn sphere(center: [f32; 3], radius: f32, color: [f32; 3], emissive: f32) -> Sphe
         ring_plane: [0.0; 4],
         ring_params: [0.0; 4],
         ring_color: [0.0; 4],
-        axis_x: [0.0; 4],
-        axis_y: [0.0; 4],
-        surface_color: [0.0; 4],
-        surface_params: [0.0; 4],
     }
 }
 
