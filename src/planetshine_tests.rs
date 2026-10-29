@@ -222,12 +222,26 @@ fn gpu_calyx_textures_preserve_night_glare() {
     });
     tracer.history = History::default();
     let glow = sample(&device, &queue, &mut tracer, &scene, 16);
+    // Keep every occulting sphere and ring, but switch off Calyx's reflected
+    // radiance. The difference isolates planetshine from stellar twilight.
+    let calyx = state
+        .scene
+        .bodies
+        .iter()
+        .filter(|body| body.kind != crate::sim::BodyKind::Anchor)
+        .position(|body| body.name == "Calyx")
+        .unwrap();
+    let mut dark = state.build_frame(size.0, size.1);
+    dark.bodies[calyx].color = [0.0; 3];
+    dark.bodies[calyx].axis_x[3] = 0.0;
+    let background = sample(&device, &queue, &mut tracer, &dark, 16);
     let peak = glow
         .iter()
-        .map(|p| p[..3].iter().sum::<f32>())
+        .zip(&background)
+        .map(|(lit, black)| (0..3).map(|c| lit[c] - black[c]).sum::<f32>())
         .fold(0.0_f32, f32::max);
     eprintln!(
-        "Calyx night t={}, off-disc air peak={peak}, exposure={exposure}",
+        "Calyx night t={}, off-disc Calyx contribution={peak}, exposure={exposure}",
         state.sim_time
     );
     assert!(pixels.iter().flatten().all(|v| v.is_finite() && *v >= 0.0));
