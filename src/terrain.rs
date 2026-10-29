@@ -2,6 +2,10 @@
 //! and a min/max quadtree over a triangulated heightfield. See docs/terrain.md.
 use std::sync::OnceLock;
 
+#[path = "volcano.rs"]
+mod volcano;
+pub use volcano::detail as basalt_detail;
+
 /// Default grid: cells per side. Grounds may use finer grids (`cells`).
 pub const CELLS: usize = 512;
 #[cfg(test)]
@@ -13,28 +17,29 @@ pub const NODE_COUNT: usize = node_count(CELLS);
 #[cfg(test)]
 pub const BOUNDS_OFFSET: usize = bounds_offset(CELLS);
 /// The finest grid any ground uses; the GPU buffer is sized for it.
-pub const MAX_CELLS: usize = 1024;
+pub const MAX_CELLS: usize = 2048;
 
 pub const fn node_count(cells: usize) -> usize {
     let leaves = cells / LEAF;
     (4 * leaves * leaves - 1) / 3
 }
 pub const fn bounds_offset(cells: usize) -> usize {
-    (cells + 1) * (cells + 1) * 3
+    (cells + 1) * (cells + 1) * if cells > 1024 { 1 } else { 3 }
 }
 
-/// Grid cells per side for a ground. The airless crater field has no
-/// atmosphere to pay for, so it spends the time on a grid twice as fine.
+/// Grid cells per side. Crater rims and measured volcanic cliffs need the
+/// finer grid to preserve their silhouettes and geometric shadowing.
 pub fn cells(theme: crate::ground::Theme) -> usize {
-    if theme == crate::ground::Theme::Craters {
-        MAX_CELLS
-    } else {
-        CELLS
+    match theme {
+        crate::ground::Theme::Basalt => MAX_CELLS,
+        crate::ground::Theme::Craters => CRATER_CELLS,
+        _ => CELLS,
     }
 }
 /// Source heights/derivatives/bounds, plus cached host-local bounds and vertices/normals.
-pub const GPU_FLOATS: usize =
-    bounds_offset(MAX_CELLS) + node_count(MAX_CELLS) * 8 + (MAX_CELLS + 1) * (MAX_CELLS + 1) * 6;
+pub const DETAIL_OFFSET: usize =
+    bounds_offset(MAX_CELLS) + node_count(MAX_CELLS) * 8 + (MAX_CELLS + 1) * (MAX_CELLS + 1) * 2;
+pub const GPU_FLOATS: usize = DETAIL_OFFSET + volcano::DETAIL_FLOATS;
 const SEED: u32 = 0x7433_37a9;
 
 pub struct Terrain {
@@ -63,12 +68,6 @@ pub fn lookout_height(theme: crate::ground::Theme, radius: f64) -> f64 {
 
 /// Quadratic spacing gives sub-metre geometry at the observatory, with
 /// gradually larger cells towards the edge. Every neighbour shares vertices.
-#[cfg(test)]
-pub fn coordinate(i: usize) -> f32 {
-    coordinate_in(i, CELLS)
-}
-
-/// `coordinate` for a grid of `cells` per side.
 pub fn coordinate_in(i: usize, cells: usize) -> f32 {
     let u = 2.0 * i as f32 / cells as f32 - 1.0;
     u * u.abs() * EXTENT
@@ -229,7 +228,7 @@ fn craters(x: f32, z: f32, cell: f32, seed: u32) -> f32 {
     sum
 }
 
-const CRATER_CELLS: usize = MAX_CELLS;
+const CRATER_CELLS: usize = 1024;
 
 fn crater_elevation(x: f32, z: f32, seed: u32) -> f32 {
     // A raised regolith plain lets bowls dig below its level; the observer
@@ -332,41 +331,47 @@ fn aeolian(index: usize, x: f32, z: f32) -> f32 {
         * (1.0 - smooth(reach - 300.0, reach, x.abs().max(z.abs())))
 }
 
-/// Summit (island-local x, z), summit height and coastline radius of the
-/// three conical islands in AEOLIAN (Stromboli, Alicudi, Filicudi), for
-/// blending each with an ideal cone.
-const AEOLIAN_CONES: [(f32, f32, f32, f32); 3] = [
-    (-12.0, -612.0, 894.0, 2_080.0),
-    (-138.0, 262.0, 651.0, 1_360.0),
-    (-362.0, 462.0, 745.0, 1_820.0),
-];
+/// INGV's 2023 airborne LiDAR survey, downsampled from 50 cm to a 5 m
+/// whole-island grid and a nested 1 m summit grid. Decimetres, little-endian
+/// u16; the origin is the actual Pizzo summit. No synthetic cone or crater.
+/// See assets/terrain/README.md and scripts/stromboli_dem.py.
+static STROMBOLI: &[u8] = include_bytes!("../assets/terrain/stromboli-2023.u16");
+const STROMBOLI_SAMPLES: usize = 1281;
+const SUMMIT_SAMPLES: usize = 1025;
+
+fn stromboli(x: f32, z: f32) -> f32 {
+    let reach = x.abs().max(z.abs());
+    if reach >= 3200.0 {
+        return 0.0;
+    }
+    let coarse = dem_sample(
+        STROMBOLI,
+        0,
+        STROMBOLI_SAMPLES,
+        x / 5.0 + 640.0,
+        z / 5.0 + 640.0,
+    );
+    let fine_z = z - 250.0;
+    let fine_reach = x.abs().max(fine_z.abs());
+    if fine_reach >= 512.0 {
+        return coarse;
+    }
+    let fine = dem_sample(
+        STROMBOLI,
+        STROMBOLI_SAMPLES * STROMBOLI_SAMPLES,
+        SUMMIT_SAMPLES,
+        x + 512.0,
+        fine_z + 512.0,
+    );
+    coarse + (fine - coarse) * (1.0 - smooth(440.0, 512.0, fine_reach))
+}
 
 fn basalt_elevation(x: f32, z: f32, seed: u32) -> f32 {
-    // Real Aeolian volcanoes rising from a sea of dark lava rock instead of
-    // water. The observer stands on the summit of Stromboli (~900 m), on the
-    // south rim of a small summit crater, with an open view all round. Far
-    // out on the horizon in every direction stand eight conical islands of
-    // different sizes: real Stromboli, Alicudi and Filicudi, turned and
-    // scaled, each blended with an ideal cone so it reads as a volcano while
-    // keeping its gullies and irregularities.
-    let mut volcanoes = aeolian(0, x - 12.0, z - 612.0);
-    // The small summit crater: a bowl with a raised rim through the lookout.
-    let u = x.hypot(z - 120.0) / 120.0;
-    volcanoes += smooth_min(
-        45.0 * (u * u - 1.0) + 6.0 * u.powi(4),
-        6.0 * u.max(1e-3).powi(-3) * (1.0 - smooth(2.0, 4.0, u)),
-        2.0,
-    );
-    for (index, bearing, distance, turn, size) in [
-        (1_usize, 8.0_f32, 12_300.0_f32, 0.0_f32, 1.2_f32),
-        (2, 52.0, 12_800.0, -40.0, 1.0),
-        (0, 95.0, 11_800.0, 160.0, 0.85),
-        (1, 138.0, 13_200.0, 90.0, 0.8),
-        (2, 182.0, 12_000.0, 30.0, 1.15),
-        (0, 228.0, 13_000.0, 300.0, 0.9),
-        (1, 270.0, 11_600.0, 200.0, 1.05),
-        (2, 318.0, 12_600.0, 120.0, 0.95),
-    ] {
+    // The real Pizzo summit overlooks the active vent complex to the NNW.
+    // Reuse surveyed islands on the horizon, without blending their gullies,
+    // asymmetric ridges and collapse scars back into mathematical cones.
+    let mut volcanoes = stromboli(x, z);
+    for (index, bearing, distance, turn, size) in volcano::SITES {
         let b = bearing.to_radians();
         let (dx, dz) = (
             (x - distance * b.sin()) / size,
@@ -374,16 +379,18 @@ fn basalt_elevation(x: f32, z: f32, seed: u32) -> f32 {
         );
         let (c, s) = (turn.to_radians().cos(), turn.to_radians().sin());
         let (lx, lz) = (c * dx - s * dz, s * dx + c * dz);
-        let (sx, sz, height, radius) = AEOLIAN_CONES[index];
-        let cone = height * (1.0 - (lx - sx).hypot(lz - sz) / radius).max(0.0).powf(1.2);
-        let real = aeolian(index, lx, lz);
-        volcanoes = volcanoes.max(size * (real + 0.6 * (cone - real)));
+        let real = if index == 0 {
+            stromboli(lx, lz)
+        } else {
+            aeolian(index, lx, lz)
+        };
+        volcanoes = volcanoes.max(size * real);
     }
     // The lava sea: flat at large scale, blocky and broken up close by.
-    let sea = 20.0
-        + 4.0 * fbm(x / 600.0, z / 600.0, seed, 3)
-        + 2.5 * fbm(x / 45.0, z / 45.0, seed ^ 0xbeef, 3).abs() * detail(x, z, 45.0, CELLS)
-        + 0.8 * fbm(x / 9.0, z / 9.0, seed ^ 0x0f, 2) * detail(x, z, 9.0, CELLS);
+    let rough = 4.0 * fbm(x / 600.0, z / 600.0, seed, 3)
+        + 2.5 * fbm(x / 45.0, z / 45.0, seed ^ 0xbeef, 3).abs() * detail(x, z, 45.0, MAX_CELLS)
+        + 0.8 * fbm(x / 9.0, z / 9.0, seed ^ 0x0f, 2) * detail(x, z, 9.0, MAX_CELLS);
+    let sea = 20.0 + rough * (1.0 - smooth(20.0, 100.0, volcanoes));
     // Fade only over the last kilometre, so the horizon cones stay whole.
     let fade = 1.0 - smooth(EXTENT - 1_000.0, EXTENT, x.abs().max(z.abs()));
     (sea + volcanoes).max(0.0) * fade
@@ -630,7 +637,9 @@ impl Terrain {
         let offset = bounds_offset(cells);
         let mut data = vec![0.0; offset + 2 * node_count(cells)];
         data[..width * width].copy_from_slice(&heights);
-        for z in 0..width {
+        // Fine grids reconstruct vertex derivatives in the one-time GPU
+        // cache pass, keeping the volcano mesh and atlas below 128 MiB.
+        for z in 0..if cells > 1024 { 0 } else { width } {
             for x in 0..width {
                 let i = z * width + x;
                 let (x0, x1) = (x.saturating_sub(1), (x + 1).min(cells));
@@ -787,7 +796,8 @@ mod tests {
         assert!(lookout_height(Theme::Dunes, 6.371e6) > 300.0);
         assert!(lookout_height(Theme::Craters, 6.371e6) > 20.0);
         assert!(for_theme(Theme::Alpine).data[BOUNDS_OFFSET + 1] > 1_500.0);
-        assert_eq!(for_theme(Theme::Craters).cells, MAX_CELLS);
+        assert_eq!(for_theme(Theme::Craters).cells, CRATER_CELLS);
+        assert_eq!(for_theme(Theme::Basalt).cells, MAX_CELLS);
     }
 
     #[test]

@@ -332,19 +332,22 @@ fn alpine_floor(p: vec3<f32>, distance: f32, normal: vec3<f32>) -> vec3<f32> {
     color *= 1.0 + (grain - 0.5) * 0.1 * detail;
     return color;
 }
-// Black basaltic sand and rough lava, with rusty oxidised patches.
+// Charcoal scoria, weathered ash and exposed lava. Broad variation remains
+// visible on distant slopes; gravel and pores are filtered by pixel footprint.
 fn basalt_floor(p: vec3<f32>, distance: f32, normal: vec3<f32>) -> vec3<f32> {
-    let broad = vnoise(p * 0.003 + vec3<f32>(5.0, 9.0, 2.0));
-    let middle = vnoise(p * 0.12);
-    let grain = vnoise(p * 5.0);
     let footprint = distance * 2.0 * settings.g.cam_forward.w / max(settings.g.viewport.y, 1.0);
-    let detail = 1.0 - smoothstep(0.025, 0.2, footprint);
-    let sand = vec3<f32>(0.030, 0.029, 0.029) * (0.85 + 0.3 * middle);
-    let rust = vec3<f32>(0.075, 0.04, 0.028);
-    var color = mix(sand, rust, smoothstep(0.8, 0.95, broad) * 0.25);
-    // Glassy, rougher flows on steeper ground read slightly lighter.
-    color *= 1.0 + 0.4 * smoothstep(0.1, 0.4, 1.0 - max(normal.y, 0.0));
-    color *= 1.0 + (grain - 0.5) * 0.4 * detail;
+    let broad = fbm(p * 0.006 + vec3<f32>(5.0, 9.0, 2.0), 4);
+    let weather = fbm(p * 0.017 + vec3<f32>(23.0, 7.0, 11.0), 3);
+    let middle = mix(fbm(p * 0.08, 3), 0.5, smoothstep(1.0, 12.0, footprint));
+    let ash = mix(vec3<f32>(0.065, 0.060, 0.052), vec3<f32>(0.14, 0.12, 0.095), broad);
+    var rock = mix(vec3<f32>(0.028, 0.030, 0.031), vec3<f32>(0.07, 0.064, 0.054), middle);
+    rock = mix(rock, vec3<f32>(0.16, 0.073, 0.037), smoothstep(0.48, 0.68, weather) * 0.45);
+    let slope = 1.0 - max(normal.y, 0.0);
+    let loose = 1.0 - smoothstep(0.14, 0.43, slope + 0.12 * (weather - 0.5));
+    var color = mix(rock, ash, loose);
+    color *= 0.86 + 0.28 * middle;
+    let grain = vnoise(p * 5.0);
+    color *= 1.0 + (grain - 0.5) * 0.28 * (1.0 - smoothstep(0.025, 0.2, footprint));
     return color;
 }
 // Namib sand: deep apricot-red iron-stained grains with gentle mottling.
@@ -396,6 +399,11 @@ fn landscape_shading_normal(ray: Ray, hit: Hit) -> vec3<f32> {
     if (hit.index != LOCAL_BASE && hit.index != TERRAIN_ID) { return hit.normal; }
     let p = landscape_point(ray,hit);
     let distance = hit.distance*METRES_PER_AU;
+    if (ground_theme() == 4u && hit.index == TERRAIN_ID) {
+        // The survey already supplies surface detail. Overlaying the generic
+        // lattice bump turns grazing sunlight into a repeating brick pattern.
+        return from_ground(volcano_normal(p, distance, to_ground(hit.normal)));
+    }
     let strength = 0.11*(1.0-smoothstep(8.0,65.0,distance));
     let dx = vnoise((p+vec3<f32>(0.025,0.0,0.0))*6.0)-vnoise((p-vec3<f32>(0.025,0.0,0.0))*6.0);
     let dz = vnoise((p+vec3<f32>(0.0,0.0,0.025))*6.0)-vnoise((p-vec3<f32>(0.0,0.0,0.025))*6.0);
