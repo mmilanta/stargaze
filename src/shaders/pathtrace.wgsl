@@ -295,7 +295,9 @@ fn hash31(p: vec3<f32>) -> f32 {
 }
 fn vnoise(p: vec3<f32>) -> f32 {
     let i = floor(p);
-    let f = fract(p);
+    // Keep the fraction tied to the same rounded cell. A separate fract(p)
+    // disagrees near integer planes on RADV, exposing the ground mesh as a grid.
+    let f = p - i;
     let u = f * f * (3.0 - 2.0 * f);
     let a = mix(hash31(i), hash31(i + vec3<f32>(1.0, 0.0, 0.0)), u.x);
     let b = mix(hash31(i + vec3<f32>(0.0, 1.0, 0.0)), hash31(i + vec3<f32>(1.0, 1.0, 0.0)), u.x);
