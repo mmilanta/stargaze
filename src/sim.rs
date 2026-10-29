@@ -327,6 +327,8 @@ pub struct Scene {
     pub observer_lon_deg: f64,
     pub observer_height_m: f64,
     pub initial_time_days: Option<f64>,
+    /// Fixed duration for day jumps; None derives a day from solar rotation.
+    pub day_length_days: Option<f64>,
 }
 
 impl Scene {
@@ -365,6 +367,9 @@ impl Scene {
     /// select a partial libration. This includes eccentric orbits, tilted and
     /// retrograde spins, and the host moon's motion about its planet.
     pub fn step_local_day(&self, time: f64, forward: bool) -> Option<f64> {
+        if let Some(days) = self.day_length_days {
+            return Some(time + if forward { days } else { -days });
+        }
         use std::f64::consts::{PI, TAU};
         let host = self.body(self.host);
         let spin = if host.tidally_locked {
@@ -771,6 +776,7 @@ pub fn binary_scene() -> Scene {
         observer_lon_deg: 0.0,
         observer_height_m: 2.0,
         initial_time_days: None,
+        day_length_days: None,
     }
 }
 
