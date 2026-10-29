@@ -1,6 +1,163 @@
 use super::*;
 
 #[test]
+#[ignore = "requires a GPU; reproduce the screenshot's volcanic ground view"]
+fn gpu_volcano_ground_artifact() {
+    use super::surfaces::{read_exposure, save_surface};
+    let (device, queue) = gpu();
+    let mut state = crate::State::with_scene(
+        crate::config::parse(include_str!("../configs/1-halo-volcano.yaml")).unwrap(),
+    );
+    state.sim_time = 15.03;
+    state.observer.fov_y = 90_f64.to_radians();
+    state.observer.alt = -25_f64.to_radians();
+    let size = (640, 360);
+    let mut tracer = PathTracer::new_with_guided_ground(
+        &device,
+        wgpu::TextureFormat::Rgba8UnormSrgb,
+        size,
+        &[],
+        Options {
+            samples_per_frame: 4,
+            max_bounces: 8,
+            sample_limit: 64,
+            auto_exposure: true,
+            ..test_options()
+        },
+        true,
+    );
+    for az in [0_f64, 90.0, 180.0, 270.0] {
+        state.observer.az = az.to_radians();
+        let frame = state.build_frame(size.0, size.1);
+        let pixels = sample(&device, &queue, &mut tracer, &frame, 80);
+        let exposure = read_exposure(&device, &queue, &tracer);
+        save_surface(&format!("volcano-ground-{az}"), size, &pixels, exposure);
+        assert!(pixels.iter().flatten().all(|x| x.is_finite() && *x >= 0.0));
+    }
+    // Basalt shading must follow the measured elevation normals. A second
+    // procedural bump layer used to add a visible, repeating lattice to them.
+    let hook = "sum += trace(Ray(vec3<f32>(0.0), direction, MISS), &rng, &backdrop);";
+    assert_eq!(TRACE_SHADER.matches(hook).count(), 1);
+    let source = TRACE_SHADER.replace(
+        hook,
+        r#"
+        let ray = Ray(vec3<f32>(0.0), direction, MISS);
+        let hit = closest_hit(ray);
+        if (hit.index == TERRAIN_ID) {
+            let point = landscape_point(ray, hit);
+            let measured = from_ground(volcano_normal(point,
+                hit.distance * METRES_PER_AU, to_ground(hit.normal)));
+            let shaded = landscape_shading_normal(ray, hit);
+            sum += vec4<f32>(length(shaded - measured), 1.0, 0.0, 0.0);
+        }
+    "#,
+    );
+    let shader = device.create_shader_module(wgpu::ShaderModuleDescriptor {
+        label: Some("volcano measured normals"),
+        source: wgpu::ShaderSource::Wgsl(source.into()),
+    });
+    let layout = device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
+        label: None,
+        bind_group_layouts: &[Some(&tracer.trace_layout)],
+        immediate_size: 0,
+    });
+    tracer.compute = device.create_compute_pipeline(&wgpu::ComputePipelineDescriptor {
+        label: Some("volcano measured normals"),
+        layout: Some(&layout),
+        module: &shader,
+        entry_point: Some("main"),
+        compilation_options: Default::default(),
+        cache: None,
+    });
+    tracer.history = History::default();
+    let frame = state.build_frame(size.0, size.1);
+    let normals = sample(&device, &queue, &mut tracer, &frame, 1);
+    assert!(normals.iter().filter(|p| p[1] > 0.5).count() > normals.len() / 2);
+    let error = normals.iter().map(|p| p[0]).fold(0.0_f32, f32::max);
+    assert!(
+        error < 1e-5,
+        "procedural bumps override survey normals: {error}"
+    );
+}
+
+#[test]
+#[ignore = "requires a GPU; volcano terrain views at settled automatic exposure"]
+fn gpu_volcano_terrain_preview() {
+    use super::surfaces::{read_exposure, save_surface};
+    let (device, queue) = gpu();
+    let width = std::env::var("STARGAZE_TERRAIN_WIDTH")
+        .ok()
+        .and_then(|s| s.parse::<u32>().ok())
+        .unwrap_or(960)
+        .clamp(64, 1920);
+    let size = (width, width * 9 / 16);
+    let samples = std::env::var("STARGAZE_TERRAIN_SAMPLES")
+        .ok()
+        .and_then(|s| s.parse::<u32>().ok())
+        .unwrap_or(64)
+        .clamp(1, 256);
+    let scene = crate::config::parse(include_str!("../configs/1-halo-volcano.yaml")).unwrap();
+    let mut state = crate::State::with_scene(scene);
+    for step in 0..4000 {
+        state.sim_time = step as f64 * 0.005;
+        let positions = state.scene.positions(state.sim_time);
+        let view = state
+            .observer
+            .frame(&state.scene, state.sim_time, &positions);
+        if (0.35..0.38).contains(&view.sun_altitude) {
+            break;
+        }
+    }
+    eprintln!("volcano preview time: {}", state.sim_time);
+    state.ground_view();
+    let mut tracer = PathTracer::new_with_guided_ground(
+        &device,
+        wgpu::TextureFormat::Rgba8UnormSrgb,
+        size,
+        &[],
+        Options {
+            samples_per_frame: 4,
+            max_bounces: 4,
+            sample_limit: samples,
+            auto_exposure: true,
+            ..test_options()
+        },
+        true,
+    );
+    for (name, azimuth, altitude, fov) in [
+        ("crater", 0.0_f64, -14.0_f64, 65.0_f64),
+        ("horizon", 95.0, -3.0, 30.0),
+        ("flanks", 315.0, -16.0, 60.0),
+    ] {
+        state.observer.az = azimuth.to_radians();
+        state.observer.alt = altitude.to_radians();
+        state.observer.fov_y = fov.to_radians();
+        let scene = state.build_frame(size.0, size.1);
+        let start = std::time::Instant::now();
+        let pixels = sample(
+            &device,
+            &queue,
+            &mut tracer,
+            &scene,
+            samples.div_ceil(4) as usize + 64,
+        );
+        assert!(pixels.iter().flatten().all(|v| v.is_finite() && *v >= 0.0));
+        let exposure = read_exposure(&device, &queue, &tracer);
+        eprintln!("volcano {name}: {:?}, exposure {exposure}", start.elapsed());
+        save_surface(&format!("volcano-{name}"), size, &pixels, exposure);
+    }
+    if let Ok(dir) = std::env::var("STARGAZE_TEST_IMAGE_DIR") {
+        let terrain = crate::terrain::for_theme(crate::ground::Theme::Basalt);
+        let width = terrain.cells + 1;
+        std::fs::write(
+            std::path::Path::new(&dir).join("heightfield.f32"),
+            bytemuck::cast_slice(&terrain.data[..width * width]),
+        )
+        .unwrap();
+    }
+}
+
+#[test]
 #[ignore = "requires GPU; switching ground themes must rebuild terrain and reset history"]
 fn gpu_ground_theme_switch() {
     let (device, queue) = gpu();
@@ -522,6 +679,16 @@ fn gpu_distant_hills_and_rocks_occlude_the_sky() {
 #[test]
 #[ignore = "requires a GPU; exact heightfield traversal versus brute-force triangles"]
 fn gpu_heightfield_matches_exhaustive_triangles() {
+    heightfield_oracle(crate::ground::Theme::Forest, 10);
+}
+
+#[test]
+#[ignore = "requires a GPU; fine volcano mesh versus exhaustive f64 triangles"]
+fn gpu_volcano_heightfield_matches_exhaustive_triangles() {
+    heightfield_oracle(crate::ground::Theme::Basalt, 6);
+}
+
+fn heightfield_oracle(theme: crate::ground::Theme, ray_limit: usize) {
     use glam::DVec3;
     let (device, queue) = gpu();
     let shader = device.create_shader_module(wgpu::ShaderModuleDescriptor {
@@ -557,7 +724,8 @@ fn gpu_heightfield_matches_exhaustive_triangles() {
         compilation_options: Default::default(),
         cache: None,
     });
-    let terrain = crate::terrain::cached();
+    let terrain = crate::terrain::for_theme(theme);
+    let width = terrain.cells + 1;
     let mut landscape = vec![0.0_f32; crate::ground::CAPACITY * 12 + crate::ground::SKY_TEXELS * 4];
     landscape.extend_from_slice(&terrain.data);
     landscape.resize(
@@ -604,13 +772,21 @@ fn gpu_heightfield_matches_exhaustive_triangles() {
             ([16_000.0, 100.0, 0.0], [0.0, -1.0, 0.0]),
             ([16_100.0, 100.0, 0.0], [0.0, -1.0, 0.0]),
             ([0.0, 0.1, 0.0], [0.5, -0.01, -1.0]),
-        ] {
+        ]
+        .into_iter()
+        .take(ray_limit)
+        {
+            let mut o = o;
+            if theme == crate::ground::Theme::Basalt {
+                o[1] += terrain.height(o[0], o[2]);
+            }
             let o = glam::Vec3::from_array(o) * scale;
             let d = glam::Vec3::from_array(d).normalize();
             rays.extend_from_slice(&[o.extend(0.0).to_array(), d.extend(0.0).to_array(), [0.0; 4]]);
         }
         let mut settings = Settings::zeroed();
         settings.globals.ground_up[3] = radius;
+        settings.globals.ground_counts[2] = theme as u32 | (terrain.cells.trailing_zeros() << 8);
         let uniform = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
             label: None,
             contents: bytemuck::bytes_of(&settings),
@@ -631,6 +807,10 @@ fn gpu_heightfield_matches_exhaustive_triangles() {
             label: None,
             layout: &pipeline.get_bind_group_layout(0),
             entries: &[
+                wgpu::BindGroupEntry {
+                    binding: 0,
+                    resource: uniform.as_entire_binding(),
+                },
                 wgpu::BindGroupEntry {
                     binding: 5,
                     resource: ground.as_entire_binding(),
@@ -660,7 +840,7 @@ fn gpu_heightfield_matches_exhaustive_triangles() {
             let mut pass = encoder.begin_compute_pass(&Default::default());
             pass.set_pipeline(&cache_pipeline);
             pass.set_bind_group(0, &cache_group, &[]);
-            pass.dispatch_workgroups((crate::terrain::WIDTH as u32).pow(2).div_ceil(64), 1, 1);
+            pass.dispatch_workgroups((width as u32).div_ceil(64), width as u32, 1);
         }
 
         {
@@ -679,11 +859,10 @@ fn gpu_heightfield_matches_exhaustive_triangles() {
         receive.recv().unwrap().unwrap();
         let mapping = readback.slice(..).get_mapped_range().unwrap();
         let results: &[[f32; 4]] = bytemuck::cast_slice(&mapping);
-        let width = crate::terrain::WIDTH;
         let vertices: Vec<DVec3> = (0..width * width)
             .map(|i| {
-                let x = (crate::terrain::coordinate(i % width) * scale) as f64;
-                let z = (crate::terrain::coordinate(i / width) * scale) as f64;
+                let x = (crate::terrain::coordinate_in(i % width, terrain.cells) * scale) as f64;
+                let z = (crate::terrain::coordinate_in(i / width, terrain.cells) * scale) as f64;
                 let r = radius as f64;
                 let curvature = -(x * x + z * z) / (r + (r * r - x * x - z * z).sqrt());
                 DVec3::new(x, terrain.data[i] as f64 * scale as f64 + curvature, z)
