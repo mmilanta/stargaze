@@ -26,6 +26,8 @@ const TRACE_SHADER: &str = concat!(
     "\n",
     include_str!("shaders/terrain.wgsl"),
     "\n",
+    include_str!("shaders/volcano.wgsl"),
+    "\n",
     include_str!("shaders/forest.wgsl"),
 );
 const HISTOGRAM_BINS: usize = 256;
@@ -785,6 +787,13 @@ impl PathTracer {
                     offset as u64,
                     bytemuck::cast_slice(&crate::terrain::for_theme(theme).data),
                 );
+                if theme == crate::ground::Theme::Basalt {
+                    queue.write_buffer(
+                        &self.ground,
+                        (offset + crate::terrain::DETAIL_OFFSET * 4) as u64,
+                        bytemuck::cast_slice(crate::terrain::basalt_detail()),
+                    );
+                }
                 self.terrain_theme = theme;
                 self.terrain_radius = None;
             }
@@ -796,7 +805,9 @@ impl PathTracer {
                 pass.set_pipeline(&self.terrain_geometry);
                 pass.set_bind_group(0, &self.trace_group, &[]);
                 let width = crate::terrain::cells(theme) as u32 + 1;
-                pass.dispatch_workgroups(width.pow(2).div_ceil(64), 1, 1);
+                // Dispatch rows separately: a 2049² grid exceeds the 65535
+                // workgroup limit when flattened into a single dimension.
+                pass.dispatch_workgroups(width.div_ceil(64), width, 1);
                 self.terrain_radius = Some(radius);
             }
             if self.history.samples == 0 {
