@@ -121,6 +121,7 @@ pub fn install(device: &wgpu::Device, tracer: &mut PathTracer, variant: &str) {
         })
     };
     tracer.compute = pipeline("main");
+    tracer.camera_air_pipeline = pipeline("integrate_camera_air");
     tracer.sky_light = pipeline("cache_surface_sky");
 }
 

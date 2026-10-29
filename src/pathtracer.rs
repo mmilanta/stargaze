@@ -17,6 +17,7 @@ use crate::renderer::{Frame, Globals, Sphere};
 use crate::stars::{self, CatalogueStar};
 
 const BODY_CAPACITY: usize = 256;
+const MAX_BATCH_SAMPLES: usize = 64;
 const TRACE_SHADER: &str = concat!(
     include_str!("shaders/pathtrace.wgsl"),
     "\n",
@@ -180,6 +181,7 @@ impl History {
 pub struct PathTracer {
     compute: wgpu::ComputePipeline,
     sky_light: wgpu::ComputePipeline,
+    camera_air_pipeline: wgpu::ComputePipeline,
     terrain_geometry: wgpu::ComputePipeline,
     terrain_radius: Option<u32>,
     terrain_theme: crate::ground::Theme,
@@ -187,6 +189,9 @@ pub struct PathTracer {
     trace_layout: wgpu::BindGroupLayout,
     display_layout: wgpu::BindGroupLayout,
     trace_group: wgpu::BindGroup,
+    sample_groups: Vec<wgpu::BindGroup>,
+    settings_stride: u64,
+    camera_air: wgpu::Buffer,
     display_group: wgpu::BindGroup,
     settings: wgpu::Buffer,
     bodies: wgpu::Buffer,
@@ -231,6 +236,14 @@ fn group(
     layout: &wgpu::BindGroupLayout,
     buffers: &[&wgpu::Buffer],
 ) -> wgpu::BindGroup {
+    group_at(device, layout, buffers, 0)
+}
+fn group_at(
+    device: &wgpu::Device,
+    layout: &wgpu::BindGroupLayout,
+    buffers: &[&wgpu::Buffer],
+    settings_offset: u64,
+) -> wgpu::BindGroup {
     device.create_bind_group(&wgpu::BindGroupDescriptor {
         label: Some("pathtracer-bind-group"),
         layout,
@@ -239,7 +252,15 @@ fn group(
             .enumerate()
             .map(|(i, buffer)| wgpu::BindGroupEntry {
                 binding: i as u32,
-                resource: buffer.as_entire_binding(),
+                resource: if i == 0 {
+                    wgpu::BindingResource::Buffer(wgpu::BufferBinding {
+                        buffer,
+                        offset: settings_offset,
+                        size: wgpu::BufferSize::new(std::mem::size_of::<Settings>() as u64),
+                    })
+                } else {
+                    buffer.as_entire_binding()
+                },
             })
             .collect::<Vec<_>>(),
     })
@@ -329,6 +350,11 @@ impl PathTracer {
                     wgpu::BufferBindingType::Storage { read_only: false },
                     wgpu::ShaderStages::COMPUTE,
                 ),
+                buffer_entry(
+                    8,
+                    wgpu::BufferBindingType::Storage { read_only: false },
+                    wgpu::ShaderStages::COMPUTE,
+                ),
             ],
         });
         let display_layout = device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
@@ -404,6 +430,15 @@ impl PathTracer {
             compilation_options: Default::default(),
             cache: None,
         });
+        let camera_air_pipeline =
+            device.create_compute_pipeline(&wgpu::ComputePipelineDescriptor {
+                label: Some("camera-air-pipeline"),
+                layout: Some(&compute_layout),
+                module: &shader,
+                entry_point: Some("integrate_camera_air"),
+                compilation_options: Default::default(),
+                cache: None,
+            });
         let terrain_geometry = device.create_compute_pipeline(&wgpu::ComputePipelineDescriptor {
             label: Some("terrain-geometry-cache"),
             layout: Some(&compute_layout),
@@ -480,9 +515,12 @@ impl PathTracer {
             compilation_options: Default::default(),
             cache: None,
         });
+        let settings_stride = (std::mem::size_of::<Settings>() as u64).next_multiple_of(u64::from(
+            device.limits().min_uniform_buffer_offset_alignment,
+        ));
         let settings = device.create_buffer(&wgpu::BufferDescriptor {
             label: Some("pathtrace-settings"),
-            size: std::mem::size_of::<Settings>() as u64,
+            size: settings_stride * (MAX_BATCH_SAMPLES as u64 + 1),
             usage: wgpu::BufferUsages::UNIFORM | wgpu::BufferUsages::COPY_DST,
             mapped_at_creation: false,
         });
@@ -538,6 +576,7 @@ impl PathTracer {
                 | wgpu::BufferUsages::COPY_SRC,
             mapped_at_creation: false,
         });
+        let camera_air = accumulation(device, dimensions);
         let backdrop_accumulation = accumulation(device, dimensions);
         let accumulation = accumulation(device, dimensions);
         let trace_group = group(
@@ -552,8 +591,29 @@ impl PathTracer {
                 &ground,
                 &milky_way,
                 &backdrop_accumulation,
+                &camera_air,
             ],
         );
+        let sample_groups = (1..=MAX_BATCH_SAMPLES)
+            .map(|sample| {
+                group_at(
+                    device,
+                    &trace_layout,
+                    &[
+                        &settings,
+                        &bodies,
+                        &catalogue,
+                        &cells,
+                        &accumulation,
+                        &ground,
+                        &milky_way,
+                        &backdrop_accumulation,
+                        &camera_air,
+                    ],
+                    sample as u64 * settings_stride,
+                )
+            })
+            .collect();
         let display_group = group(
             device,
             &display_layout,
@@ -567,6 +627,7 @@ impl PathTracer {
         Self {
             compute,
             sky_light,
+            camera_air_pipeline,
             terrain_geometry,
             terrain_radius: None,
             terrain_theme: crate::ground::Theme::Forest,
@@ -574,6 +635,9 @@ impl PathTracer {
             trace_layout,
             display_layout,
             trace_group,
+            sample_groups,
+            settings_stride,
+            camera_air,
             display_group,
             settings,
             bodies,
@@ -602,6 +666,7 @@ impl PathTracer {
             return;
         }
         self.dimensions = dimensions;
+        self.camera_air = accumulation(device, dimensions);
         self.accumulation = accumulation(device, dimensions);
         self.backdrop_accumulation = accumulation(device, dimensions);
         self.trace_group = group(
@@ -616,8 +681,29 @@ impl PathTracer {
                 &self.ground,
                 &self.milky_way,
                 &self.backdrop_accumulation,
+                &self.camera_air,
             ],
         );
+        self.sample_groups = (1..=MAX_BATCH_SAMPLES)
+            .map(|sample| {
+                group_at(
+                    device,
+                    &self.trace_layout,
+                    &[
+                        &self.settings,
+                        &self.bodies,
+                        &self.catalogue,
+                        &self.cells,
+                        &self.accumulation,
+                        &self.ground,
+                        &self.milky_way,
+                        &self.backdrop_accumulation,
+                        &self.camera_air,
+                    ],
+                    sample as u64 * self.settings_stride,
+                )
+            })
+            .collect();
         self.display_group = group(
             device,
             &self.display_layout,
@@ -699,11 +785,15 @@ impl PathTracer {
         assert_eq!(frame.globals.ground_counts[0] as usize, frame.ground.len());
         self.history.update(frame, self.options);
         // Avoid counter wrap and loss of integer resolution in f32 weights.
-        let count = self.options.samples_per_frame.min(
-            self.options
-                .sample_limit
-                .saturating_sub(self.history.samples),
-        );
+        let count = self
+            .options
+            .samples_per_frame
+            .min(MAX_BATCH_SAMPLES as u32)
+            .min(
+                self.options
+                    .sample_limit
+                    .saturating_sub(self.history.samples),
+            );
         let mut globals = frame.globals;
         // Keep projection aspect tied to the window, including at odd sizes.
         globals.viewport[3] = globals.viewport[0] / globals.viewport[1].max(1.0);
@@ -747,6 +837,27 @@ impl PathTracer {
             ],
         };
         queue.write_buffer(&self.settings, 0, bytemuck::bytes_of(&settings));
+        let has_air = frame.globals.atmo_params[3] >= 0.5;
+        if has_air && count > 0 {
+            // Immutable settings slices prevent queue writes for later samples
+            // from overwriting an earlier dispatch's sample index.
+            let mut slices = vec![0u8; self.settings_stride as usize * count as usize];
+            for sample in 0..count {
+                let one = Settings {
+                    counts: [
+                        settings.counts[0],
+                        self.history.samples + sample,
+                        1,
+                        settings.counts[3],
+                    ],
+                    ..settings
+                };
+                let offset = sample as usize * self.settings_stride as usize;
+                let bytes = bytemuck::bytes_of(&one);
+                slices[offset..offset + bytes.len()].copy_from_slice(bytes);
+            }
+            queue.write_buffer(&self.settings, self.settings_stride, &slices);
+        }
         // Publish the exposure controls. When automatic metering has been on,
         // overwrite only the tail so the GPU's eased `value` is preserved.
         let tail = ExposureTail {
@@ -819,17 +930,31 @@ impl PathTracer {
                 pass.set_bind_group(0, &self.trace_group, &[]);
                 pass.dispatch_workgroups(2, 1, 1);
             }
-            let mut pass = encoder.begin_compute_pass(&wgpu::ComputePassDescriptor {
-                label: Some("pathtrace"),
-                timestamp_writes: None,
-            });
-            pass.set_pipeline(&self.compute);
-            pass.set_bind_group(0, &self.trace_group, &[]);
-            pass.dispatch_workgroups(
-                self.dimensions.0.div_ceil(8),
-                self.dimensions.1.div_ceil(8),
-                1,
-            );
+            let dispatch = |encoder: &mut wgpu::CommandEncoder,
+                            pipeline: &wgpu::ComputePipeline,
+                            group: &wgpu::BindGroup,
+                            label| {
+                let mut pass = encoder.begin_compute_pass(&wgpu::ComputePassDescriptor {
+                    label: Some(label),
+                    timestamp_writes: None,
+                });
+                pass.set_pipeline(pipeline);
+                pass.set_bind_group(0, group, &[]);
+                pass.dispatch_workgroups(
+                    self.dimensions.0.div_ceil(8),
+                    self.dimensions.1.div_ceil(8),
+                    1,
+                );
+            };
+            if has_air {
+                for sample in 0..count as usize {
+                    let group = &self.sample_groups[sample];
+                    dispatch(encoder, &self.camera_air_pipeline, group, "camera-air");
+                    dispatch(encoder, &self.compute, group, "pathtrace");
+                }
+            } else {
+                dispatch(encoder, &self.compute, &self.trace_group, "pathtrace");
+            }
         }
         if self.options.auto_exposure {
             // Clear, accumulate the centre-weighted histogram, then resolve it

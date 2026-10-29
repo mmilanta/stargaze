@@ -29,6 +29,10 @@ struct Body {
     ring_plane: vec4<f32>, // xyz = pole, w = inner radius in planet radii
     ring_params: vec4<f32>, // outer radius in planet radii (0 = absent), optical depth, banded, unused
     ring_color: vec4<f32>, // rgb = single-scattering albedo
+    axis_x: vec4<f32>, // xyz = body-fixed X axis, w = surface style (0 mottled, 1 gas giant)
+    axis_y: vec4<f32>, // xyz = body-fixed Y axis, w = pattern seed
+    surface_color: vec4<f32>, // rgb = belt albedo, w = turbulence
+    surface_params: vec4<f32>, // x = band pairs, y = storm count
 };
 struct CatalogueStar {
     direction: vec4<f32>, // xyz = unit direction, w = sin(angular radius)^2
@@ -43,6 +47,12 @@ struct CatalogueStar {
 // One linear RGB10 texel per word.
 @group(0) @binding(6) var<storage, read> milky_way_map: array<u32>;
 @group(0) @binding(7) var<storage, read_write> backdrop_accumulation: array<vec4<f32>>;
+
+// Kept separate from the surface bounce shader: combining both long paths
+// caused reflected night-air light to vanish on RADV with detailed materials.
+struct CameraAir { radiance: vec3<f32>, rng: u32 };
+@group(0) @binding(8) var<storage, read_write> camera_air: array<CameraAir>;
+var<private> primary_air: CameraAir;
 
 const PI: f32 = 3.141592653589793;
 const TAU: f32 = 6.283185307179586;
@@ -321,15 +331,546 @@ fn fbm(p_in: vec3<f32>, octaves: u32) -> f32 {
     return sum / norm;
 }
 
+// Surface normal in the body's own rotating frame (Z = spin pole), so
+// markings turn with the body and differ in orientation between bodies.
+fn body_local(body: Body, normal: vec3<f32>) -> vec3<f32> {
+    let x = body.axis_x.xyz;
+    let y = body.axis_y.xyz;
+    return vec3<f32>(dot(normal, x), dot(normal, y), dot(normal, cross(x, y)));
+}
+
+// A distinct, stable noise domain for each seed.
+fn seed_offset(seed: f32) -> vec3<f32> {
+    return vec3<f32>(
+        hash31(vec3<f32>(seed, 1.0, 7.0)),
+        hash31(vec3<f32>(3.0, seed, 5.0)),
+        hash31(vec3<f32>(9.0, 2.0, seed))) * 512.0;
+}
+
+// Gas giant: alternating bright zones (the body's albedo) and darker belts
+// along latitude, their edges warped by elongated turbulence, fine streaks,
+// hazy poles and up to three oval storms that the bands swirl around.
+fn gas_giant_albedo(body: Body, local: vec3<f32>) -> vec3<f32> {
+    let off = seed_offset(body.axis_y.w);
+    let zone = body.material.rgb;
+    let belt = body.surface_color.rgb;
+    let turbulence = body.surface_color.w;
+    let bands = body.surface_params.x;
+    let storms = u32(body.surface_params.y + 0.5);
+    var q = local;
+    var masks = vec3<f32>(0.0);
+    var rims = vec3<f32>(0.0);
+    for (var k = 0u; k < storms && k < 3u; k += 1u) {
+        let fk = f32(k);
+        let lat = (hash31(off + vec3<f32>(7.1 * fk, 1.3, 2.9)) - 0.5) * 1.1;
+        let lon = hash31(off + vec3<f32>(3.7, 5.3 * fk, 8.1)) * TAU;
+        let size = select(0.05, 0.11, k == 0u) * (0.8 + 0.4 * hash31(off + vec3<f32>(fk, 9.0, 4.0)));
+        let centre = vec3<f32>(cos(lat) * cos(lon), cos(lat) * sin(lon), sin(lat));
+        if (dot(q, centre) <= 0.0) {
+            continue;
+        }
+        let east = vec3<f32>(-sin(lon), cos(lon), 0.0);
+        let north = cross(centre, east);
+        // Ovals are twice as wide (east-west) as they are tall.
+        let dx = dot(q - centre, east) / (2.0 * size);
+        let dy = dot(q - centre, north) / size;
+        let e = length(vec2<f32>(dx, dy));
+        // Swirl the band lookup around the storm; anticyclones turn opposite
+        // ways in the two hemispheres.
+        let influence = 1.0 - smoothstep(0.0, 2.4, e);
+        let angle = select(-3.2, 3.2, lat < 0.0) * influence * influence;
+        let c = cos(angle);
+        let s = sin(angle);
+        let rx = c * dx - s * dy;
+        let ry = s * dx + c * dy;
+        q = normalize(q + east * ((rx - dx) * 2.0 * size) + north * ((ry - dy) * size));
+        let ragged = e + 0.25 * (fbm(q * 18.0 + off, 3) - 0.5);
+        masks[k] = 1.0 - smoothstep(0.7, 1.0, ragged);
+        rims[k] = smoothstep(0.75, 1.0, ragged) * (1.0 - smoothstep(1.0, 1.35, ragged));
+    }
+    // Noise stretched east-west (z scaled up) gives zonal streaks. Domain
+    // warping is strongest at band edges, where the zonal winds shear.
+    let p = vec3<f32>(q.x * 2.2, q.y * 2.2, q.z * 9.0) + off;
+    let warp1 = fbm(p, 5) - 0.5;
+    let warp2 = fbm(p * 2.1 + vec3<f32>(5.2, 1.3, 7.7) + 4.0 * warp1, 5) - 0.5;
+    // Unequal band widths: a smooth remapping of latitude per seed.
+    let lat = q.z + 0.07 * sin(3.0 * PI * q.z + off.z) + 0.04 * sin(5.0 * PI * q.z + off.y);
+    let shear = 0.35 + 0.65 * abs(cos(PI * bands * lat + off.x));
+    // Waves travelling along the band edges, plus the turbulent warp.
+    let lon = atan2(q.y, q.x);
+    let ripple = sin(lon * (9.0 + floor(bands)) + 6.0 * warp1 + off.y) * 0.5
+        + sin(lon * 23.0 + 9.0 * warp2 + off.z) * 0.25;
+    let mu = lat + turbulence * shear * (0.16 * warp1 + 0.10 * warp2 + 0.025 * ripple);
+    // Irregular band widths: a regular wave plus 1D noise along latitude.
+    let wave = 0.5 + 0.5 * sin(PI * bands * mu + off.x);
+    let irregular = fbm(vec3<f32>(mu * bands * 1.7, off.y, off.z), 3);
+    let profile = 0.5 * wave + 0.5 * irregular;
+    // Each band also gets its own tone, from creamy to deep orange-brown.
+    let tone = fbm(vec3<f32>(mu * bands * 0.9, off.z, off.x), 2);
+    let fine = fbm(vec3<f32>(q.x * 7.0, q.y * 7.0, q.z * 70.0) + off + 3.0 * warp2, 4);
+    let eddies = fbm(p * 5.0 + 6.0 * vec3<f32>(warp1, warp2, warp1), 4);
+    var color = mix(belt, zone, smoothstep(0.3, 0.75, profile));
+    // Deeper tones keep the body's hue but saturate it (dark channels drop most).
+    color = mix(color, color * (0.55 + 0.5 * color), smoothstep(0.35, 0.75, tone) * 0.8);
+    color *= (0.78 + 0.44 * fine) * (0.9 + 0.2 * eddies);
+    // Polar regions lose band contrast under a duller haze.
+    let polar = smoothstep(0.55, 0.92, abs(local.z));
+    color = mix(color, mix(zone, belt, 0.55) * (0.8 + 0.2 * fine), polar * 0.8);
+    for (var k = 0u; k < storms && k < 3u; k += 1u) {
+        // The first storm is the large, deeply coloured one (red on a tan giant,
+        // dark blue on a blue one); the others are white ovals.
+        let tint = select(zone * 1.15, belt * belt * 1.5, k == 0u);
+        // Inside, the storm's own spiral texture and a darker core.
+        let core = 1.0 - 0.25 * (1.0 - smoothstep(0.0, 0.6, masks[k] - rims[k]));
+        color = mix(color, tint * (0.7 + 0.6 * fine) * core, masks[k] * 0.92);
+        color = mix(color, zone * 1.1, rims[k] * 0.45);
+    }
+    return color;
+}
+
+// --- Solid-body surfaces ------------------------------------------------
+
+// Signed distances occur on both sides of a rim or latitude band. WGSL pow
+// has no defined result for a negative base, even with exponent 2.0; square
+// directly so these profiles stay finite on every GPU/compiler path.
+fn surface_gaussian(distance: f32) -> f32 {
+    return exp(-(distance * distance));
+}
+
 fn hash33(p: vec3<f32>) -> vec3<f32> {
     return vec3<f32>(hash31(p), hash31(p + vec3<f32>(19.1, 7.3, 3.7)),
         hash31(p + vec3<f32>(5.9, 31.7, 11.3)));
 }
 
+// Ridged noise: thin bright lines where the noise crosses 0.5.
+fn ridge(n: f32, width: f32) -> f32 {
+    return 1.0 - smoothstep(0.0, width, abs(n - 0.5));
+}
+
+// Lunar maria: smooth, dark lava plains (0-1).
+fn maria(q: vec3<f32>, off: vec3<f32>) -> f32 {
+    let warp = fbm(q * 2.0 + off, 4) - 0.5;
+    return smoothstep(0.5, 0.56, fbm(q * 1.2 + off + 1.5 * warp, 5));
+}
+
+// Centre of the crater (or vent) owned by `cell`, on the unit sphere. A
+// jittered point is projected onto the sphere; the projection must stay in
+// the cell, otherwise a neighbour search around a point could miss it and
+// cut it off. Three jitters are tried. w = 0 when the cell has none.
+// `key` seeds the jitter (it differs between craters sharing a cell).
+fn cell_centre(cell: vec3<f32>, key: vec3<f32>, scale: f32, off: vec3<f32>) -> vec4<f32> {
+    for (var t = 0u; t < 3u; t += 1u) {
+        let centre = normalize(cell + hash33(key + vec3<f32>(f32(t) * 17.0)) - off);
+        if (all(floor(centre * scale + off) == cell)) {
+            return vec4<f32>(centre, 1.0);
+        }
+    }
+    return vec4<f32>(0.0);
+}
+
+// One octave of craters on the unit sphere. A 3D cell grid scattered over
+// the sphere holds at most two craters per cell, centred on the sphere and
+// inside their cell. A crater's influence (ejecta, rays) stays within half a
+// cell of its centre, so only the 2x2x2 cells nearest the point can reach it.
+//
+// The state carried through the layers is x = floor darkness (multiplier)
+// and y = relief brightness (rims, ejecta, rays; additive). Craters are
+// painted in a fixed age order, oldest first, like real impacts: inside its
+// rim a younger crater replaces the rims and rays beneath it, and its ejecta
+// blanket partly buries them around it, so overlapping rims never cross.
+// Floors persist: a crater inside a basin stays dark, and overlapping floors
+// of one layer darken only once. Every choice about a crater (existence,
+// size, age, flooding) depends on the crater alone, never on the shaded
+// point, so no crater is ever cut off.
+// `flood` > 0: old craters centred in lunar maria were buried by the lava.
+fn crater_layer(q: vec3<f32>, scale: f32, density: f32, off: vec3<f32>,
+    body_off: vec3<f32>, flood: f32, contrast: f32, rays: f32,
+    state: vec2<f32>) -> vec2<f32> {
+    let p = q * scale + off;
+    let base = floor(p - 0.5);
+    // Gather the craters that reach this point, then sort them by age. Each
+    // cell holds up to two craters (slots); `key` is a per-crater value,
+    // offset by the slot, from which all its properties are hashed. Only
+    // the slot index and age are stored, to keep the arrays small.
+    // At most six craters reach a point in practice; if more do, the
+    // oldest (painted first, then mostly covered) are dropped.
+    var slots: array<u32, 6>;
+    var ages: array<f32, 6>;
+    var centres: array<vec3<f32>, 6>;
+    var count = 0u;
+    for (var i = 0u; i < 16u; i += 1u) {
+        let grid = base + vec3<f32>(f32(i & 1u), f32((i >> 1u) & 1u), f32((i >> 2u) & 1u));
+        // Skip cells too far from the point for any of their craters to
+        // reach it (largest reach: 2.2 x 0.22 cells).
+        let gap = max(max(grid - p, p - grid - 1.0), vec3<f32>(0.0));
+        if (dot(gap, gap) > 0.2343) {
+            continue;
+        }
+        let key = grid + vec3<f32>(f32(i >> 3u) * 1000.0);
+        if (hash31(key + vec3<f32>(71.3, 3.1, 9.7)) > density) {
+            continue;
+        }
+        let found = cell_centre(grid, key, scale, off);
+        if (found.w == 0.0) {
+            continue;
+        }
+        let size = hash31(key + vec3<f32>(3.1, 8.3, 1.7));
+        let radius = (0.06 + 0.16 * size * size) / scale;
+        if (length(q - found.xyz) > 2.2 * radius) {
+            continue;
+        }
+        let age = hash31(key + vec3<f32>(29.0, 61.0, 7.0));
+        if (flood > 0.0 && age < 0.7 && maria(found.xyz, body_off) > 0.5) {
+            continue;
+        }
+        // Insertion sort: ages ascending (larger value = younger crater).
+        if (count == 6u) {
+            if (age <= ages[0]) {
+                continue;
+            }
+            // Full: drop the oldest to make room.
+            for (var m = 0u; m < 5u; m += 1u) {
+                ages[m] = ages[m + 1u];
+                slots[m] = slots[m + 1u];
+                centres[m] = centres[m + 1u];
+            }
+            count = 5u;
+        }
+        var j = count;
+        while (j > 0u && ages[j - 1u] > age) {
+            ages[j] = ages[j - 1u];
+            slots[j] = slots[j - 1u];
+            centres[j] = centres[j - 1u];
+            j -= 1u;
+        }
+        ages[j] = age;
+        slots[j] = i;
+        centres[j] = found.xyz;
+        count += 1u;
+    }
+    var floor_shade = 1.0;
+    var relief = state.y;
+    for (var k = 0u; k < count; k += 1u) {
+        let i = slots[k];
+        let grid = base + vec3<f32>(f32(i & 1u), f32((i >> 1u) & 1u), f32((i >> 2u) & 1u));
+        let cell = grid + vec3<f32>(f32(i >> 3u) * 1000.0);
+        let centre = centres[k];
+        // Size distribution: many small craters, few large ones.
+        let size = hash31(cell + vec3<f32>(3.1, 8.3, 1.7));
+        let radius = (0.06 + 0.16 * size * size) / scale;
+        let offset = q - centre;
+        let d = length(offset) / radius;
+        // Local frame around the crater, for its ragged rim and its rays.
+        var east = cross(vec3<f32>(0.0, 0.0, 1.0), centre);
+        east = east / max(length(east), 1.0e-4);
+        let north = cross(centre, east);
+        let angle = atan2(dot(offset, north), dot(offset, east));
+        // Ragged outline: a few low harmonics with per-crater phases.
+        let phase = hash33(cell + vec3<f32>(41.0, 5.0, 23.0)) * TAU;
+        let wobble = 0.025 * (sin(3.0 * angle + phase.x) + sin(5.0 * angle + phase.y)
+            + 0.6 * sin(8.0 * angle + phase.z));
+        let r = d + wobble;
+        floor_shade = min(floor_shade, 1.0 - 0.18 * contrast * (1.0 - smoothstep(0.55, 0.9, r)));
+        // Inside the footprint the crater's own rim replaces older relief.
+        let rim = 0.22 * contrast * surface_gaussian((r - 1.0) / 0.13);
+        let footprint = 1.0 - smoothstep(1.1, 1.3, r);
+        relief = mix(relief, rim, footprint);
+        // Outside: a bright ejecta blanket that thins outwards and partly
+        // buries older relief.
+        let blanket = (1.0 - smoothstep(1.0, 1.9, r)) * (1.0 - footprint);
+        relief = mix(relief, 0.0, blanket * 0.3) + 0.1 * contrast * blanket;
+        // A few fresh craters throw long bright rays and have bright floors.
+        let fresh = hash31(cell + vec3<f32>(13.0, 2.0, 5.0));
+        if (rays > 0.0 && fresh > 0.82) {
+            let streaks = pow(vnoise(vec3<f32>(cos(angle) * 9.0, sin(angle) * 9.0, fresh * 40.0)), 3.0);
+            relief += contrast * (rays * 0.9 * streaks * (1.0 - smoothstep(1.0, 2.2, d)) * step(0.9, d)
+                + rays * 0.25 * (1.0 - smoothstep(0.0, 1.0, d)));
+        }
+    }
+    return vec2<f32>(state.x * floor_shade, relief);
+}
+
+// Five octaves of craters, painted from large to small: big basins are the
+// oldest, so smaller craters sit on their rims and floors, never under them.
+fn craters(q: vec3<f32>, density: f32, off: vec3<f32>, flood: f32, contrast: f32, rays: f32) -> f32 {
+    if (density <= 0.0) {
+        return 1.0;
+    }
+    var state = crater_layer(q, 1.5, density, off, off, flood, contrast, rays, vec2<f32>(1.0, 0.0));
+    state = crater_layer(q, 3.5, density, off + 101.0, off, flood, contrast, rays * 0.8, state);
+    state = crater_layer(q, 8.0, density, off + 203.0, off, flood, contrast * 0.85, rays * 0.5, state);
+    // Small craters are younger than the lava plains: no flooding (cheaper too).
+    state = crater_layer(q, 18.0, density, off + 307.0, off, 0.0, contrast * 0.7, 0.0, state);
+    state = crater_layer(q, 40.0, density, off + 401.0, off, 0.0, contrast * 0.55, 0.0, state);
+    return state.x * (1.0 + state.y);
+}
+
+// Polar ice: caps reach down to |sin(latitude)| = 1 - extent, ragged edges.
+fn polar_caps(q: vec3<f32>, extent: f32, off: vec3<f32>) -> f32 {
+    if (extent <= 0.0) {
+        return 0.0;
+    }
+    let edge = 1.0 - extent + 0.12 * (fbm(q * 5.0 + off, 5) - 0.5) + 0.05 * (fbm(q * 18.0 + off, 3) - 0.5);
+    return smoothstep(edge - 0.015, edge + 0.015, abs(q.z));
+}
+
+// Moon/Mercury: highland albedo, smooth dark maria with fewer craters,
+// layered craters and fine regolith grain.
+fn cratered_albedo(body: Body, q: vec3<f32>) -> vec3<f32> {
+    let off = seed_offset(body.axis_y.w);
+    let mare = maria(q, off);
+    let grain = fbm(q * 45.0 + off, 3);
+    var color = mix(body.material.rgb, body.surface_color.rgb, mare);
+    color *= 0.9 + 0.2 * grain;
+    // Old craters centred in the maria were flooded; young ones remain.
+    color *= craters(q, body.surface_color.w, off, 1.0, 1.0, 1.0);
+    return color;
+}
+
+// Mars: ochre plains, large dark albedo regions, softened craters, dust
+// streaks and polar caps.
+fn rocky_albedo(body: Body, q: vec3<f32>) -> vec3<f32> {
+    let off = seed_offset(body.axis_y.w);
+    let warp = vec3<f32>(fbm(q * 1.8 + off, 4), fbm(q * 1.8 + off + 7.0, 4), 0.0) - 0.5;
+    let dark = smoothstep(0.5, 0.64, fbm(q * 2.2 + off + vec3<f32>(2.0 * warp.x, 2.0 * warp.y, warp.x), 6));
+    let tone = fbm(q * 5.0 + off + 3.0, 4);
+    var color = mix(body.material.rgb, body.surface_color.rgb, dark * 0.85);
+    color *= 0.85 + 0.3 * tone;
+    // Bright dust streaks trailing downwind of craters and highlands.
+    let streak = fbm(vec3<f32>(q.x * 4.0, q.y * 4.0, q.z * 18.0) + off + 9.0, 3);
+    color *= 0.95 + 0.1 * streak;
+    color *= craters(q, body.surface_color.w, off, 0.0, 0.45, 0.0);
+    let ice = polar_caps(q, body.surface_params.x, off);
+    return mix(color, vec3<f32>(0.92, 0.92, 0.94), ice);
+}
+
+// Local ice plates: nearest-cell distance, distance gap at a fracture, and
+// the plate's stable tone. All 27 neighbours participate, so a moving sample
+// never reveals the underlying lattice at a cell boundary.
+fn ice_plates(p: vec3<f32>) -> vec3<f32> {
+    let base = floor(p);
+    var nearest = 10.0;
+    var second = 10.0;
+    var tone = 0.0;
+    for (var i = 0; i < 27; i += 1) {
+        let cell = base + vec3<f32>(f32(i % 3 - 1), f32((i / 3) % 3 - 1), f32(i / 9 - 1));
+        let delta = cell + 0.2 + 0.6 * hash33(cell) - p;
+        let d = dot(delta, delta);
+        if (d < nearest) {
+            second = nearest;
+            nearest = d;
+            tone = hash31(cell + 57.0);
+        } else {
+            second = min(second, d);
+        }
+    }
+    return vec3<f32>(sqrt(nearest), sqrt(second) - sqrt(nearest), tone);
+}
+
+// Europa: many generations of fine lineae over granular, disrupted ice.
+// Large colour regions stay translucent; the small fractures and embedded
+// ice plates carry the detail instead of broad, flat bands of colour.
+fn icy_albedo(body: Body, q: vec3<f32>) -> vec3<f32> {
+    let off = seed_offset(body.axis_y.w);
+    let ice = body.material.rgb;
+    let rust = body.surface_color.rgb * vec3<f32>(0.72, 0.62, 0.56);
+    let warp = vec3<f32>(fbm(q * 3.1 + off + 11.0, 3),
+        fbm(q * 3.1 + off + 23.0, 3), fbm(q * 3.1 + off + 37.0, 3)) - 0.5;
+    let terrain = fbm(q * 4.2 + off + warp, 5);
+    let rubble = fbm(q * 85.0 + off + 7.0 * warp, 4);
+    let chaos = smoothstep(0.42, 0.65, terrain + 0.14 * (rubble - 0.5));
+    let plates = ice_plates(q * 72.0 + off + 4.0 * warp);
+    let seams = 1.0 - smoothstep(0.015, 0.07, plates.y);
+    let dust = chaos * (0.2 + 0.46 * rubble + 0.18 * plates.z);
+    var color = mix(ice, rust, dust);
+    color = mix(color, rust * 0.8, seams * chaos * 0.35);
+    // Frost between the older ridges, with subdued grain visible on zooming.
+    let ridged_plain = ridge(fbm(q * 34.0 + off + 83.0, 3), 0.025);
+    color = mix(color, rust, ridged_plain * (0.1 + 0.14 * chaos));
+    color *= 0.87 + 0.22 * fbm(q * 180.0 + off, 3);
+
+    let warped = q + 0.1 * warp;
+    let roughness = 0.0015 * (rubble - 0.5);
+    var shoulder = 0.0;
+    var fissure = 0.0;
+    var fresh_ridge = 0.0;
+    for (var i = 0u; i < 64u; i += 1u) {
+        let h = hash33(off + vec3<f32>(f32(i) * 3.7, 1.0, 2.0));
+        // Related fracture families share curvature, but have different
+        // offsets and widths. Fine local bends prevent ruler-straight scars.
+        let family = hash33(off + vec3<f32>(f32(i / 8u) * 17.3, 21.0, 7.0));
+        let n = normalize(family * 2.0 - 1.0 + 0.28 * (h * 2.0 - 1.0));
+        let shift = (hash31(off + vec3<f32>(f32(i), 9.0, 4.0)) - 0.5) * 1.4;
+        let width = select(0.0005 + 0.0011 * h.z, 0.0015 + 0.0022 * h.z, i < 10u)
+            * (0.65 + 0.8 * vnoise(q * 17.0 + h * 29.0));
+        let bend = 0.03 * (vnoise(q * 6.0 + family * 31.0) - 0.5)
+            + 0.008 * (vnoise(q * 24.0 + family * 37.0) - 0.5);
+        let dist = abs(dot(warped, n) - shift + roughness + bend);
+        let along = smoothstep(0.28, 0.62, vnoise(q * 3.5 + h * 50.0));
+        shoulder = max(shoulder, (1.0 - smoothstep(width, width * 4.0, dist)) * along);
+        // Older bands contain an icy centre between their two stained ridges.
+        let double_ridge = abs(dist - width * 0.85);
+        let single = 1.0 - smoothstep(width * 0.25, width, dist);
+        let paired = 1.0 - smoothstep(width * 0.15, width * 0.55, double_ridge);
+        fissure = max(fissure, select(single, paired, i < 10u) * along);
+        fresh_ridge = max(fresh_ridge,
+            (1.0 - smoothstep(width * 0.15, width * 0.35, abs(dist - width * 1.8))) * along);
+    }
+    color = mix(color, rust, shoulder * 0.17);
+    color = mix(color, rust * 0.7, fissure * 0.8);
+    color = mix(color, ice, fresh_ridge * 0.13);
+    color *= craters(q, body.surface_color.w * 0.2, off, 0.0, 0.3, 0.4);
+    return color;
+}
+
+// Io: finely mottled sulphur/frost plains with irregular paterae, lobate lava
+// flows and diffuse deposits. The masks are accumulated independently of cell
+// traversal order, so overlapping deposits cannot expose grid boundaries.
+fn volcanic_albedo(body: Body, q: vec3<f32>) -> vec3<f32> {
+    let off = seed_offset(body.axis_y.w);
+    let sulphur = body.material.rgb;
+    let deposit = body.surface_color.rgb;
+    let warp = vec3<f32>(fbm(q * 4.7 + off, 3), fbm(q * 4.7 + off + 19.0, 3),
+        fbm(q * 4.7 + off + 41.0, 3)) - 0.5;
+    let terrain = fbm(q * 10.0 + off + 2.0 * warp, 6);
+    let weathered = smoothstep(0.38, 0.65, fbm(q * 3.7 + off + 11.0, 5));
+    let fine = fbm(q * 90.0 + off + 3.0 * warp, 4);
+    let crust = mix(sulphur * vec3<f32>(0.43, 0.51, 0.6), deposit, 0.12);
+    var color = sulphur * (0.7 + 0.5 * terrain);
+    color = mix(color, crust, weathered * (0.45 + 0.5 * terrain));
+    let frost = smoothstep(0.38, 0.74,
+        fbm(q * 6.0 + off + 29.0 + warp, 5) + 0.2 * (fine - 0.5));
+    let frost_color = mix(sulphur, vec3<f32>(0.72, 0.7, 0.62), 0.8);
+    color = mix(color, frost_color, frost * 0.7);
+    let flow_edges = ridge(fbm(q * 35.0 + off + 2.0 * warp, 4), 0.025);
+    color = mix(color, crust, flow_edges * weathered * 0.4);
+    color *= (0.82 + 0.32 * fine) * (0.94 + 0.13 * fbm(q * 210.0 + off, 3));
+
+    var dark = 0.0;
+    var ash = 0.0;
+    var red = 0.0;
+    var white = 0.0;
+    let density = body.surface_color.w;
+    let scale = 5.5;
+    let p = q * scale + off + 300.0;
+    let base = floor(p);
+    for (var i = 0; i < 27; i += 1) {
+        let cell = base + vec3<f32>(f32(i % 3 - 1), f32((i / 3) % 3 - 1), f32(i / 9 - 1));
+        if (hash31(cell + vec3<f32>(4.0, 41.0, 9.0)) > 0.6 * density) {
+            continue;
+        }
+        let found = cell_centre(cell, cell, scale, off + 300.0);
+        if (found.w == 0.0) {
+            continue;
+        }
+        let centre = found.xyz;
+        let size = hash31(cell + vec3<f32>(8.0, 1.0, 3.0));
+        let radius = (0.025 + 0.11 * size * size * size) / scale;
+        let offset = q - centre;
+        let reach = length(offset) * scale;
+        if (reach > 0.95) { continue; }
+        let cutoff = 1.0 - smoothstep(0.75, 0.95, reach);
+        let tangent = cross(centre, vec3<f32>(0.37, 0.83, 0.41));
+        let east = tangent / max(length(tangent), 1.0e-5);
+        let north = cross(centre, east);
+        let angle = TAU * hash31(cell + 91.0);
+        let u = vec2<f32>(dot(offset, east), dot(offset, north)) / radius;
+        let uv = vec2<f32>(u.x * cos(angle) - u.y * sin(angle),
+            u.x * sin(angle) + u.y * cos(angle));
+        let ragged = fbm(vec3<f32>(uv * 2.7, 0.0) + cell * 7.0, 3) - 0.5;
+        let d = length(uv * vec2<f32>(1.0 / (0.65 + 0.9 * size), 1.0)) + 0.42 * ragged;
+        let pit = 1.0 - smoothstep(0.68, 0.86, d);
+        let age = hash31(cell + 31.0);
+        // Continuous lava lobes with ragged edges, rather than a noise mask
+        // punching disconnected holes through an elliptical footprint.
+        let flow_uv = uv - vec2<f32>(0.2 + 2.3 * age,
+            0.35 * sin(uv.x * 1.3 + angle));
+        let flow_shape = length(flow_uv * vec2<f32>(0.75 - 0.48 * age, 0.85 + 0.35 * size))
+            + 0.65 * ragged
+            + 0.35 * (fbm(vec3<f32>(uv * 1.8, 0.0) + cell * 3.0, 4) - 0.5);
+        let flow = (1.0 - smoothstep(0.72, 0.9, flow_shape)) * smoothstep(0.35, 0.85, age) * 0.85;
+        dark = max(dark, max(pit, flow) * cutoff);
+        let plume = hash31(cell + vec3<f32>(2.0, 6.0, 17.0));
+        let halo_uv = (uv - vec2<f32>(0.5, 0.3)) * vec2<f32>(0.16, 0.23);
+        let halo = exp(-dot(halo_uv, halo_uv)) * cutoff;
+        ash = max(ash, halo * (0.25 + 0.35 * age));
+        white = max(white, halo * step(0.45, plume) * (1.0 - step(0.83, plume)));
+        // A few fresh eruptions leave a diffuse, incomplete red apron.
+        let apron = surface_gaussian((length(uv) + ragged - 3.5) / 1.6)
+            * (0.25 + 0.75 * smoothstep(-1.5, 2.0, uv.y));
+        red = max(red, apron * step(0.83, plume) * cutoff);
+    }
+    color = mix(color, crust * 0.7, ash * 0.45);
+    color = mix(color, frost_color, white * 0.4);
+    color = mix(color, deposit * vec3<f32>(0.85, 0.7, 0.65), red * 0.6);
+    color = mix(color, vec3<f32>(0.035, 0.032, 0.026), dark * 0.96);
+    return color;
+}
+
+// Earth-like: oceans with lighter shallows, continents whose colour varies
+// with moisture and altitude (green, desert, rock, snow), polar ice and
+// swirling clouds.
+fn terran_albedo(body: Body, q: vec3<f32>) -> vec3<f32> {
+    let off = seed_offset(body.axis_y.w);
+    let land_base = body.material.rgb;
+    let ocean_color = body.surface_color.rgb;
+    let warp = vec3<f32>(fbm(q * 1.5 + off, 4), fbm(q * 1.5 + off + 13.0, 4), fbm(q * 1.5 + off + 29.0, 4)) - 0.5;
+    let height = fbm(q * 1.1 + off + 0.9 * warp, 7);
+    // fbm is roughly centred on 0.5 with a spread of about 0.1.
+    let sea = 0.5 + (body.surface_params.y - 0.5) * 0.3;
+    let coast = smoothstep(sea, sea + 0.004, height);
+    let shallow = 1.0 - smoothstep(sea - 0.04, sea, height);
+    let water = mix(ocean_color * 1.8 + vec3<f32>(0.0, 0.04, 0.05), ocean_color, shallow);
+    // Land: moist (vegetated, darker green) vs dry (the albedo, desert).
+    let moisture = fbm(q * 3.0 + off + 41.0, 5) + 0.25 * (abs(q.z) - 0.35);
+    let green = land_base * vec3<f32>(0.45, 0.62, 0.38);
+    var land = mix(land_base, green, smoothstep(0.45, 0.6, moisture));
+    let altitude = smoothstep(sea + 0.08, sea + 0.2, height);
+    land = mix(land, vec3<f32>(0.42, 0.38, 0.34), altitude * 0.6);
+    land = mix(land, vec3<f32>(0.9, 0.9, 0.92), smoothstep(sea + 0.19, sea + 0.24, height));
+    land *= 0.88 + 0.24 * fbm(q * 25.0 + off, 3);
+    var color = mix(water, land, coast);
+    let ice = polar_caps(q, body.surface_params.x, off);
+    color = mix(color, vec3<f32>(0.9, 0.92, 0.95), ice);
+    // Clouds: domain-warped, streaky along latitude, with spiral cyclones.
+    let cover = body.surface_params.z;
+    if (cover > 0.0) {
+        // Two levels of domain warping, stretched east-west, turn the noise
+        // into streaks and curls; a soft remap keeps thin veils.
+        let w1 = vec3<f32>(fbm(q * 1.6 + off + 77.0, 4), fbm(q * 1.6 + off + 91.0, 4), 0.5) - 0.5;
+        let w2 = vec3<f32>(fbm(q * 4.0 + off + 3.0 * w1, 4), fbm(q * 4.0 + off + 17.0 + 3.0 * w1, 4), 0.5) - 0.5;
+        let cq = vec3<f32>(q.x * 2.5, q.y * 2.5, q.z * 7.0) + off + 2.5 * w1 + 1.2 * w2;
+        let cloud = fbm(cq, 7);
+        // More cloud in the equatorial and mid-latitude storm belts, less
+        // over the subtropics.
+        let lat = abs(q.z);
+        let belts = 0.06 * (surface_gaussian(lat / 0.12) + surface_gaussian((lat - 0.72) / 0.15))
+            - 0.04 * surface_gaussian((lat - 0.42) / 0.1);
+        let threshold = 0.62 - 0.22 * cover - belts;
+        let mask = smoothstep(threshold - 0.04, threshold + 0.14, cloud);
+        color = mix(color, vec3<f32>(0.93, 0.94, 0.96), mask * 0.95);
+    }
+    return color;
+}
+
 fn surface_albedo(body: Body, normal: vec3<f32>) -> vec3<f32> {
+    let local = body_local(body, normal);
+    let style = u32(body.axis_x.w + 0.5);
+    if (style > 0u) {
+        var color: vec3<f32>;
+        switch style {
+            case 1u: { color = gas_giant_albedo(body, local); }
+            case 2u: { color = cratered_albedo(body, local); }
+            case 3u: { color = rocky_albedo(body, local); }
+            case 4u: { color = icy_albedo(body, local); }
+            case 5u: { color = volcanic_albedo(body, local); }
+            default: { color = terran_albedo(body, local); }
+        }
+        return clamp(color, vec3<f32>(0.0), vec3<f32>(1.0));
+    }
     var mottle = 1.0;
     if (body.low.w > 0.0) {
-        var p = world_direction(normal) * 2.4;
+        var p = local * 2.4 + seed_offset(body.axis_y.w);
         var amplitude = 0.5;
         var noise = 0.0;
         for (var octave = 0u; octave < 5u; octave += 1u) {
@@ -623,6 +1164,27 @@ fn atmosphere(origin: vec3<f32>, dir: vec3<f32>, limit: f32, rng: ptr<function, 
     return result;
 }
 
+// Reconstruct only view extinction in the surface pass. This keeps the
+// scratch buffer at one vec4 per pixel, independent of samples per batch.
+fn camera_air_transmittance(origin: vec3<f32>, dir: vec3<f32>, limit: f32, seed: u32) -> vec3<f32> {
+    let exit = shell_exit(origin, dir);
+    let t_max = min(limit, exit);
+    if (t_max <= 0.0) { return vec3<f32>(1.0); }
+    let steps = clamp(u32(ceil(t_max / (0.25 * atmo_scale_height()))), 2u, ATMO_VIEW_STEPS);
+    let dt = t_max / f32(steps);
+    var jitter_rng = hash(seed ^ 0x3c6ef372u);
+    let jitter = select(0.5, random(&jitter_rng), steps < ATMO_VIEW_STEPS || limit < exit);
+    let beta_ext = settings.g.atmo_rayleigh.rgb + vec3<f32>(settings.g.atmo_rayleigh.w);
+    var transmittance = vec3<f32>(1.0);
+    for (var i = 0u; i < steps; i += 1u) {
+        let p = origin + dir * ((f32(i) + jitter) * dt);
+        let altitude = max(length(p - settings.g.atmo_center.xyz) - host_radius(), 0.0);
+        let column = exp(-altitude / atmo_scale_height()) * dt;
+        transmittance *= exp(-beta_ext * column);
+    }
+    return transmittance;
+}
+
 // Ring area as seen by ringshine sampling (uniform over the annulus).
 fn ring_area(index: u32) -> f32 {
     let body = bodies[index];
@@ -792,9 +1354,12 @@ fn trace(initial: Ray, rng: ptr<function, u32>, backdrop: ptr<function, vec3<f32
             if (ring.index != MISS) {
                 limit = min(limit, ring.distance);
             }
-            let atmo = atmosphere(ray.offset, ray.direction, limit, rng);
-            radiance += throughput * atmo.inscatter;
-            throughput *= atmo.transmittance;
+            if (settings.g.atmo_params.w >= 0.5) {
+                let transmittance = camera_air_transmittance(ray.offset, ray.direction, limit, *rng);
+                radiance += throughput * primary_air.radiance;
+                throughput *= transmittance;
+                *rng = primary_air.rng;
+            }
             // No visibility rule for the catalogue or Milky Way: both carry
             // physical brightness, so illuminated air (day, twilight, thick
             // air, moonlight) out-shines them under the adapted exposure.
@@ -1003,6 +1568,32 @@ fn trace(initial: Ray, rng: ptr<function, u32>, backdrop: ptr<function, vec3<f32
     return vec4<f32>(radiance, dot(*backdrop, vec3<f32>(0.2126, 0.7152, 0.0722)));
 }
 
+fn camera_direction(id: vec2<u32>, rng: ptr<function, u32>) -> vec3<f32> {
+    let jitter = vec2<f32>(random(rng), random(rng));
+    let uv = (vec2<f32>(id) + jitter) / settings.g.viewport.xy;
+    let ndc = vec2<f32>(2.0 * uv.x - 1.0, 1.0 - 2.0 * uv.y);
+    let tangent = settings.g.cam_forward.w;
+    // Telescope-space jitter remains precise at high magnification.
+    return normalize(vec3<f32>(ndc.x * tangent * settings.g.viewport.w, ndc.y * tangent, -1.0));
+}
+
+// Each air/trace pair handles one sample. CPU settings slices preserve its
+// sample index; this pass leaves the exact continuation RNG for trace().
+@compute @workgroup_size(8, 8)
+fn integrate_camera_air(@builtin(global_invocation_id) id: vec3<u32>) {
+    let dimensions = vec2<u32>(settings.g.viewport.xy);
+    if (id.x >= dimensions.x || id.y >= dimensions.y) { return; }
+    let pixel = id.y * dimensions.x + id.x;
+    var rng = hash(pixel ^ hash(settings.counts.y + 0x9e3779b9u));
+    let ray = Ray(vec3<f32>(0.0), camera_direction(id.xy, &rng), MISS);
+    var hit = closest_hit(ray);
+    var disc_scale = 1.0;
+    if (settings.background.w > 0.0) { hit = point_disc_hit(ray, hit, &disc_scale, &rng); }
+    let ring = closest_ring(ray, hit.distance);
+    let light = atmosphere(ray.offset, ray.direction, min(hit.distance, ring.distance), &rng);
+    camera_air[pixel] = CameraAir(light.inscatter, rng);
+}
+
 @compute @workgroup_size(8, 8)
 fn main(@builtin(global_invocation_id) id: vec3<u32>) {
     let dimensions = vec2<u32>(settings.g.viewport.xy);
@@ -1010,19 +1601,12 @@ fn main(@builtin(global_invocation_id) id: vec3<u32>) {
         return;
     }
     let pixel = id.y * dimensions.x + id.x;
+    primary_air = camera_air[pixel];
     var sum = vec4<f32>(0.0);
     var backdrop_sum = vec3<f32>(0.0);
     for (var s = 0u; s < settings.counts.z; s += 1u) {
         var rng = hash(pixel ^ hash(settings.counts.y + s + 0x9e3779b9u));
-        let jitter = vec2<f32>(random(&rng), random(&rng));
-        let uv = (vec2<f32>(id.xy) + jitter) / settings.g.viewport.xy;
-        let ndc = vec2<f32>(2.0 * uv.x - 1.0, 1.0 - 2.0 * uv.y);
-        let tangent = settings.g.cam_forward.w;
-        // Stay in telescope space: adding 1e-9-radian jitter to a world-space
-        // unit vector would lose the jitter in f32 at high magnification.
-        let direction = normalize(vec3<f32>(
-            ndc.x * tangent * settings.g.viewport.w,
-            ndc.y * tangent, -1.0));
+        let direction = camera_direction(id.xy, &rng);
         var backdrop = vec3<f32>(0.0);
         sum += trace(Ray(vec3<f32>(0.0), direction, MISS), &rng, &backdrop);
         backdrop_sum += backdrop;

@@ -66,6 +66,83 @@ pub struct Rings {
     pub banded: bool,
 }
 
+/// Procedural surface look for a planet or moon (see `surface_albedo` in
+/// pathtrace.wgsl). Without one, a body keeps the plain mottled albedo.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub enum SurfaceStyle {
+    /// Latitude bands warped by turbulence, with large oval storms.
+    GasGiant,
+    /// Airless grey world: dark maria, layered craters, bright ray craters.
+    Cratered,
+    /// Mars-like: dark albedo regions, eroded craters, polar caps.
+    Rocky,
+    /// Europa-like ice crossed by reddish cracks (lineae).
+    Icy,
+    /// Io-like sulphur plains with dark volcanic vents and red plume rings.
+    Volcanic,
+    /// Earth-like oceans, continents, polar ice and clouds.
+    Terran,
+}
+
+impl SurfaceStyle {
+    pub const ALL: [SurfaceStyle; 6] = [
+        SurfaceStyle::GasGiant,
+        SurfaceStyle::Cratered,
+        SurfaceStyle::Rocky,
+        SurfaceStyle::Icy,
+        SurfaceStyle::Volcanic,
+        SurfaceStyle::Terran,
+    ];
+
+    /// Name used in config files.
+    pub fn name(self) -> &'static str {
+        match self {
+            SurfaceStyle::GasGiant => "gas_giant",
+            SurfaceStyle::Cratered => "cratered",
+            SurfaceStyle::Rocky => "rocky",
+            SurfaceStyle::Icy => "icy",
+            SurfaceStyle::Volcanic => "volcanic",
+            SurfaceStyle::Terran => "terran",
+        }
+    }
+
+    /// Style code read by the shader (0 is the plain mottled albedo).
+    pub fn code(self) -> f32 {
+        match self {
+            SurfaceStyle::GasGiant => 1.0,
+            SurfaceStyle::Cratered => 2.0,
+            SurfaceStyle::Rocky => 3.0,
+            SurfaceStyle::Icy => 4.0,
+            SurfaceStyle::Volcanic => 5.0,
+            SurfaceStyle::Terran => 6.0,
+        }
+    }
+}
+
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct Surface {
+    pub style: SurfaceStyle,
+    /// Varies the pattern between bodies that share a style.
+    pub seed: u32,
+    /// Second colour: gas giant belts, maria, dark regions, cracks, lava
+    /// deposits or oceans. The body's albedo is the main colour.
+    pub secondary_albedo: [f32; 3],
+    /// Gas giants: approximate number of belt/zone pairs from pole to pole.
+    pub bands: f32,
+    /// Gas giants: 0 gives straight bands, 1 strongly turbulent ones.
+    pub turbulence: f32,
+    /// Gas giants: large oval storms (0-3); the first is the largest.
+    pub storms: u32,
+    /// Solid bodies: crater density 0-1 (volcanic: density of vents).
+    pub craters: f32,
+    /// Solid bodies: polar cap extent 0-1 (fraction of sin(latitude)).
+    pub ice_caps: f32,
+    /// Terran: fraction of the surface under water, 0-1.
+    pub ocean: f32,
+    /// Terran: cloud cover, 0-1.
+    pub clouds: f32,
+}
+
 #[derive(Clone, Debug)]
 pub struct Body {
     pub name: String,
@@ -88,8 +165,12 @@ pub struct Body {
     pub spin_period: f64,
     pub spin_phase: f64,
     pub rings: Option<Rings>,
+    pub surface: Option<Surface>,
     /// Align spin with the orbital plane and synchronize it with mean anomaly.
     pub tidally_locked: bool,
+    /// Tidally locked to one of its own moons instead of to its parent:
+    /// that moon's orbit and period. Longitude 0 then faces the moon.
+    pub lock_to: Option<(Elements, f64)>,
 }
 
 impl Body {
@@ -120,14 +201,22 @@ impl Body {
         }
     }
 
+    /// The orbit a tidally locked body's spin follows, and its period.
+    pub fn lock_orbit(&self) -> (Elements, f64) {
+        self.lock_to.unwrap_or((self.elements, self.period_days))
+    }
+
     /// Orientation of the body's fixed frame in world space.
     pub fn spin_quat(&self, t: f64) -> DQuat {
         if self.tidally_locked {
-            let orbit = DQuat::from_rotation_z(self.elements.node)
-                * DQuat::from_rotation_x(self.elements.inc)
-                * DQuat::from_rotation_z(self.elements.peri);
-            let phase = self.elements.m0
-                + std::f64::consts::TAU * (t - self.elements.epoch) / self.period_days;
+            // Locked to the parent: follow our own orbit (longitude 180
+            // faces the parent). Locked to a moon: follow the moon's orbit,
+            // so body X, longitude 0, always points at the moon.
+            let (elements, period) = self.lock_orbit();
+            let orbit = DQuat::from_rotation_z(elements.node)
+                * DQuat::from_rotation_x(elements.inc)
+                * DQuat::from_rotation_z(elements.peri);
+            let phase = elements.m0 + std::f64::consts::TAU * (t - elements.epoch) / period;
             return orbit * DQuat::from_rotation_z(phase);
         }
         let theta = self.spin_phase + std::f64::consts::TAU * (t / self.spin_period);
@@ -284,7 +373,7 @@ impl Scene {
         use std::f64::consts::{PI, TAU};
         let host = self.body(self.host);
         let spin = if host.tidally_locked {
-            host.period_days
+            host.lock_orbit().1
         } else {
             host.spin_period.abs()
         };
@@ -390,7 +479,9 @@ pub fn binary_scene() -> Scene {
         spin_period: spin,
         spin_phase: 0.0,
         tidally_locked: false,
+        lock_to: None,
         rings: None,
+        surface: None,
     };
 
     let bodies = vec![
@@ -409,7 +500,9 @@ pub fn binary_scene() -> Scene {
             spin_period: 1.0,
             spin_phase: 0.0,
             tidally_locked: false,
+            lock_to: None,
             rings: None,
+            surface: None,
         },
         // 1 — Aur: larger, yellow. The radii are inflated for a thicker disc
         // while `luminosity` (the total light output) is unchanged: emitted
@@ -449,7 +542,9 @@ pub fn binary_scene() -> Scene {
             spin_period: 0.85,
             spin_phase: 0.0,
             tidally_locked: false,
+            lock_to: None,
             rings: None,
+            surface: None,
         },
         // 4 — Pip (moon of Nerid).
         Body {
@@ -474,7 +569,9 @@ pub fn binary_scene() -> Scene {
             spin_period: 2.5,
             spin_phase: 0.0,
             tidally_locked: false,
+            lock_to: None,
             rings: None,
+            surface: None,
         },
         // 5 — Calyx: the two-mooned planet and observatory host.
         Body {
@@ -499,7 +596,9 @@ pub fn binary_scene() -> Scene {
             spin_period: 0.60,
             spin_phase: 0.0,
             tidally_locked: false,
+            lock_to: None,
             rings: None,
+            surface: None,
         },
         // 6 — Halo: inner moon of Calyx and the startup target.
         Body {
@@ -525,7 +624,9 @@ pub fn binary_scene() -> Scene {
             spin_period: 3.5,
             spin_phase: 0.0,
             tidally_locked: false,
+            lock_to: None,
             rings: None,
+            surface: None,
         },
         // 7 — Umbra: outer moon of Calyx.
         Body {
@@ -550,7 +651,9 @@ pub fn binary_scene() -> Scene {
             spin_period: 8.0,
             spin_phase: 0.0,
             tidally_locked: false,
+            lock_to: None,
             rings: None,
+            surface: None,
         },
         // 8 — Vantus, three moons.
         Body {
@@ -575,7 +678,9 @@ pub fn binary_scene() -> Scene {
             spin_period: 0.40,
             spin_phase: 0.0,
             tidally_locked: false,
+            lock_to: None,
             rings: None,
+            surface: None,
         },
         // 9, 10, 11 — Iri, Kesh, Coll (moons of Vantus).
         Body {
@@ -600,7 +705,9 @@ pub fn binary_scene() -> Scene {
             spin_period: 5.0,
             spin_phase: 0.0,
             tidally_locked: false,
+            lock_to: None,
             rings: None,
+            surface: None,
         },
         Body {
             name: "Kesh".into(),
@@ -624,7 +731,9 @@ pub fn binary_scene() -> Scene {
             spin_period: 11.0,
             spin_phase: 0.0,
             tidally_locked: false,
+            lock_to: None,
             rings: None,
+            surface: None,
         },
         Body {
             name: "Coll".into(),
@@ -648,7 +757,9 @@ pub fn binary_scene() -> Scene {
             spin_period: 18.0,
             spin_phase: 0.0,
             tidally_locked: false,
+            lock_to: None,
             rings: None,
+            surface: None,
         },
     ];
 

@@ -44,6 +44,7 @@ bodies:
       semi_major_axis_km: 590000
       period_days: 0.95
     rotation: {mode: free, period_days: 0.45, obliquity_deg: 28}
+    surface: {style: gas_giant, seed: 21, bands: 8, turbulence: 0.7, storms: 3}
     rings:
       inner_radius: 1.3
       outer_radius: 2.5
@@ -62,6 +63,7 @@ bodies:
       period_days: 6.057
       mean_anomaly_deg: 20
     rotation: {mode: tidal_lock}
+    surface: {style: rocky, seed: 1}
   # A smaller world midway between the pair and the observatory's orbit.
   - id: cobre
     name: Cobre
@@ -74,6 +76,7 @@ bodies:
       period_days: 11.127
       mean_anomaly_deg: 12
     rotation: {mode: free, period_days: 1.7}
+    surface: {style: cratered, seed: 5}
   # The inward-facing valley keeps the central pair above the horizon.
   - id: mirador
     name: Mirador
@@ -97,6 +100,7 @@ bodies:
       period_days: 0.4
       mean_anomaly_deg: 45
     rotation: {mode: tidal_lock}
+    surface: {style: icy, seed: 4}
   - id: pizarra
     name: Pizarra
     kind: moon
@@ -108,3 +112,4 @@ bodies:
       period_days: 0.8
       mean_anomaly_deg: 210
     rotation: {mode: tidal_lock}
+    surface: {style: cratered, seed: 9}

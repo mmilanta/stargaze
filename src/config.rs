@@ -1,5 +1,7 @@
 //! Versioned, human-editable scene files. All external distances have explicit units.
-use crate::sim::{AU_KM, Atmosphere, Body, BodyKind, Elements, Rings, Scene};
+use crate::sim::{
+    AU_KM, Atmosphere, Body, BodyKind, Elements, Rings, Scene, Surface, SurfaceStyle,
+};
 use anyhow::{Context, Result, bail, ensure};
 use serde::Deserialize;
 use std::{
@@ -86,6 +88,8 @@ struct BodyDef {
     rotation: Rotation,
     #[serde(default)]
     rings: Option<RingDef>,
+    #[serde(default)]
+    surface: Option<SurfaceDef>,
 }
 fn default_albedo() -> [f32; 3] {
     [0.5; 3]
@@ -124,7 +128,11 @@ enum Rotation {
         #[serde(default)]
         phase_deg: f64,
     },
-    TidalLock,
+    TidalLock {
+        /// Lock to this moon (a direct child) instead of to the parent.
+        #[serde(default)]
+        to: Option<String>,
+    },
 }
 impl Default for Rotation {
     fn default() -> Self {
@@ -144,6 +152,141 @@ struct RingDef {
     albedo: [f32; 3],
     #[serde(default)]
     banded: bool,
+}
+
+#[derive(Deserialize, Clone, Copy)]
+#[serde(rename_all = "snake_case")]
+enum StyleDef {
+    GasGiant,
+    Cratered,
+    Rocky,
+    Icy,
+    Volcanic,
+    Terran,
+}
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
+struct SurfaceDef {
+    style: StyleDef,
+    #[serde(default)]
+    seed: u32,
+    #[serde(default, alias = "belt_albedo")]
+    secondary_albedo: Option<[f32; 3]>,
+    #[serde(default)]
+    bands: Option<f32>,
+    #[serde(default)]
+    turbulence: Option<f32>,
+    #[serde(default)]
+    storms: Option<u32>,
+    #[serde(default)]
+    craters: Option<f32>,
+    #[serde(default)]
+    ice_caps: Option<f32>,
+    #[serde(default)]
+    ocean: Option<f32>,
+    #[serde(default)]
+    clouds: Option<f32>,
+}
+
+impl SurfaceDef {
+    fn build(&self, albedo: [f32; 3]) -> Result<Surface> {
+        let style = match self.style {
+            StyleDef::GasGiant => SurfaceStyle::GasGiant,
+            StyleDef::Cratered => SurfaceStyle::Cratered,
+            StyleDef::Rocky => SurfaceStyle::Rocky,
+            StyleDef::Icy => SurfaceStyle::Icy,
+            StyleDef::Volcanic => SurfaceStyle::Volcanic,
+            StyleDef::Terran => SurfaceStyle::Terran,
+        };
+        let gas = style == SurfaceStyle::GasGiant;
+        let terran = style == SurfaceStyle::Terran;
+        ensure!(
+            gas || (self.bands.is_none() && self.turbulence.is_none() && self.storms.is_none()),
+            "surface bands, turbulence and storms apply only to gas_giant"
+        );
+        ensure!(
+            !gas || (self.craters.is_none() && self.ice_caps.is_none()),
+            "surface craters and ice_caps do not apply to gas_giant"
+        );
+        ensure!(
+            terran || (self.ocean.is_none() && self.clouds.is_none()),
+            "surface ocean and clouds apply only to terran"
+        );
+        // Default second colours keep the body's hue where that is natural:
+        // darker, more saturated belts, maria and dark regions.
+        let peak = albedo.into_iter().fold(1.0e-6_f32, f32::max);
+        let deeper = |scale: f32, power: f32| albedo.map(|c| scale * c * (c / peak).powf(power));
+        let secondary_albedo = self.secondary_albedo.unwrap_or(match style {
+            SurfaceStyle::GasGiant => deeper(0.8, 1.6),
+            SurfaceStyle::Cratered => deeper(0.55, 0.6),
+            SurfaceStyle::Rocky => deeper(0.6, 1.0),
+            SurfaceStyle::Icy => [albedo[0] * 0.75, albedo[1] * 0.5, albedo[2] * 0.35],
+            SurfaceStyle::Volcanic => [albedo[0] * 0.85, albedo[1] * 0.45, albedo[2] * 0.2],
+            SurfaceStyle::Terran => [0.03, 0.09, 0.2],
+        });
+        rgb(secondary_albedo, "surface secondary_albedo")?;
+        let unit = |value: Option<f32>, default: f32, name: &str| -> Result<f32> {
+            let v = value.unwrap_or(default);
+            ensure!(
+                v.is_finite() && (0.0..=1.0).contains(&v),
+                "surface {name} must be between 0 and 1"
+            );
+            Ok(v)
+        };
+        let bands = self.bands.unwrap_or(7.0);
+        ensure!(
+            bands.is_finite() && (1.0..=30.0).contains(&bands),
+            "surface bands must be between 1 and 30"
+        );
+        let storms = self.storms.unwrap_or(1);
+        ensure!(storms <= 3, "surface storms must be at most 3");
+        let (craters, ice_caps) = match style {
+            SurfaceStyle::GasGiant => (0.0, 0.0),
+            SurfaceStyle::Cratered => (0.8, 0.0),
+            SurfaceStyle::Rocky => (0.5, 0.06),
+            SurfaceStyle::Icy => (0.15, 0.0),
+            SurfaceStyle::Volcanic => (0.5, 0.0),
+            SurfaceStyle::Terran => (0.0, 0.1),
+        };
+        Ok(Surface {
+            style,
+            seed: self.seed,
+            secondary_albedo,
+            bands,
+            turbulence: unit(self.turbulence, 0.5, "turbulence")?,
+            storms,
+            craters: unit(self.craters, craters, "craters")?,
+            ice_caps: unit(self.ice_caps, ice_caps, "ice_caps")?,
+            ocean: unit(self.ocean, 0.65, "ocean")?,
+            clouds: unit(self.clouds, 0.4, "clouds")?,
+        })
+    }
+}
+
+/// A style's default surface for a body of the given albedo, exactly as a
+/// config file naming only the style would produce.
+pub fn default_surface(style: SurfaceStyle, albedo: [f32; 3]) -> Surface {
+    SurfaceDef {
+        style: match style {
+            SurfaceStyle::GasGiant => StyleDef::GasGiant,
+            SurfaceStyle::Cratered => StyleDef::Cratered,
+            SurfaceStyle::Rocky => StyleDef::Rocky,
+            SurfaceStyle::Icy => StyleDef::Icy,
+            SurfaceStyle::Volcanic => StyleDef::Volcanic,
+            SurfaceStyle::Terran => StyleDef::Terran,
+        },
+        seed: 0,
+        secondary_albedo: None,
+        bands: None,
+        turbulence: None,
+        storms: None,
+        craters: None,
+        ice_caps: None,
+        ocean: None,
+        clouds: None,
+    }
+    .build(albedo)
+    .expect("style defaults are valid")
 }
 
 pub fn load(path: impl AsRef<Path>) -> Result<Scene> {
@@ -206,6 +349,7 @@ impl System {
         let mut pending = self.bodies;
         let mut indices = HashMap::new();
         let mut bodies: Vec<Body> = Vec::new();
+        let mut locks = Vec::new();
         while !pending.is_empty() {
             let Some(next) = pending
                 .iter()
@@ -224,8 +368,22 @@ impl System {
             let body = def
                 .build(&indices, &bodies)
                 .with_context(|| format!("body '{}'", def.id))?;
+            if let Rotation::TidalLock { to: Some(moon) } = &def.rotation {
+                locks.push((bodies.len(), def.id.clone(), moon.clone()));
+            }
             indices.insert(def.id, bodies.len());
             bodies.push(body);
+        }
+        // Locks to a moon resolve once every body (and so the moon) exists.
+        for (index, id, moon) in locks {
+            let target = *indices
+                .get(&moon)
+                .with_context(|| format!("body '{id}': unknown tidal_lock moon '{moon}'"))?;
+            ensure!(
+                bodies[target].parent == Some(index),
+                "body '{id}': tidal_lock to '{moon}' requires '{moon}' to orbit '{id}'"
+            );
+            bodies[index].lock_to = Some((bodies[target].elements, bodies[target].period_days));
         }
         ensure!(
             bodies.iter().any(|b| b.kind == BodyKind::Star
@@ -431,8 +589,11 @@ impl BodyDef {
                     false,
                 )
             }
-            Rotation::TidalLock => {
-                ensure!(parent.is_some(), "tidal_lock requires an orbit and parent");
+            Rotation::TidalLock { ref to } => {
+                ensure!(
+                    parent.is_some() || to.is_some(),
+                    "tidal_lock requires an orbit and parent, or a moon to lock to"
+                );
                 (elements.inc, period_days, elements.m0, true)
             }
         };
@@ -465,7 +626,19 @@ impl BodyDef {
                 })
             })
             .transpose()?;
+        let surface = self
+            .surface
+            .as_ref()
+            .map(|d| -> Result<Surface> {
+                ensure!(
+                    matches!(kind, BodyKind::Planet | BodyKind::Moon),
+                    "surface requires a planet or moon"
+                );
+                d.build(self.albedo)
+            })
+            .transpose()?;
         Ok(Body {
+            surface,
             name: self.name.clone().unwrap_or_else(|| self.id.clone()),
             parent,
             elements,
@@ -480,6 +653,7 @@ impl BodyDef {
             spin_phase,
             rings,
             tidally_locked,
+            lock_to: None,
         })
     }
 }
@@ -586,6 +760,108 @@ mod tests {
             }
             assert!(count >= 2, "{name}: only {count} transits in 60 days");
         }
+    }
+
+    #[test]
+    fn gas_giant_surface_defaults_and_validation() {
+        let scene = parse(CORONA).unwrap();
+        let tormenta = scene.bodies.iter().find(|b| b.name == "Tormenta").unwrap();
+        let surface = tormenta.surface.unwrap();
+        assert_eq!(surface.style, SurfaceStyle::GasGiant);
+        assert_eq!((surface.seed, surface.storms), (21, 3));
+        // Default belts: same hue as the zones, darker and more saturated.
+        let (zone, belt) = (tormenta.albedo, surface.secondary_albedo);
+        assert!((0..3).all(|c| belt[c] < zone[c]));
+        assert!(belt[2] / belt[0] < zone[2] / zone[0]);
+        let line = "surface: {style: gas_giant, seed: 21, bands: 8, turbulence: 0.7, storms: 3}";
+        assert!(CORONA.contains(line));
+        for bad in [
+            "surface: {style: gas_giant, bands: 0}",
+            "surface: {style: gas_giant, turbulence: 2}",
+            "surface: {style: gas_giant, storms: 4}",
+            "surface: {style: gas_giant, belt_albedo: [2, 0, 0]}",
+            "surface: {style: marble}",
+            "surface: {style: gas_giant, colour: 1}",
+            "surface: {style: gas_giant, craters: 0.5}",
+        ] {
+            assert!(parse(&CORONA.replace(line, bad)).is_err(), "{bad}");
+        }
+        // Stars cannot take a surface style.
+        let star = CORONA.replacen(
+            "    rotation: {mode: free, period_days: 9, obliquity_deg: 25}",
+            "    rotation: {mode: free, period_days: 9, obliquity_deg: 25}\n    surface: {style: gas_giant}",
+            1,
+        );
+        assert!(parse(&star).is_err());
+    }
+
+    #[test]
+    fn solid_surface_styles_defaults_and_field_checks() {
+        let scene = parse(CORONA).unwrap();
+        let surface = |name: &str| {
+            scene
+                .bodies
+                .iter()
+                .find(|b| b.name == name)
+                .unwrap()
+                .surface
+                .unwrap()
+        };
+        let ocre = surface("Ocre");
+        assert_eq!(ocre.style, SurfaceStyle::Rocky);
+        assert!(ocre.craters > 0.0 && ocre.ice_caps > 0.0);
+        assert_eq!(surface("Chispa").style, SurfaceStyle::Cratered);
+        assert_eq!(surface("Ceniza").style, SurfaceStyle::Volcanic);
+        assert_eq!(surface("Alba").style, SurfaceStyle::Icy);
+        let puna = surface("Puna");
+        assert_eq!(puna.style, SurfaceStyle::Terran);
+        assert!(puna.ocean > 0.5 && puna.clouds > 0.0);
+        // The host keeps the plain albedo; its ground is the local terrain.
+        assert!(scene.body(scene.host).surface.is_none());
+        let line = "surface: {style: rocky, seed: 1}";
+        assert!(CORONA.contains(line));
+        assert!(
+            parse(&CORONA.replace(line, "surface: {style: rocky, craters: 1, ice_caps: 0}"))
+                .is_ok()
+        );
+        for bad in [
+            "surface: {style: rocky, ocean: 0.5}",
+            "surface: {style: rocky, clouds: 0.5}",
+            "surface: {style: rocky, bands: 4}",
+            "surface: {style: rocky, storms: 1}",
+            "surface: {style: rocky, craters: 1.5}",
+            "surface: {style: rocky, ice_caps: -0.1}",
+        ] {
+            assert!(parse(&CORONA.replace(line, bad)).is_err(), "{bad}");
+        }
+        let terran = "surface: {style: terran, seed: 7}";
+        assert!(
+            parse(&CORONA.replace(terran, "surface: {style: terran, ocean: 0.3, clouds: 0}"))
+                .is_ok()
+        );
+        assert!(parse(&CORONA.replace(terran, "surface: {style: terran, ocean: 2}")).is_err());
+    }
+
+    #[test]
+    fn gemma_and_gemmi_are_mutually_tidally_locked() {
+        const ERG: &str = include_str!("../configs/2-erg-dunes.yaml");
+        let scene = parse(ERG).unwrap();
+        let id = |name: &str| scene.bodies.iter().position(|b| b.name == name).unwrap();
+        let (gemma, gemmi) = (id("Gemma"), id("Gemmi"));
+        for t in [0.0, 0.7, 1.6, 2.9, 40.0] {
+            let p = scene.positions(t);
+            let towards = (p[gemmi] - p[gemma]).normalize();
+            // Gemma's longitude 0 faces Gemmi; Gemmi's longitude 180 faces Gemma.
+            let gemma_x = scene.body(gemma).spin_quat(t) * glam::DVec3::X;
+            let gemmi_x = scene.body(gemmi).spin_quat(t) * glam::DVec3::X;
+            assert!(gemma_x.dot(towards) > 0.9999, "t={t}");
+            assert!(gemmi_x.dot(towards) > 0.9999, "t={t}");
+        }
+        let lock = "rotation: {mode: tidal_lock, to: gemmi}";
+        assert!(ERG.contains(lock));
+        // The target must exist and orbit the locked body.
+        assert!(parse(&ERG.replace(lock, "rotation: {mode: tidal_lock, to: nowhere}")).is_err());
+        assert!(parse(&ERG.replace(lock, "rotation: {mode: tidal_lock, to: simoom}")).is_err());
     }
 
     #[test]

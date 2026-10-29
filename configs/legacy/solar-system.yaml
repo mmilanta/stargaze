@@ -72,6 +72,7 @@ bodies:
       mode: free
       period_days: 27.321661
       obliquity_deg: 6.68
+    surface: {style: cratered, seed: 1}
   - id: mars
     name: Mars
     kind: planet
@@ -90,6 +91,7 @@ bodies:
       mode: free
       period_days: 1.025957
       obliquity_deg: 25.19
+    surface: {style: rocky, seed: 2}
   - id: phobos
     name: Phobos
     kind: moon
@@ -107,6 +109,7 @@ bodies:
       mode: free
       period_days: 0.31891
       obliquity_deg: 25.19
+    surface: {style: cratered, seed: 3}
   - id: mercury
     name: Mercury
     kind: planet
@@ -125,6 +128,7 @@ bodies:
       mode: free
       period_days: 58.646
       obliquity_deg: 0.034
+    surface: {style: cratered, seed: 4, craters: 1}
   - id: venus
     name: Venus
     kind: planet
@@ -161,6 +165,7 @@ bodies:
       mode: free
       period_days: 0.41354
       obliquity_deg: 3.1300000000000003
+    surface: {style: gas_giant, seed: 1, bands: 7, turbulence: 0.7, storms: 3}
   - id: saturn
     name: Saturn
     kind: planet
@@ -179,6 +184,7 @@ bodies:
       mode: free
       period_days: 0.44401
       obliquity_deg: 26.73
+    surface: {style: gas_giant, seed: 2, bands: 10, turbulence: 0.25, storms: 0}
     rings:
       inner_radius: 1.2820785822228329
       outer_radius: 2.34879447726336
@@ -203,6 +209,7 @@ bodies:
       mode: free
       period_days: 0.71833
       obliquity_deg: 97.77
+    surface: {style: gas_giant, seed: 3, bands: 4, turbulence: 0.1, storms: 0}
   - id: neptune
     name: Neptune
     kind: planet
@@ -221,6 +228,7 @@ bodies:
       mode: free
       period_days: 0.67125
       obliquity_deg: 28.32
+    surface: {style: gas_giant, seed: 4, bands: 5, turbulence: 0.5, storms: 1}
   - id: deimos
     name: Deimos
     kind: moon
@@ -239,6 +247,7 @@ bodies:
       mode: free
       period_days: 1.26244
       obliquity_deg: 25.19
+    surface: {style: cratered, seed: 5}
   - id: io
     name: Io
     kind: moon
@@ -257,6 +266,7 @@ bodies:
       mode: free
       period_days: 1.769138
       obliquity_deg: 3.1300000000000003
+    surface: {style: volcanic, seed: 6}
   - id: europa
     name: Europa
     kind: moon
@@ -275,6 +285,7 @@ bodies:
       mode: free
       period_days: 3.551181
       obliquity_deg: 3.1300000000000003
+    surface: {style: icy, seed: 7}
   - id: ganymede
     name: Ganymede
     kind: moon
@@ -293,6 +304,7 @@ bodies:
       mode: free
       period_days: 7.154553
       obliquity_deg: 3.1300000000000003
+    surface: {style: cratered, seed: 8, craters: 0.5}
   - id: callisto
     name: Callisto
     kind: moon
@@ -311,6 +323,7 @@ bodies:
       mode: free
       period_days: 16.689018
       obliquity_deg: 3.1300000000000003
+    surface: {style: cratered, seed: 9, craters: 1}
   - id: titan
     name: Titan
     kind: moon
@@ -347,6 +360,7 @@ bodies:
       mode: free
       period_days: 8.705872
       obliquity_deg: 97.77
+    surface: {style: cratered, seed: 10}
   - id: triton
     name: Triton
     kind: moon
@@ -365,3 +379,4 @@ bodies:
       mode: free
       period_days: 5.876854
       obliquity_deg: 156.865
+    surface: {style: icy, seed: 11}
