@@ -245,9 +245,12 @@ cargo run --release -- --check-config configs/legacy/halo.yaml
 The menu lists the levels in `configs/` (one per explore ground, numbered in
 play order); the default launch, with or without `--game`, opens the first,
 `configs/1-halo-volcano.yaml`: Calyx and Halo over the volcano ground.
-`configs/3-corona-valley.yaml` puts the desert valley on Quebrada, a freely
-spinning planet of the red dwarf Brasa, which orbits Corona, a ringed white star.
-It opens just before the neighbouring planet Puna hides Corona's disc but not its rings. The
+`configs/3-umbra-valley.yaml` puts the desert valley on Mirador, a tidally locked
+outer planet with two moons. A compact white star and a much larger ringed giant
+orbit their shared centre; the giant eclipses the star once per simulated day.
+Two inner planets and the moons add frequent transits. Page Up / Page Down move
+forward / backward exactly one simulated day, preserving the eclipse phase and view.
+The old ringed-star valley is archived in `configs/legacy/corona-valley.yaml`. The
 earlier systems live in `configs/legacy/` (still used by presets, tests and
 benchmarks); `configs/legacy/solar-system.yaml` contains the Sun, all eight
 planets and selected moons, with the camera on Earth looking at the Moon. Edit
@@ -496,7 +499,7 @@ or minimizing also releases capture; returning to observation captures it again.
 | `R` | keep the horizon level or the stars fixed while following a target |
 | scroll / `=` / `-` | zoom, down to 0.001° |
 | `Space` | pause or resume the previous signed playback speed |
-| `Page Down` / `Page Up` | jump backward / forward by one local solar day (targets panel closed) |
+| `Page Down` / `Page Up` | backward / forward one day (exactly 24 hours on Mirador; targets panel closed) |
 | Left / Right arrow | choose −1000, −100, −10, −1, 0, +1, +10, +100 or +1000 minutes per second |
 | `1`–`9`, `0` (targets panel open) | aim at a target on the current page (Explore only) |
 | `Page Up` / `Page Down` (targets panel open) | previous / next page of up to 10 targets |
@@ -529,6 +532,12 @@ the search is bounded to 512 of the shortest resolved spin/orbit cycles.
 Page Down / Page Up perform these jumps while observing, once per key press,
 except when the targets panel is open: there they navigate target pages without
 advancing time. In the map menu they continue to turn pages.
+
+A system can instead set `day_length_days: <duration>` at the YAML top level.
+Its day jumps then move by that fixed duration in simulated days. Mirador uses
+`day_length_days: 1`: exactly 24 hours, matching its eclipse cycle while keeping
+the current eclipse phase, camera view and tracking. Eclipse search (`E`)
+remains a separate action.
 
 Right-clicking (or pressing `K`) with a body at the centre locks the telescope onto it as time advances.
 With empty sky at the centre, right-click holds that direction fixed against the background stars,

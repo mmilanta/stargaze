@@ -1,0 +1,115 @@
+# A compact white star and an enormous ringed planet share a barycentre.
+# Their 0.95-day orbit, viewed from a 19-day outer orbit, repeats in one day.
+# Coplanar tracks give daily eclipses and frequent inner-planet/moon transits.
+# These are illustrative analytic orbits; masses and N-body stability are not modeled.
+version: 1
+name: Umbra — the daily eclipse
+time_days: -0.08
+day_length_days: 1
+camera:
+  body: mirador
+  # Near the equator so both moons can cross the star from this surface site.
+  latitude_deg: 8
+  # Offset from the substellar meridian: the star stays about 50° above the horizon.
+  longitude_deg: 140.7
+  height_m: 2
+  look_at: lucero
+  fov_deg: 70
+  atmosphere: earthlike
+  ground: desert
+targets: [lucero, umbra, ascua, cobre, nacar, pizarra]
+bodies:
+  - id: centre
+    name: Barycentre
+    kind: anchor
+    radius_km: 0
+  - id: lucero
+    name: Lucero
+    kind: star
+    parent: centre
+    radius_km: 8000
+    luminosity: 0.0004
+    emission: [0.90, 0.95, 1.0]
+    orbit:
+      semi_major_axis_km: 10000
+      period_days: 0.95
+      mean_anomaly_deg: 180
+  - id: umbra
+    name: Umbra
+    kind: planet
+    parent: centre
+    radius_km: 100000
+    albedo: [0.76, 0.65, 0.48]
+    orbit:
+      semi_major_axis_km: 590000
+      period_days: 0.95
+    rotation: {mode: free, period_days: 0.45, obliquity_deg: 28}
+    surface: {style: gas_giant, seed: 21, bands: 8, turbulence: 0.7, storms: 3}
+    rings:
+      inner_radius: 1.3
+      outer_radius: 2.5
+      optical_depth: 0.9
+      albedo: [0.88, 0.82, 0.68]
+      banded: true
+  # Fast, close-in rocky planet; safely outside the giant and its rings.
+  - id: ascua
+    name: Ascua
+    kind: planet
+    parent: centre
+    radius_km: 4200
+    albedo: [0.64, 0.34, 0.19]
+    orbit:
+      semi_major_axis_km: 1400000
+      period_days: 6.057
+      mean_anomaly_deg: 20
+    rotation: {mode: tidal_lock}
+    surface: {style: rocky, seed: 1}
+  # A smaller world midway between the pair and the observatory's orbit.
+  - id: cobre
+    name: Cobre
+    kind: planet
+    parent: centre
+    radius_km: 2600
+    albedo: [0.64, 0.46, 0.30]
+    orbit:
+      semi_major_axis_km: 2100000
+      period_days: 11.127
+      mean_anomaly_deg: 12
+    rotation: {mode: free, period_days: 1.7}
+    surface: {style: cratered, seed: 5}
+  # The inward-facing valley keeps the central pair above the horizon.
+  - id: mirador
+    name: Mirador
+    kind: planet
+    parent: centre
+    radius_km: 6000
+    albedo: [0.58, 0.42, 0.28]
+    orbit:
+      semi_major_axis_km: 3000000
+      period_days: 19
+    rotation: {mode: tidal_lock}
+  # Two visible moons in a 1:2 resonance; orbital planes match the inner worlds.
+  - id: nacar
+    name: Nacar
+    kind: moon
+    parent: mirador
+    radius_km: 1050
+    albedo: [0.76, 0.79, 0.82]
+    orbit:
+      semi_major_axis_km: 45000
+      period_days: 0.4
+      mean_anomaly_deg: 45
+    rotation: {mode: tidal_lock}
+    surface: {style: icy, seed: 4}
+  - id: pizarra
+    name: Pizarra
+    kind: moon
+    parent: mirador
+    radius_km: 1500
+    albedo: [0.46, 0.48, 0.52]
+    orbit:
+      semi_major_axis_km: 71433
+      period_days: 0.8
+      mean_anomaly_deg: 210
+    rotation: {mode: tidal_lock}
+    surface: {style: cratered, seed: 9}

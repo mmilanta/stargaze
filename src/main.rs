@@ -431,45 +431,60 @@ impl State {
     /// system, or a planet eclipsing a star in the binary.
     fn next_eclipse(&mut self) -> Option<&'static str> {
         let stars = self.scene.star_indices();
-        let host = self.scene.host;
         let step = 0.01; // days
         let start = self.sim_time;
+        let mut between_events = self.eclipsed_star(start, &stars, None).is_none();
         // A true-size Earth does not see a local solar eclipse every year.
-        // Search up to ten model years instead of the old inflated-scene limit.
+        // Search up to ten model years, skipping an event already in progress.
         for i in 1..365_250 {
             let t = start + i as f64 * step;
-            let p = self.scene.positions(t);
-            let vf = self.observer.frame(&self.scene, t, &p);
-            for &si in &stars {
-                let d_star = p[si] - vf.position;
-                let star_dist = d_star.length();
-                let star_dir = d_star / star_dist;
-                if star_dir.dot(vf.zenith) < 0.05 {
-                    continue; // star below the horizon
+            match self.eclipsed_star(t, &stars, None) {
+                None => between_events = true,
+                Some(star) if between_events => {
+                    self.sim_time = t;
+                    self.day_step_failed = false;
+                    self.point_at(star);
+                    self.last = Instant::now();
+                    return Some("eclipse of a star");
                 }
-                let star_ang = (self.scene.body(si).radius / star_dist).asin();
-                for (bi, body) in self.scene.bodies.iter().enumerate() {
-                    if bi == host
-                        || bi == si
-                        || matches!(body.kind, BodyKind::Star | BodyKind::Anchor)
-                    {
-                        continue;
-                    }
-                    let d_body = p[bi] - vf.position;
-                    let body_dist = d_body.length();
-                    if body_dist >= star_dist {
-                        continue; // must be in front of the star
-                    }
-                    let body_ang = (body.radius / body_dist).asin();
-                    if body_ang < star_ang * 0.3 {
-                        continue; // too small to be a real eclipse
-                    }
-                    let sep = star_dir.angle_between(d_body / body_dist);
-                    if sep < star_ang + body_ang {
-                        self.sim_time = t;
-                        self.point_at(si);
-                        return Some("eclipse of a star");
-                    }
+                Some(_) => {}
+            }
+        }
+        None
+    }
+
+    fn eclipsed_star(&self, t: f64, stars: &[usize], occluder: Option<usize>) -> Option<usize> {
+        let host = self.scene.host;
+        let p = self.scene.positions(t);
+        let vf = self.observer.frame(&self.scene, t, &p);
+        for &si in stars {
+            let d_star = p[si] - vf.position;
+            let star_dist = d_star.length();
+            let star_dir = d_star / star_dist;
+            if star_dir.dot(vf.zenith) < 0.05 {
+                continue; // star below the horizon
+            }
+            let star_ang = (self.scene.body(si).radius / star_dist).asin();
+            for (bi, body) in self.scene.bodies.iter().enumerate() {
+                if bi == host
+                    || bi == si
+                    || occluder.is_some_and(|index| index != bi)
+                    || matches!(body.kind, BodyKind::Star | BodyKind::Anchor)
+                {
+                    continue;
+                }
+                let d_body = p[bi] - vf.position;
+                let body_dist = d_body.length();
+                if body_dist >= star_dist {
+                    continue; // must be in front of the star
+                }
+                let body_ang = (body.radius / body_dist).asin();
+                if body_ang < star_ang * 0.3 {
+                    continue; // too small to be a real eclipse
+                }
+                let sep = star_dir.angle_between(d_body / body_dist);
+                if sep < star_ang + body_ang {
+                    return Some(si);
                 }
             }
         }
@@ -3310,6 +3325,48 @@ mod app_tests {
             .frame(&state.scene, state.sim_time, &positions);
         let dir = (positions[state.scene.default_target] - vf.position).normalize();
         assert!(vf.forward.dot(dir) > 0.999_999);
+    }
+
+    #[test]
+    fn locked_world_day_keys_move_exactly_one_day_without_reaiming() {
+        for puzzle in [false, true] {
+            let mut app = app();
+            app.state = State::with_scene(
+                config::parse(include_str!("../configs/3-umbra-valley.yaml")).unwrap(),
+            );
+            if puzzle {
+                app.game = Some(game::Game::default());
+            }
+            // A custom aim must survive a day jump even away from an eclipse.
+            app.state.observer.az = 0.7;
+            app.state.observer.alt = 0.3;
+            let aim = (app.state.observer.az, app.state.observer.alt);
+            let fov = app.state.observer.fov_y;
+            let warp = app.state.warp;
+            let mut previous = app.state.sim_time;
+            for key in [
+                KeyCode::PageUp,
+                KeyCode::PageUp,
+                KeyCode::PageUp,
+                KeyCode::PageDown,
+                KeyCode::PageDown,
+            ] {
+                app.observation_key(key);
+                let t = app.state.sim_time;
+                assert!(!app.state.day_step_failed);
+                let delta = if key == KeyCode::PageUp { 1.0 } else { -1.0 };
+                assert!((t - previous - delta).abs() < 1e-12);
+                assert_eq!((app.state.observer.az, app.state.observer.alt), aim);
+                assert_eq!(app.state.observer.fov_y, fov);
+                assert_eq!(app.state.warp, warp);
+                previous = t;
+            }
+            // Totality advances to the same phase one full day later.
+            app.state.sim_time = 0.0;
+            app.observation_key(KeyCode::PageUp);
+            assert_eq!(app.state.sim_time, 1.0);
+            assert!(!app.repeat_observation_key(KeyCode::PageUp));
+        }
     }
 
     #[test]

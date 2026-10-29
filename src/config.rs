@@ -16,6 +16,8 @@ struct System {
     name: String,
     #[serde(default)]
     time_days: Option<f64>,
+    #[serde(default)]
+    day_length_days: Option<f64>,
     camera: Camera,
     #[serde(default)]
     targets: Vec<String>,
@@ -410,6 +412,11 @@ impl System {
             Ok(())
         };
         check_target(default_target)?;
+        ensure!(
+            self.day_length_days
+                .is_none_or(|days| days.is_finite() && days > 0.0),
+            "day_length_days must be positive and finite"
+        );
         let targets = if self.targets.is_empty() {
             vec![default_target]
         } else {
@@ -474,6 +481,7 @@ impl System {
             observer_lon_deg: c.longitude_deg,
             observer_height_m: c.height_m,
             initial_time_days: self.time_days,
+            day_length_days: self.day_length_days,
         })
     }
 }
@@ -655,7 +663,103 @@ mod tests {
     use super::*;
     const HALO: &str = include_str!("../configs/legacy/halo.yaml");
     const SOLAR: &str = include_str!("../configs/legacy/solar-system.yaml");
-    const CORONA: &str = include_str!("../configs/3-corona-valley.yaml");
+    const CORONA: &str = include_str!("../configs/legacy/corona-valley.yaml");
+    const UMBRA: &str = include_str!("../configs/3-umbra-valley.yaml");
+
+    #[test]
+    fn umbra_has_a_locked_two_moon_host_and_daily_giant_eclipses() {
+        let scene = parse(UMBRA).unwrap();
+        let id = |name: &str| scene.bodies.iter().position(|b| b.name == name).unwrap();
+        let (star, giant) = (id("Lucero"), id("Umbra"));
+        let host = scene.body(scene.host);
+        assert!(host.tidally_locked);
+        assert_eq!(scene.day_length_days, Some(1.0));
+        assert_eq!(scene.body(star).parent, scene.body(giant).parent);
+        assert_eq!(scene.body(star).period_days, scene.body(giant).period_days);
+        assert!(scene.body(giant).radius > 10.0 * scene.body(star).radius);
+        assert!(scene.body(giant).rings.is_some());
+        assert!(scene.body(star).rings.is_none());
+        assert_eq!(
+            scene
+                .bodies
+                .iter()
+                .filter(|b| b.parent == Some(scene.host) && b.kind == BodyKind::Moon)
+                .count(),
+            2
+        );
+        let inner: Vec<_> = scene
+            .bodies
+            .iter()
+            .filter(|b| {
+                b.kind == BodyKind::Planet
+                    && b.parent == host.parent
+                    && b.elements.a > scene.body(giant).elements.a
+                    && b.elements.a < host.elements.a
+            })
+            .collect();
+        assert_eq!(inner.len(), 2);
+        assert!(
+            inner
+                .iter()
+                .all(|b| b.radius < host.radius && b.elements.inc == 0.0)
+        );
+        let state = crate::State::with_scene(scene);
+        for t in [0.0, 1.0, 2.0, 19.0, 50.0] {
+            let p = state.scene.positions(t);
+            let vf = state.observer.frame(&state.scene, t, &p);
+            let ds = p[star] - vf.position;
+            let dg = p[giant] - vf.position;
+            let rs = (state.scene.body(star).radius / ds.length()).asin();
+            let rg = (state.scene.body(giant).radius / dg.length()).asin();
+            assert!(dg.length() < ds.length());
+            assert!(ds.angle_between(dg) + rs < rg, "no totality on day {t}");
+            let altitude = ds.normalize().dot(vf.zenith).asin().to_degrees();
+            assert!(
+                (49.0..51.0).contains(&altitude),
+                "star altitude {altitude} on day {t}"
+            );
+        }
+        for duration in ["0", "-1", ".inf", ".nan"] {
+            assert!(
+                parse(&UMBRA.replace(
+                    "day_length_days: 1",
+                    &format!("day_length_days: {duration}")
+                ))
+                .is_err()
+            );
+        }
+        assert!(
+            parse(&UMBRA.replace("day_length_days: 1\n", ""))
+                .unwrap()
+                .day_length_days
+                .is_none()
+        );
+    }
+
+    #[test]
+    fn umbra_inner_planets_and_both_moons_repeatedly_transit_the_star() {
+        let state = crate::State::with_scene(parse(UMBRA).unwrap());
+        let star = state.scene.default_target;
+        for name in ["Ascua", "Cobre", "Nacar", "Pizarra"] {
+            let index = state
+                .scene
+                .bodies
+                .iter()
+                .position(|b| b.name == name)
+                .unwrap();
+            let mut count = 0;
+            let mut was_transiting = false;
+            for step in 0..30_000 {
+                let t = step as f64 * 0.002;
+                let transit = state.eclipsed_star(t, &[star], Some(index)).is_some();
+                if transit && !was_transiting {
+                    count += 1;
+                }
+                was_transiting = transit;
+            }
+            assert!(count >= 2, "{name}: only {count} transits in 60 days");
+        }
+    }
 
     #[test]
     fn gas_giant_surface_defaults_and_validation() {
