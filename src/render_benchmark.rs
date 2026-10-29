@@ -31,6 +31,7 @@ const CASES: &[&str] = &[
     "ground-dunes",
     "level-1",
     "level-2",
+    "level-3",
 ];
 const FORMAT: wgpu::TextureFormat = wgpu::TextureFormat::Rgba8UnormSrgb;
 
@@ -459,13 +460,13 @@ fn fixture(name: &str, step: u32, cfg: &Config) -> Frame {
             if name == "atacama-day" { 0.14 + dt } else { dt },
         ),
         // Level start views, exactly as configured.
-        "level-1" | "level-2" => {
+        "level-1" | "level-2" | "level-3" => {
             // The app's own start: configured or searched time, initial view
             // and lookout height. The benchmark runner strips STARGAZE_* vars.
-            let scene = crate::config::parse(if name == "level-1" {
-                include_str!("../configs/1-halo-volcano.yaml")
-            } else {
-                include_str!("../configs/2-erg-dunes.yaml")
+            let scene = crate::config::parse(match name {
+                "level-1" => include_str!("../configs/1-halo-volcano.yaml"),
+                "level-2" => include_str!("../configs/2-erg-dunes.yaml"),
+                _ => include_str!("../configs/3-umbra-valley.yaml"),
             })
             .unwrap();
             let mut s = crate::State::with_scene(scene);
@@ -490,7 +491,7 @@ fn fixture(name: &str, step: u32, cfg: &Config) -> Frame {
     };
     match name {
         "halo-rings" | "atacama-day" | "atacama-night" => s.point_initial_view(),
-        "level-1" | "level-2" => {}
+        "level-1" | "level-2" | "level-3" => {}
         name if name.starts_with("ground-") => {
             // Atacama's initial direction, levelled to show the ground.
             s.point_initial_view();
@@ -510,6 +511,8 @@ fn fixture(name: &str, step: u32, cfg: &Config) -> Frame {
                 "ground-dunes" => -14.0_f64,
                 "ground-craters" => -12.0,
                 "ground-basalt" => -9.0,
+                // Down from the nunatak over the crevasse fields.
+                "ground-alpine" => -5.0,
                 _ => 2.0,
             }
             .to_radians();
@@ -877,6 +880,8 @@ fn run_benchmark(cfg: &Config) -> Result<()> {
             // The app's auto exposure for the level's night start view.
             "level-1" => 110.0,
             "level-2" => 0.16,
+            // Chosen by eye for the night start, lit by Corona alone.
+            "level-3" => 1.5,
             "ground-craters" => 0.4,
             "ground-dunes" => 0.3,
             "ground-alpine" => 0.25,

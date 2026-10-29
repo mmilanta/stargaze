@@ -22,12 +22,14 @@ pub enum Theme {
     Desert = 1,
     /// Airless regolith plain with craters; the host atmosphere is removed.
     Craters = 2,
-    /// Snowfield plateau ringed by jagged peaks.
+    /// Patagonian ice field seen from a nunatak: crevasses, blue ice and
+    /// jagged granite peaks (real elevation data).
     Alpine = 3,
     /// Stromboli's measured summit and vent complex above a lava plain, with
     /// surveyed Aeolian volcanoes on the horizon.
     Basalt = 4,
-    /// Endless sand sea, seen from the crest of a high dune.
+    /// Endless sand sea, seen from the crest of a high dune, with compound
+    /// dunes, wind ripples and a cracked clay pan.
     Dunes = 5,
 }
 
