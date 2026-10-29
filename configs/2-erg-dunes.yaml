@@ -40,6 +40,8 @@ bodies:
     rotation: {mode: free, period_days: 25}
   # The near-double planet: Gemmi is 3/4 of Gemma's diameter and orbits in
   # the planets' plane, so the pair eclipses each other every orbit.
+  # Mutually tidally locked, like Pluto and Charon: each keeps one face
+  # turned to the other, both spinning once per 3.2-day orbit.
   - id: gemma
     name: Gemma
     kind: planet
@@ -50,7 +52,8 @@ bodies:
       semi_major_axis_au: 0.62
       period_days: 178.31
       mean_anomaly_deg: 130
-    rotation: {mode: tidal_lock}
+    rotation: {mode: tidal_lock, to: gemmi}
+    surface: {style: terran, seed: 1}
   - id: gemmi
     name: Gemmi
     kind: moon
@@ -61,6 +64,7 @@ bodies:
       semi_major_axis_km: 30000
       period_days: 3.2
     rotation: {mode: tidal_lock}
+    surface: {style: icy, seed: 2}
   # Home: a ringed dune world. Rings lie in its equator (22-degree tilt).
   - id: erg
     name: Erg
@@ -94,6 +98,7 @@ bodies:
       ascending_node_deg: 0
       mean_anomaly_deg: 75
     rotation: {mode: tidal_lock}
+    surface: {style: cratered, seed: 3}
   - id: sirocco
     name: Sirocco
     kind: moon
@@ -107,6 +112,7 @@ bodies:
       ascending_node_deg: 0
       mean_anomaly_deg: 105
     rotation: {mode: tidal_lock}
+    surface: {style: icy, seed: 5}
   - id: harmattan
     name: Harmattan
     kind: moon
@@ -120,6 +126,7 @@ bodies:
       ascending_node_deg: 0
       mean_anomaly_deg: 30
     rotation: {mode: tidal_lock}
+    surface: {style: cratered, seed: 6}
   # The outer giant: rings from 1.3 to 4.3 planet radii (three diameters
   # wide) and a 50-degree tilt. Moons orbit outside the rings, in its equator.
   - id: dhow
@@ -133,6 +140,7 @@ bodies:
       period_days: 1358.0
       mean_anomaly_deg: 250
     rotation: {mode: free, period_days: 0.45, obliquity_deg: 50}
+    surface: {style: gas_giant, seed: 4, bands: 9, turbulence: 0.35, storms: 1}
     rings:
       inner_radius: 1.3
       outer_radius: 4.3
@@ -152,6 +160,7 @@ bodies:
       ascending_node_deg: 90
       mean_anomaly_deg: 20
     rotation: {mode: tidal_lock}
+    surface: {style: rocky, seed: 7}
   - id: zonda
     name: Zonda
     kind: moon
@@ -165,6 +174,7 @@ bodies:
       ascending_node_deg: 90
       mean_anomaly_deg: 160
     rotation: {mode: tidal_lock}
+    surface: {style: icy, seed: 8}
   - id: bora
     name: Bora
     kind: moon
@@ -178,3 +188,4 @@ bodies:
       ascending_node_deg: 90
       mean_anomaly_deg: 280
     rotation: {mode: tidal_lock}
+    surface: {style: cratered, seed: 9}

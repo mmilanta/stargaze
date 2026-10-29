@@ -59,7 +59,9 @@ impl Orbiter {
             spin_period: self.spin_days,
             spin_phase: 0.0,
             tidally_locked: false,
+            lock_to: None,
             rings: None,
+            surface: None,
         }
     }
 }

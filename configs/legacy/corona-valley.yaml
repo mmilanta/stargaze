@@ -62,6 +62,7 @@ bodies:
       period_days: 130.5
       mean_anomaly_deg: 40
     rotation: {mode: free, period_days: 1.8, obliquity_deg: 10}
+    surface: {style: rocky, seed: 1}
   - id: chispa
     name: Chispa
     kind: moon
@@ -73,6 +74,7 @@ bodies:
       period_days: 11
       mean_anomaly_deg: 200
     rotation: {mode: tidal_lock}
+    surface: {style: cratered, seed: 2}
   - id: ceniza
     name: Ceniza
     kind: planet
@@ -84,6 +86,7 @@ bodies:
       period_days: 369.6
       mean_anomaly_deg: 250
     rotation: {mode: free, period_days: 0.7, obliquity_deg: 18}
+    surface: {style: volcanic, seed: 3}
   # Alba and Ocaso: a 1:2 resonance (4 and 8 days; Ocaso 2^(2/3) farther).
   - id: alba
     name: Alba
@@ -96,6 +99,7 @@ bodies:
       period_days: 4
       mean_anomaly_deg: 30
     rotation: {mode: tidal_lock}
+    surface: {style: icy, seed: 4}
   - id: ocaso
     name: Ocaso
     kind: moon
@@ -107,6 +111,7 @@ bodies:
       period_days: 8
       mean_anomaly_deg: 195
     rotation: {mode: tidal_lock}
+    surface: {style: cratered, seed: 5}
   # The companion: a red dwarf, 0.35 solar radii, 4 AU from Corona.
   - id: brasa
     name: Brasa
@@ -133,6 +138,7 @@ bodies:
       period_days: 15
       mean_anomaly_deg: 120
     rotation: {mode: tidal_lock}
+    surface: {style: icy, seed: 6}
   - id: quebrada
     name: Quebrada
     kind: planet
@@ -149,12 +155,13 @@ bodies:
     kind: planet
     parent: brasa
     radius_km: 11000
-    albedo: [0.46, 0.52, 0.58]
+    albedo: [0.60, 0.52, 0.40]
     orbit:
       semi_major_axis_au: 0.14415
       period_days: 33.75
       mean_anomaly_deg: 300
     rotation: {mode: tidal_lock}
+    surface: {style: terran, seed: 7}
   # The outer giant circles both stars at 14 AU, its rings and moons in its
   # equator, tilted 27 degrees (inclination 27, node 90 = its equator).
   - id: tormenta
@@ -168,6 +175,7 @@ bodies:
       period_days: 15126
       mean_anomaly_deg: 150
     rotation: {mode: free, period_days: 0.44, obliquity_deg: 27}
+    surface: {style: gas_giant, seed: 21, bands: 8, turbulence: 0.7, storms: 3}
     rings:
       inner_radius: 1.3
       outer_radius: 2.5
@@ -187,6 +195,7 @@ bodies:
       ascending_node_deg: 90
       mean_anomaly_deg: 10
     rotation: {mode: tidal_lock}
+    surface: {style: icy, seed: 8}
   - id: trueno
     name: Trueno
     kind: moon
@@ -200,6 +209,7 @@ bodies:
       ascending_node_deg: 90
       mean_anomaly_deg: 130
     rotation: {mode: tidal_lock}
+    surface: {style: cratered, seed: 9}
   - id: granizo
     name: Granizo
     kind: moon
@@ -213,6 +223,7 @@ bodies:
       ascending_node_deg: 90
       mean_anomaly_deg: 250
     rotation: {mode: tidal_lock}
+    surface: {style: icy, seed: 10}
   - id: niebla
     name: Niebla
     kind: moon
@@ -226,3 +237,4 @@ bodies:
       ascending_node_deg: 90
       mean_anomaly_deg: 330
     rotation: {mode: tidal_lock}
+    surface: {style: cratered, seed: 11}
