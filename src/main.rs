@@ -185,6 +185,9 @@ struct State {
     last: Instant,
     /// Either a moving scene body or a fixed direction against distant stars.
     view_lock: Option<ViewLock>,
+    /// Mouse-look offset from the locked target (yaw, pitch in radians), so
+    /// the view can pan around a followed body without releasing it.
+    lock_offset: (f64, f64),
     /// Explore-mode tuning of the host atmosphere.
     air: AirTuning,
     /// Hide the local terrain and props (the texture editor's camera floats).
@@ -242,6 +245,7 @@ impl State {
             day_step_failed: false,
             last: Instant::now(),
             view_lock: None,
+            lock_offset: (0.0, 0.0),
             air: AirTuning::default(),
             no_ground: false,
         };
@@ -608,6 +612,7 @@ impl State {
 
     fn unlock(&mut self) {
         self.view_lock = None;
+        self.lock_offset = (0.0, 0.0);
     }
 
     fn toggle_star_orientation(&mut self) {
@@ -649,6 +654,27 @@ impl State {
         };
         self.observer.alt = dir.dot(vf.zenith).clamp(-1.0, 1.0).asin();
         self.observer.az = dir.dot(vf.east).atan2(dir.dot(vf.north));
+        let (yaw, mut pitch) = self.lock_offset;
+        if yaw == 0.0 && pitch == 0.0 {
+            return;
+        }
+        if self.observer.star_orientation.is_none() {
+            // Keep the panned view short of the zenith, like free look, so
+            // the level horizon never flips. Store only the pitch applied, so
+            // panning back responds immediately.
+            let target_alt = self.observer.alt;
+            let limit = 89.0_f64.to_radians().max(target_alt.abs());
+            pitch = (target_alt + pitch).clamp(-limit, limit) - target_alt;
+            self.lock_offset.1 = pitch;
+        }
+        // Turn about the target-centred view's own axes, so the target keeps
+        // its place on screen as it moves across the sky.
+        let vf = self.observer.frame(&self.scene, self.sim_time, &positions);
+        let (sy, cy) = yaw.sin_cos();
+        let (sp, cp) = pitch.sin_cos();
+        let dir = vf.forward * (cy * cp) + vf.right * (sy * cp) + vf.up * sp;
+        self.observer.alt = dir.dot(vf.zenith).clamp(-1.0, 1.0).asin();
+        self.observer.az = dir.dot(vf.east).atan2(dir.dot(vf.north));
     }
 
     fn cursor_ray(&self, x: f64, y: f64, width: u32, height: u32) -> Option<DVec3> {
@@ -681,17 +707,28 @@ impl State {
             Some(i) => Some(ViewLock::Body(i)),
             None => Some(ViewLock::Background(dir)),
         };
+        self.lock_offset = (0.0, 0.0);
         self.track();
     }
 
     /// Relative mouse-look: right moves right, down moves down. Sensitivity
     /// follows the telescope FOV so fine aiming remains possible at deep zoom.
+    /// While locked, it pans around the followed target instead of releasing it.
     fn look_around(&mut self, (dx, dy): (f64, f64), height: u32) -> bool {
         if !dx.is_finite() || !dy.is_finite() || (dx == 0.0 && dy == 0.0) || height == 0 {
             return false;
         }
-        self.unlock();
         let sensitivity = self.observer.fov_y / height as f64;
+        if self.view_lock.is_some() {
+            use std::f64::consts::{PI, TAU};
+            let (yaw, pitch) = self.lock_offset;
+            self.lock_offset = (
+                (yaw + dx * sensitivity + PI).rem_euclid(TAU) - PI,
+                (pitch - dy * sensitivity).clamp(-89.0_f64.to_radians(), 89.0_f64.to_radians()),
+            );
+            self.track();
+            return true;
+        }
         if self.observer.star_orientation.is_some() {
             let positions = self.scene.positions(self.sim_time);
             let frame = self.observer.frame(&self.scene, self.sim_time, &positions);
@@ -1355,6 +1392,8 @@ impl App {
                     ViewLock::Body(i) => progress::SavedLock::Body(i),
                     ViewLock::Background(v) => progress::SavedLock::Sky(v.to_array()),
                 }),
+                lock_offset: [self.state.lock_offset.0, self.state.lock_offset.1],
+                start: Some(progress::sky_start(&self.state.scene)),
                 ev: self.ev_bias,
                 auto: self.auto_exposure,
             };
@@ -1511,6 +1550,20 @@ impl App {
                         .filter(|s| s.valid())
                 {
                     self.game = game::Game::restore(&saved.theory);
+                    self.auto_exposure = saved.auto;
+                    self.ev_bias = saved.ev;
+                }
+                // A sky saved under an older version of the level (a changed
+                // start, site or view) would hide its new opening: keep the
+                // theory, but start the sky afresh.
+                if puzzle
+                    && let Some(saved) = self
+                        .progress
+                        .levels
+                        .get(&progress::key(path))
+                        .filter(|s| s.valid())
+                        .filter(|s| s.start == Some(progress::sky_start(&self.state.scene)))
+                {
                     self.state.sim_time = saved.time;
                     self.state.observer.az = saved.az;
                     self.state.observer.alt = saved.alt;
@@ -1533,8 +1586,11 @@ impl App {
                         }
                         _ => None,
                     });
-                    self.auto_exposure = saved.auto;
-                    self.ev_bias = saved.ev;
+                    self.state.lock_offset = if self.state.view_lock.is_some() {
+                        (saved.lock_offset[0], saved.lock_offset[1])
+                    } else {
+                        (0.0, 0.0)
+                    };
                     self.state.track();
                 }
                 if let Some(g) = &mut self.game {
@@ -2721,10 +2777,11 @@ mod app_tests {
             assert!(app.observation_button(MouseButton::Right, ElementState::Pressed, (800, 600)));
             assert_eq!(app.state.view_lock, Some(ViewLock::Body(2)));
             assert!(!app.graphics.open);
-            assert!(app.observation_button(MouseButton::Left, ElementState::Pressed, (800, 600)));
+            assert!(app.observation_button(MouseButton::Left, ElementState::Released, (800, 600)));
             assert_eq!(app.state.view_lock, Some(ViewLock::Body(2)));
+            assert!(app.observation_button(MouseButton::Left, ElementState::Pressed, (800, 600)));
+            assert_eq!(app.state.view_lock, None, "left-click releases the lock");
             assert!(!app.graphics.open);
-            app.state.unlock();
             assert!(app.observation_button(MouseButton::Right, ElementState::Released, (800, 600)));
             assert_eq!(app.state.view_lock, None);
             assert!(app.observation_button(MouseButton::Right, ElementState::Pressed, (0, 0)));
@@ -3224,6 +3281,43 @@ mod app_tests {
     }
 
     #[test]
+    fn panning_a_lock_keeps_the_target_at_the_same_offset_as_time_advances() {
+        for steady in [false, true] {
+            let mut state = State::with_scene(sim::default_scene());
+            state.point_at(2);
+            if steady {
+                state.toggle_star_orientation();
+            }
+            state.view_lock = Some(ViewLock::Body(2));
+            state.track();
+            assert!(state.look_around((40.0, -25.0), 600));
+            let offset_of_target = |state: &State| {
+                let positions = state.scene.positions(state.sim_time);
+                let vf = state
+                    .observer
+                    .frame(&state.scene, state.sim_time, &positions);
+                let dir = (positions[2] - vf.position).normalize();
+                (dir.dot(vf.right), dir.dot(vf.up), dir.dot(vf.forward))
+            };
+            let before = offset_of_target(&state);
+            assert!(
+                before.0 < 0.0,
+                "panning right leaves the target to the left"
+            );
+            assert!(before.1 < 0.0, "panning up leaves the target below");
+            state.sim_time += 0.05;
+            state.track();
+            let after = offset_of_target(&state);
+            assert_eq!(state.view_lock, Some(ViewLock::Body(2)));
+            assert!((after.0 - before.0).abs() < 1e-6, "{before:?} {after:?}");
+            assert!((after.1 - before.1).abs() < 1e-6, "{before:?} {after:?}");
+            // Re-locking re-centres on the new target.
+            state.unlock();
+            assert_eq!(state.lock_offset, (0.0, 0.0));
+        }
+    }
+
+    #[test]
     fn mouse_look_moves_without_a_press_and_scales_with_fov() {
         for steady in [false, true] {
             let mut state = State::with_scene(sim::default_scene());
@@ -3233,6 +3327,7 @@ mod app_tests {
                 state.toggle_star_orientation();
             }
             state.view_lock = Some(ViewLock::Body(2));
+            state.track();
             assert!(!state.look_around((0.0, 0.0), 600));
             assert!(!state.look_around((f64::NAN, 1.0), 600));
             assert!(!state.look_around((1.0, 1.0), 0));
@@ -3247,7 +3342,11 @@ mod app_tests {
                 .frame(&state.scene, state.sim_time, &positions);
             assert!(after.forward.dot(before.right) > 0.0, "right means right");
             assert!(after.forward.dot(before.up) < 0.0, "down means down");
-            assert_eq!(state.view_lock, None);
+            assert_eq!(
+                state.view_lock,
+                Some(ViewLock::Body(2)),
+                "panning keeps following"
+            );
         }
         let mut state = State::with_scene(sim::default_scene());
         state.observer.az = 0.5;
@@ -3478,6 +3577,22 @@ mod app_tests {
         assert_eq!(game.state.sim_time, 7.5);
         assert_eq!(game.state.observer.fov_y, 0.3);
         assert!(game.build_frame(1280, 720).0.is_some());
+
+        // A sky saved before the level's opening changed restarts at the new
+        // opening, but the theory survives.
+        let mut stale = app();
+        stale.game = Some(game::Game::default());
+        stale.progress = std::mem::take(&mut game.progress);
+        for session in stale.progress.levels.values_mut() {
+            session.start = None;
+        }
+        stale.open_initial_view(None, false);
+        assert_eq!(stale.game.as_ref().unwrap().progress(), expected);
+        assert_eq!(
+            stale.state.sim_time,
+            stale.state.scene.initial_time_days.unwrap()
+        );
+        assert_ne!(stale.state.observer.fov_y, 0.3);
 
         for puzzle_mode in [false, true] {
             let mut configured = app();

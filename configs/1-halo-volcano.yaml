@@ -7,21 +7,29 @@
 # Halo's sky), so Calyx often hides both at once: a double eclipse at the
 # near side's noon.
 # Halo orbits 110,000 km from Calyx (period by Kepler's third law), so Calyx
-# spans ~7 degrees and its rings ~13 degrees, ~25 degrees above the eastern
-# horizon: the observatory stands near the edge of Halo's Calyx-facing side.
+# spans ~7 degrees and its rings ~13 degrees, ~22 degrees above the western
+# horizon: the observatory stands near the edge of Halo's Calyx-facing side,
+# where the suns set behind the planet.
 # Halo's orbit, and so its tidally locked spin axis, is tilted 5 degrees to
 # Calyx's orbit: mild seasons over Calyx's 3000-day year, and eclipses of the
 # suns in long eclipse seasons, when the suns lie near the orbit's nodes.
 # The tilt is away from the ring plane, so the rings open up to ~27 degrees
 # over each Halo orbit.
 version: 1
+# Open on a clear afternoon in an eclipse season, facing Calyx in the west:
+# both suns sink toward it, vanish behind it together for ~10 hours from day
+# ~732.8 (a total double eclipse ~24 degrees up), re-emerge toward
+# evening, and set around day 735.5.
+time_days: 730.5
 name: Calyx and Halo — the volcano
 camera:
   body: halo
   latitude_deg: 35.0
-  longitude_deg: 122.0
+  longitude_deg: -118.0
   height_m: 2.0
   look_at: calyx
+  # Calyx stands at azimuth ~253, the suns ~18 degrees above it.
+  direction: {azimuth_deg: 253, altitude_deg: 15}
   fov_deg: 70.0
   atmosphere: earthlike
   ground: basalt

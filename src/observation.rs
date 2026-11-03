@@ -111,8 +111,8 @@ impl App {
         true
     }
 
-    /// Keep sky locking on right-click, but never route observation clicks to
-    /// the HUD. The captured pointer aims at the reticle, not its old position.
+    /// Right-click locks the sky at the reticle and left-click releases it;
+    /// observation clicks never reach the HUD. The captured pointer aims at the reticle, not its old position.
     pub(crate) fn observation_button(
         &mut self,
         button: crate::MouseButton,
@@ -122,9 +122,15 @@ impl App {
         if !self.observing() {
             return false;
         }
-        if button == crate::MouseButton::Right && state == crate::ElementState::Pressed {
-            self.state
-                .lock_at(width as f64 * 0.5, height as f64 * 0.5, width, height);
+        if state == crate::ElementState::Pressed {
+            match button {
+                crate::MouseButton::Right => {
+                    self.state
+                        .lock_at(width as f64 * 0.5, height as f64 * 0.5, width, height)
+                }
+                crate::MouseButton::Left => self.state.unlock(),
+                _ => {}
+            }
         }
         true
     }

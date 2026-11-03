@@ -487,7 +487,8 @@ sequence is deterministic for a given pixel and sample index.
 In Play/Explore observation, moving the mouse looks around without holding a
 button. The pointer is captured and hidden; HUD controls are **keyboard-only**.
 Mouse buttons do not activate the HUD. A small centre reticle helps aim;
-right-click (or `K`) locks the body or sky direction it points at. Mouse movement releases tracking.
+right-click (or `K`) locks the body or sky direction it points at. While locked, mouse
+movement pans around the target and keeps following it; left-click (or `U`) releases tracking.
 Zoom sensitivity follows the field of view, including at deep magnification.
 
 `Esc` / `M`, `P`, or `Tab` (Play) release the pointer for the menu, settings,
@@ -497,9 +498,9 @@ or minimizing also releases capture; returning to observation captures it again.
 | Input | Action |
 | --- | --- |
 | `M` / `Esc` | open the menu or resume the current view |
-| mouse movement | look around (no button held) |
+| mouse movement | look around (no button held); pans around a locked target |
 | right-click / `K` | track the body at the centre, or hold that background sky direction |
-| `U` | release the view lock |
+| left-click / `U` | release the view lock |
 | `R` | keep the horizon level or the stars fixed while following a target |
 | scroll / `=` / `-` | zoom, down to 0.001° |
 | `Space` | pause or resume the previous signed playback speed |
