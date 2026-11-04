@@ -501,7 +501,6 @@ or minimizing also releases capture; returning to observation captures it again.
 | mouse movement | look around (no button held); pans around a locked target |
 | right-click / `K` | track the body at the centre, or hold that background sky direction |
 | left-click / `U` | release the view lock |
-| `R` | keep the horizon level or the stars fixed while following a target |
 | scroll / `=` / `-` | zoom, down to 0.001° |
 | `Space` | pause or resume the previous signed playback speed |
 | `Page Down` / `Page Up` | backward / forward one day (exactly 24 hours on Mirador; targets panel closed) |
@@ -552,15 +551,15 @@ changing zoom. The ground is not a lock target.
 The bottom bar shows **Locked [U]** with the target name when labels are visible. With labels
 hidden, including in game mode, it shows **Star**, **Planet / moon**, or
 **Background sky** instead. The lock indicator remains available when the HUD
-is hidden. `U` or mouse movement releases it.
+is hidden. Left-click or `U` releases it; mouse movement pans around it.
 Menus, playback controls, exposure controls, and the diagram preserve the lock.
 Aiming with a target shortcut, resetting, or loading a different system releases it.
 
-**[S]tars** holds the camera's roll against the orientation captured when enabled.
-It compensates for the observer's spin without changing the locked target, position,
-or zoom. When tracking a planet, the stars can translate as the view follows it;
-the camera transports its orientation without adding roll. Turning the toggle off
-restores the usual surface-relative orientation.
+Locking the background sky also holds the camera's roll against the stars, so the
+starfield stays fixed on screen as the observer's planet turns. Locking a body
+leaves the orientation as it was: level from a free view, or still rolling with
+the stars when switching from a sky lock. Releasing the lock (left-click or `U`)
+turns the view back to a level horizon.
 
 Startup helpers (body indices depend on the selected system):
 

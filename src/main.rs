@@ -610,15 +610,16 @@ impl State {
         }
     }
 
+    /// Release the lock and turn the view back to a level horizon.
     fn unlock(&mut self) {
         self.view_lock = None;
         self.lock_offset = (0.0, 0.0);
+        self.observer.star_orientation = None;
     }
 
-    fn toggle_star_orientation(&mut self) {
-        if self.observer.star_orientation.is_some() {
-            self.observer.star_orientation = None;
-        } else {
+    /// Roll with the stars from the current view, if not already doing so.
+    fn fix_to_stars(&mut self) {
+        if self.observer.star_orientation.is_none() {
             let positions = self.scene.positions(self.sim_time);
             let frame = self.observer.frame(&self.scene, self.sim_time, &positions);
             self.observer.star_orientation = Some((frame.forward, frame.up));
@@ -707,6 +708,11 @@ impl State {
             Some(i) => Some(ViewLock::Body(i)),
             None => Some(ViewLock::Background(dir)),
         };
+        // A sky lock holds a direction among the stars, so the view rolls
+        // with them too. A body lock leaves the orientation as it was.
+        if matches!(self.view_lock, Some(ViewLock::Background(_))) {
+            self.fix_to_stars();
+        }
         self.lock_offset = (0.0, 0.0);
         self.track();
     }
@@ -1277,7 +1283,6 @@ impl App {
                         day_step_failed: self.state.day_step_failed,
                         auto_exposure: self.auto_exposure,
                         ev_bias: self.ev_bias,
-                        steady_stars: self.state.observer.star_orientation.is_some(),
                         minutes_per_second: WARPS[self.state.warp] * 1440.0,
                     },
                     &frame.labels,
@@ -2873,7 +2878,7 @@ mod app_tests {
             assert!(app.state.sim_time < time - 0.99);
             assert!(app.state.time_key(KeyCode::PageUp));
             assert!((app.state.sim_time - time).abs() < 1e-8);
-            for key in [KeyCode::KeyL, KeyCode::Comma, KeyCode::KeyA, KeyCode::KeyR] {
+            for key in [KeyCode::KeyL, KeyCode::Comma, KeyCode::KeyA] {
                 app.observation_key(key);
                 assert_eq!(app.state.view_lock, Some(lock));
             }
@@ -3203,15 +3208,16 @@ mod app_tests {
     }
 
     #[test]
-    fn steady_stars_hold_background_roll_and_leave_the_lock_unchanged() {
+    fn sky_lock_rolls_with_the_stars_until_released_to_a_level_horizon() {
         let mut state = State::with_scene(sim::default_scene());
         state.point_at(2);
         state.lock_at(1.0, 1.0, 800, 600);
         let lock = state.view_lock;
+        assert!(matches!(lock, Some(ViewLock::Background(_))));
+        assert!(state.observer.star_orientation.is_some());
         let start = state.sim_time;
         let p = state.scene.positions(start);
         let before = state.observer.frame(&state.scene, start, &p);
-        state.toggle_star_orientation();
         for offset in [0.0, 0.25, 0.5, 5.0, -1.0, 0.0] {
             state.sim_time = start + offset;
             state.track();
@@ -3222,21 +3228,43 @@ mod app_tests {
             assert!(frame.right.dot(before.right) > 1.0 - 1e-12);
             assert_eq!(state.view_lock, lock);
         }
-        state.toggle_star_orientation();
+        state.unlock();
         assert!(state.observer.star_orientation.is_none());
-        assert_eq!(state.view_lock, lock);
+        assert_eq!(state.view_lock, None);
+    }
+
+    #[test]
+    fn body_lock_keeps_the_orientation_and_left_click_levels_the_horizon() {
+        let mut app = app();
+        app.state.point_at(2);
+        // Locking a body from a level view stays level.
+        assert!(app.observation_button(MouseButton::Right, ElementState::Pressed, (800, 600)));
+        assert_eq!(app.state.view_lock, Some(ViewLock::Body(2)));
+        assert!(app.state.observer.star_orientation.is_none());
+        // Locking a body from a sky lock keeps rolling with the stars.
+        app.state.lock_at(1.0, 1.0, 800, 600);
+        let stars = app.state.observer.star_orientation;
+        assert!(stars.is_some());
+        app.state.point_at_fov(2, app.state.observer.fov_y);
+        app.state.observer.star_orientation = stars;
+        assert!(app.observation_button(MouseButton::Right, ElementState::Pressed, (800, 600)));
+        assert_eq!(app.state.view_lock, Some(ViewLock::Body(2)));
+        assert_eq!(app.state.observer.star_orientation, stars);
+        assert!(app.observation_button(MouseButton::Left, ElementState::Pressed, (800, 600)));
+        assert_eq!(app.state.view_lock, None);
+        assert!(app.state.observer.star_orientation.is_none());
     }
 
     #[test]
     fn steady_stars_follow_planet_without_roll_or_changing_position_or_zoom() {
         let mut state = State::with_scene(sim::default_scene());
-        state.point_at(3); // Mars: the roll toggle also works with a planet lock.
+        state.point_at(3); // Mars: a body locked from a sky lock keeps star roll.
         state.view_lock = Some(ViewLock::Body(3));
         state.track();
         let p = state.scene.positions(state.sim_time);
         let before = state.observer.frame(&state.scene, state.sim_time, &p);
         let fov = state.observer.fov_y;
-        state.toggle_star_orientation();
+        state.fix_to_stars();
         let start = state.sim_time;
         for offset in [0.0, 0.25, 7.0, 90.0, -10.0] {
             state.sim_time = start + offset;
@@ -3286,7 +3314,7 @@ mod app_tests {
             let mut state = State::with_scene(sim::default_scene());
             state.point_at(2);
             if steady {
-                state.toggle_star_orientation();
+                state.fix_to_stars();
             }
             state.view_lock = Some(ViewLock::Body(2));
             state.track();
@@ -3324,7 +3352,7 @@ mod app_tests {
             state.observer.az = 0.5;
             state.observer.alt = 0.3;
             if steady {
-                state.toggle_star_orientation();
+                state.fix_to_stars();
             }
             state.view_lock = Some(ViewLock::Body(2));
             state.track();
@@ -3981,15 +4009,8 @@ mod app_tests {
             app.show_hud = true;
             app.targets_open = false;
             app.state.view_lock = Some(ViewLock::Body(2));
-            for (name, warp, stars) in [
-                ("speed-reverse", 0, false),
-                ("speed-forward", 8, false),
-                ("orientation-stars", 5, true),
-            ] {
+            for (name, warp) in [("speed-reverse", 0), ("speed-forward", 8)] {
                 app.state.warp = warp;
-                if app.state.observer.star_orientation.is_some() != stars {
-                    app.state.toggle_star_orientation();
-                }
                 let (_, vertices) = app.build_frame(w, h);
                 gpu.render(
                     &vertices,

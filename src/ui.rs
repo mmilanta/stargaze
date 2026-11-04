@@ -80,7 +80,6 @@ pub struct HudState<'a> {
     pub day_step_failed: bool,
     pub auto_exposure: bool,
     pub ev_bias: f32,
-    pub steady_stars: bool,
     pub minutes_per_second: f64,
     pub targets_open: bool,
     /// Current ground name, shown on the explore ground switcher.
@@ -102,8 +101,6 @@ pub struct Layout {
     pub exposure: Rect,
     pub auto: Rect,
     pub lock: Rect,
-    pub horizon: Rect,
-    pub stars: Rect,
     pub targets: Rect,
     pub ground: Rect,
     pub air: Rect,
@@ -183,7 +180,7 @@ impl ToolbarStyle {
         let minimum = extra
             + 217.0
             + time_group_width(keys)
-            + lock_group_width(keys)
+            + lock_group_width()
             + exposure_group_width(keys)
             + toolbar_width("Settings [P]", keys)
             + 13.0
@@ -268,8 +265,8 @@ fn time_group_width(keys: bool) -> f32 {
         + 7.0 * 4.0
 }
 
-fn lock_group_width(keys: bool) -> f32 {
-    17.0 + 148.0 + 4.0 + if keys { 95.0 + 78.0 } else { 44.0 + 44.0 } + 6.0 + key_width("R")
+fn lock_group_width() -> f32 {
+    17.0 + 148.0
 }
 
 fn auto_width() -> f32 {
@@ -313,17 +310,7 @@ fn layout_mode(w: f32, h: f32, scale: f32, puzzle: bool) -> Layout {
     let next_day = control(toolbar_width("+1d [PgUp]", style.keys));
     let time_end = nav_end + time_group_width(style.keys) * s;
     let lock = style.control(bar, time_end + 8.0 * s, 148.0);
-    let mut horizon = style.control(
-        bar,
-        lock.right() + 4.0 * s,
-        if style.keys { 95.0 } else { 44.0 },
-    );
-    let mut stars = style.control(bar, horizon.right(), if style.keys { 78.0 } else { 44.0 });
-    for r in [&mut horizon, &mut stars] {
-        r.y = bar.y + 13.0 * s;
-        r.h = 32.0 * s;
-    }
-    let lock_end = time_end + lock_group_width(style.keys) * s;
+    let lock_end = time_end + lock_group_width() * s;
     let hide = style.control(
         bar,
         w - (6.0 + toolbar_width("Hide [H]", style.keys)) * s,
@@ -373,8 +360,6 @@ fn layout_mode(w: f32, h: f32, scale: f32, puzzle: bool) -> Layout {
         clock,
         next_day,
         lock,
-        horizon,
-        stars,
         exposure,
         auto,
         targets,
@@ -1455,80 +1440,6 @@ fn toolbar_icon(
     }
 }
 
-// Exact geometry from the Blueprint keepHorizon / keepStars SVGs.
-fn orientation_icon(
-    v: &mut Vec<UiVertex>,
-    origin: [f32; 2],
-    scale: f32,
-    stars: bool,
-    active: bool,
-    vp: [f32; 2],
-) {
-    let u = scale * 30.0 / 32.0;
-    let q = |p: [f32; 2]| [origin[0] + p[0] * u, origin[1] + p[1] * u];
-    let ink = if active { BG } else { INK };
-    let spin = if active {
-        [0.462, 0.254, 0.0, 1.0]
-    } else {
-        ACCENT
-    };
-    let points = if stars {
-        [[8.0, 7.0], [15.0, 4.0], [23.0, 6.0]]
-    } else {
-        [[8.0, 9.0], [15.0, 6.0], [23.0, 8.0]]
-    };
-    for pair in points.windows(2) {
-        icon_segment(v, [q(pair[0]), q(pair[1])], 1.4 * u, ink, !stars, vp);
-    }
-    for p in points {
-        disk(v, q(p), if stars { 1.5 * u } else { 1.3 * u }, ink, vp);
-    }
-    if stars {
-        icon_segment(v, [q([2.0, 20.0]), q([24.0, 14.5])], 1.4 * u, ink, true, vp);
-    } else {
-        line(v, q([2.0, 16.5]), q([30.0, 16.5]), 1.4 * u, ink, vp);
-        for x in [6.0, 12.0, 18.0, 24.0, 30.0] {
-            line(
-                v,
-                q([x, 16.5]),
-                q([x - 2.5, 20.0]),
-                u,
-                [ink[0], ink[1], ink[2], 0.6],
-                vp,
-            );
-        }
-    }
-    let curve = if stars {
-        [[16.0, 21.5], [23.0, 22.0], [29.5, 19.0], [30.5, 12.5]]
-    } else {
-        [[6.0, 4.5], [10.0, 0.5], [21.0, 0.5], [26.0, 4.0]]
-    };
-    let at = |i: usize| {
-        let t = i as f32 / 24.0;
-        let a = 1.0 - t;
-        q([
-            a.powi(3) * curve[0][0]
-                + 3.0 * a * a * t * curve[1][0]
-                + 3.0 * a * t * t * curve[2][0]
-                + t.powi(3) * curve[3][0],
-            a.powi(3) * curve[0][1]
-                + 3.0 * a * a * t * curve[1][1]
-                + 3.0 * a * t * t * curve[2][1]
-                + t.powi(3) * curve[3][1],
-        ])
-    };
-    for i in 0..24 {
-        line(v, at(i), at(i + 1), 1.4 * u, spin, vp);
-    }
-    let (tip, ends) = if stars {
-        ([30.5, 12.5], [[27.9, 14.7], [31.7, 15.7]])
-    } else {
-        ([26.0, 4.0], [[22.8, 4.3], [25.1, 1.0]])
-    };
-    for end in ends {
-        line(v, q(tip), q(end), 1.4 * u, spin, vp);
-    }
-}
 fn icon_segment(
     v: &mut Vec<UiVertex>,
     [a, b]: [[f32; 2]; 2],
@@ -1732,76 +1643,6 @@ fn build_bar(v: &mut Vec<UiVertex>, l: &Layout, w: f32, h: f32, state: HudState<
         MUTED,
     );
     build_lock(v, l, vp, state.lock_label);
-    let orientation = Rect {
-        x: l.horizon.x,
-        y: l.horizon.y,
-        w: l.stars.right() - l.horizon.x,
-        h: l.horizon.h,
-    };
-    outline(v, orientation, s, [LINE[0], LINE[1], LINE[2], 0.18], vp);
-    for (r, stars, label, desc) in [
-        (l.horizon, false, "Horizon", "level"),
-        (l.stars, true, "Stars", "fixed"),
-    ] {
-        let active = stars == state.steady_stars;
-        let mut r = r;
-        if crate::motion::pressed("Orientation [R]", r) && active {
-            r.y += 3.0 * s;
-        }
-        if active {
-            push_rect(
-                v,
-                r.x,
-                r.y + r.h,
-                r.w,
-                3.0 * s,
-                [0.0006, 0.003, 0.023, 0.8],
-                vp,
-            );
-            push_rect(v, r.x, r.y, r.w, r.h, INK, vp);
-        }
-        let color = if active { BG } else { INK };
-        orientation_icon(
-            v,
-            [r.x + 7.0 * s, r.y + r.h * 0.5 - 10.5 * s],
-            s,
-            stars,
-            active,
-            vp,
-        );
-        if l.style.keys {
-            push_text(
-                v,
-                r.x + 44.0 * s,
-                r.y + 8.0 * s,
-                0.7125 * s,
-                label,
-                color,
-                vp,
-            );
-            push_text(
-                v,
-                r.x + 44.0 * s,
-                r.y + 22.0 * s,
-                0.5625 * s,
-                desc,
-                if active {
-                    [BG[0], BG[1], BG[2], 0.7]
-                } else {
-                    MUTED
-                },
-                vp,
-            );
-        }
-    }
-    toolbar_keycap(
-        v,
-        [l.stars.right() + 6.0 * s, l.bar.center_y()],
-        "R",
-        s,
-        MUTED,
-        vp,
-    );
     let e = l.exposure;
     let f = ((state.ev_bias - MIN_EV) / (MAX_EV - MIN_EV)).clamp(0.0, 1.0);
     let cap_y = e.center_y() - 10.0 * s;
@@ -1957,13 +1798,11 @@ mod tests {
                     l.clock,
                     l.next_day,
                     l.lock,
-                    l.horizon,
-                    l.stars,
                     l.exposure,
                     l.auto,
                 ];
                 assert!(l.time_label.x - l.toggle.right() > l.toggle.x - l.home.right());
-                assert!(l.exposure.x - l.stars.right() > l.auto.x - l.exposure.right());
+                assert!(l.exposure.x - l.lock.right() > l.auto.x - l.exposure.right());
                 assert!(controls.windows(2).all(|pair| pair[0].right() <= pair[1].x));
                 for r in controls {
                     assert!((r.center_y() - l.lock.center_y()).abs() < 0.001);
@@ -1987,7 +1826,6 @@ mod tests {
                             day_step_failed: time < 0.0,
                             auto_exposure: true,
                             ev_bias: MAX_EV,
-                            steady_stars: true,
                             minutes_per_second: if time < 0.0 {
                                 -57600.0
                             } else if time == 0.0 {
@@ -2032,8 +1870,6 @@ mod tests {
                 l.clock,
                 l.next_day,
                 l.lock,
-                l.horizon,
-                l.stars,
                 l.exposure,
                 l.auto,
                 l.ground,
