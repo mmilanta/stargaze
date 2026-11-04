@@ -7,6 +7,7 @@ mod game;
 mod graphics;
 mod ground;
 mod gui;
+mod hud;
 mod menu;
 mod motion;
 mod observation;
@@ -1261,13 +1262,17 @@ impl App {
             let lock_label = self
                 .state
                 .lock_label(self.show_labels && self.show_hud && self.game.is_none());
-            let layout = ui::layout(w as f32, h as f32, self.scale)
-                .with_puzzle(self.game.is_some())
-                .with_hidden(!self.show_hud);
+            let samples = self.renderer.as_ref().map(|r| {
+                (
+                    r.samples(),
+                    self.graphics.settings.sample_limit(),
+                    r.needs_redraw(),
+                )
+            });
             if self.show_hud {
                 ui::build(
                     &mut vertices,
-                    &layout,
+                    self.scale,
                     w as f32,
                     h as f32,
                     ui::HudState {
@@ -1284,14 +1289,17 @@ impl App {
                         auto_exposure: self.auto_exposure,
                         ev_bias: self.ev_bias,
                         minutes_per_second: WARPS[self.state.warp] * 1440.0,
+                        puzzle: self.game.is_some(),
+                        fov_deg: self.state.observer.fov_y.to_degrees(),
+                        samples,
                     },
                     &frame.labels,
                 );
             } else {
-                ui::build_hidden(
+                hud::build_hidden(
                     &mut vertices,
-                    &layout,
                     [w as f32, h as f32],
+                    self.scale,
                     lock_label.as_deref(),
                 );
             }
@@ -2776,9 +2784,8 @@ mod app_tests {
                 app.game = Some(game::Game::default());
             }
             app.state.point_at(2);
-            let layout = ui::layout(800.0, 600.0, 1.0);
-            // A stale pointer position over Settings must not affect sky picking.
-            app.cursor = (layout.settings.x as f64, layout.settings.center_y() as f64);
+            // A stale pointer position away from the reticle must not affect sky picking.
+            app.cursor = (700.0, 580.0);
             assert!(app.observation_button(MouseButton::Right, ElementState::Pressed, (800, 600)));
             assert_eq!(app.state.view_lock, Some(ViewLock::Body(2)));
             assert!(!app.graphics.open);
@@ -2863,7 +2870,7 @@ mod app_tests {
     }
 
     #[test]
-    fn keyboard_controls_and_menus_preserve_lock_until_u_releases_it() {
+    fn keyboard_controls_and_menus_preserve_lock_until_left_click_releases_it() {
         let mut app = app();
         for lock in [ViewLock::Body(2), ViewLock::Background(DVec3::X)] {
             app.state.view_lock = Some(lock);
@@ -2890,8 +2897,13 @@ mod app_tests {
             app.toggle_notebook();
             assert_eq!(app.state.view_lock, Some(lock));
             app.game = None;
+            // Lock and release are mouse-only.
+            for key in [KeyCode::KeyK, KeyCode::KeyU] {
+                app.observation_key(key);
+                assert_eq!(app.state.view_lock, Some(lock));
+            }
             app.show_hud = false;
-            app.observation_key(KeyCode::KeyU);
+            assert!(app.observation_button(MouseButton::Left, ElementState::Pressed, (800, 600)));
             assert_eq!(app.state.view_lock, None);
             app.show_hud = true;
         }

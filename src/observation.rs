@@ -151,13 +151,6 @@ impl App {
         }
         match key {
             KeyCode::KeyP => self.open_settings(),
-            KeyCode::KeyK => {
-                if let Some(r) = &self.renderer {
-                    let (w, h) = r.size();
-                    self.state.lock_at(w as f64 * 0.5, h as f64 * 0.5, w, h);
-                }
-            }
-            KeyCode::KeyU => self.state.unlock(),
             KeyCode::Home => self.state.reset_view(),
             KeyCode::F10 => self.request_leave(crate::Leave::Title),
             KeyCode::KeyG if self.game.is_none() => {

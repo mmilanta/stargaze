@@ -166,8 +166,6 @@ impl Menu {
 }
 
 pub struct Layout {
-    #[cfg(test)]
-    pub home: Rect,
     pub rows: Vec<Rect>,
     pub play: Vec<Rect>,
     pub discard: Vec<Rect>,
@@ -223,8 +221,6 @@ impl Layout {
         let px = (w * 0.125).clamp(96.0 * s, 196.0 * s).min(h * 0.23);
         let top = (h - px - 368.0 * s) * 0.5;
         Self {
-            #[cfg(test)]
-            home: ui::layout(w, h, scale).home,
             rows,
             play,
             discard,
@@ -682,8 +678,8 @@ fn build_controls(v: &mut Vec<UiVertex>, vp: [f32; 2], l: &Layout, scroll: f32) 
             "OBSERVATION",
             &[
                 ("mouse", "look around (no button)"),
-                ("right-click K", "lock body / sky at centre"),
-                ("left-click U", "release lock"),
+                ("right-click", "lock body / sky at centre"),
+                ("left-click", "release lock"),
                 ("scroll = -", "zoom (to 0.001°)"),
                 ("← →", "signed speed"),
                 ("Space", "stop / resume"),
@@ -860,18 +856,13 @@ mod tests {
             (320.0, 240.0, 1.0),
         ] {
             let l = Layout::new(w, h, scale);
-            for r in l.rows.iter().chain([&l.home, &l.previous, &l.next]) {
+            for r in l.rows.iter().chain([&l.previous, &l.next]) {
                 assert!(r.x >= 0.0 && r.y >= 0.0);
                 assert!(r.x + r.w <= w && r.y + r.h <= h);
             }
             assert!(l.previous.x + l.previous.w < l.next.x);
             let last = l.rows.last().unwrap();
             assert!(last.y + last.h < l.previous.y);
-            let hud = crate::ui::layout(w, h, scale);
-            assert!(l.home.y >= hud.bar.y);
-            assert!(l.home.y + l.home.h <= hud.bar.y + hud.bar.h);
-            assert!(l.home.x + l.home.w < hud.toggle.x);
-            assert_eq!(l.home.y, hud.toggle.y);
         }
     }
 }
