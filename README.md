@@ -364,12 +364,14 @@ is attached to Saturn and to Calyx in the Halo preset; any body may carry one. T
 ### Blueprint menus and saved levels
 
 The native menus follow `prototypes/menu-ui/suite.html`: **Play** opens anonymous
-field studies, **Explore** opens named systems, and **Settings** edits a draft.
+field studies and **Settings** edits a draft. Explore is available only when
+launched with `--explore` (for example, `cargo run --release -- --explore`).
+With that flag, **Explore** opens named systems.
 Use Up/Down to select, Enter to open, and Esc to go back. In Explore, `/` searches,
 `F` favorites the selected system, and `B` filters favorites. `P` switches between
 Explore and Levels, `C` opens the controls reference, and `T` returns to the main menu.
-Explicit `--config`, `STARGAZE_CONFIG`, and `STARGAZE_SYSTEM` selections still open
-an observatory directly. `--game` opens the first field study directly and
+Explicit `--config`, `STARGAZE_CONFIG`, and `STARGAZE_SYSTEM` selections open
+a field study directly, or free observation with `--explore`. `--game` opens the first field study directly and
 restores its saved progress; Play on the main menu opens Levels.
 
 In a field study, **Theory [Tab]** opens the full-page diagram. Right-click adds

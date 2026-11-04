@@ -80,7 +80,7 @@ fn scene_for_startup() -> Result<Option<Scene>> {
         match arg.to_str() {
             Some("--help" | "-h") => {
                 println!(
-                    "Stargaze — an observatory in a configurable star system\n\nUsage: stargaze [--game] [--unguided-ground] [--config FILE | --check-config FILE]\n\n--version, -V        Print the application version\n--game               Play the anonymous system reconstruction puzzle\n--unguided-ground    Use the original ground sampler for comparison\n--guided-ground      Use guided ground sampling (default)\n--config FILE        Load a YAML system and its camera\n--check-config FILE  Validate without opening a window\n--texture [STYLE]    Planet texture editor (plain, gas_giant, cratered, rocky, icy, volcanic, terran)\n\nDefaults to the first level, configs/1-halo-volcano.yaml (also with --game). STARGAZE_CONFIG also selects a file."
+                    "Stargaze — an observatory in a configurable star system\n\nUsage: stargaze [--game] [--explore] [--unguided-ground] [--config FILE | --check-config FILE]\n\n--version, -V        Print the application version\n--game               Play the anonymous system reconstruction puzzle\n--explore            Enable the Explore menu and free observation\n--unguided-ground    Use the original ground sampler for comparison\n--guided-ground      Use guided ground sampling (default)\n--config FILE        Load a YAML system and its camera\n--check-config FILE  Validate without opening a window\n--texture [STYLE]    Planet texture editor (plain, gas_giant, cratered, rocky, icy, volcanic, terran)\n\nDefaults to the first level, configs/1-halo-volcano.yaml (also with --game). STARGAZE_CONFIG also selects a file."
                 );
                 return Ok(None);
             }
@@ -88,7 +88,7 @@ fn scene_for_startup() -> Result<Option<Scene>> {
                 println!("stargaze {}", env!("CARGO_PKG_VERSION"));
                 return Ok(None);
             }
-            Some("--game") => {}
+            Some("--game" | "--explore") => {}
             Some("--guided-ground" | "--unguided-ground") => {
                 let guided = arg == "--guided-ground";
                 anyhow::ensure!(
@@ -1440,6 +1440,11 @@ impl App {
     }
 
     fn open_page(&mut self, page: menu::Page) {
+        let page = if page == menu::Page::Explore && !self.menu.explore_enabled {
+            menu::Page::Levels
+        } else {
+            page
+        };
         if let Some(game) = &mut self.game {
             game.release();
         }
@@ -1454,6 +1459,9 @@ impl App {
     }
 
     fn open_initial_view(&mut self, explicit: Option<&std::path::Path>, preset_selected: bool) {
+        if !self.menu.explore_enabled && (explicit.is_some() || preset_selected) {
+            self.game.get_or_insert_with(game::Game::default);
+        }
         let puzzle = self.game.is_some();
         if let Some(path) = explicit {
             self.open_page(if puzzle {
@@ -1703,7 +1711,10 @@ impl App {
 
     fn menu_layout(&self) -> Option<menu::Layout> {
         let (w, h) = self.renderer.as_ref()?.size();
-        (w > 0 && h > 0).then(|| menu::Layout::new(w as f32, h as f32, self.scale))
+        (w > 0 && h > 0).then(|| {
+            menu::Layout::new(w as f32, h as f32, self.scale)
+                .with_explore(self.menu.explore_enabled)
+        })
     }
 
     fn menu_click(&mut self, cx: f64, cy: f64) -> bool {
@@ -2351,9 +2362,13 @@ fn main() -> Result<()> {
     let event_loop = EventLoop::new()?;
     event_loop.set_control_flow(ControlFlow::Wait);
 
+    let explore_enabled = std::env::args_os().any(|arg| arg == "--explore");
     let mut app = App {
         state: State::with_scene(scene),
-        menu: menu::Menu::default(),
+        menu: menu::Menu {
+            explore_enabled,
+            ..Default::default()
+        },
         game: game_requested().then(game::Game::default),
         window: None,
         renderer: None,
@@ -2458,7 +2473,10 @@ mod app_tests {
     fn app() -> App {
         App {
             state: State::with_scene(sim::default_scene()),
-            menu: menu::Menu::default(),
+            menu: menu::Menu {
+                explore_enabled: true,
+                ..Default::default()
+            },
             game: None,
             window: None,
             renderer: None,
@@ -3557,6 +3575,38 @@ mod app_tests {
         });
         assert!(visible_transit, "view must center the transited planet");
         assert!(vf.sun_altitude < -0.1, "it should be night");
+    }
+
+    #[test]
+    fn explore_requires_opt_in_for_title_and_menu_navigation() {
+        let mut app = app();
+        app.menu.explore_enabled = false;
+        app.open_page(menu::Page::Title);
+        for expected in [2, 3, 0] {
+            app.menu_key(KeyCode::ArrowDown, None, None);
+            assert_eq!(app.menu.title_selected, expected);
+        }
+        for expected in [3, 2, 0] {
+            app.menu_key(KeyCode::ArrowUp, None, None);
+            assert_eq!(app.menu.title_selected, expected);
+        }
+        app.title_action(1, None);
+        assert!(app.menu.page == menu::Page::Title);
+        app.open_page(menu::Page::Explore);
+        assert!(app.menu.page == menu::Page::Levels);
+        app.menu_key(KeyCode::KeyP, None, None);
+        assert!(app.menu.page == menu::Page::Levels);
+        let enabled = menu::Layout::new(1280.0, 720.0, 1.0);
+        let disabled = menu::Layout::new(1280.0, 720.0, 1.0).with_explore(false);
+        assert_eq!(disabled.titles[1].w, 0.0);
+        assert_eq!(disabled.titles[2].y, enabled.titles[1].y);
+        app.menu.explore_enabled = true;
+        app.open_page(menu::Page::Title);
+        app.menu.title_selected = 0;
+        app.menu_key(KeyCode::ArrowDown, None, None);
+        assert_eq!(app.menu.title_selected, 1);
+        app.title_action(1, None);
+        assert!(app.menu.page == menu::Page::Explore);
     }
 
     #[test]

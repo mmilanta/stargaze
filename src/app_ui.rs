@@ -54,7 +54,7 @@ impl App {
         self.menu.title_selected = i;
         match i {
             0 => self.open_page(menu::Page::Levels),
-            1 => self.open_page(menu::Page::Explore),
+            1 if self.menu.explore_enabled => self.open_page(menu::Page::Explore),
             2 => self.open_settings(),
             3 => {
                 if self.game.as_ref().is_some_and(|g| g.has_progress())
@@ -164,8 +164,8 @@ impl App {
         }
         if self.menu.page == menu::Page::Title {
             match key {
-                KeyCode::ArrowUp => self.menu.title_selected = (self.menu.title_selected + 3) % 4,
-                KeyCode::ArrowDown => self.menu.title_selected = (self.menu.title_selected + 1) % 4,
+                KeyCode::ArrowUp => self.menu.move_title(false),
+                KeyCode::ArrowDown => self.menu.move_title(true),
                 KeyCode::Enter | KeyCode::ArrowRight => {
                     self.title_action(self.menu.title_selected, event_loop)
                 }
@@ -210,11 +210,13 @@ impl App {
                 self.controls_back = self.menu.page;
                 self.menu.page = menu::Page::Controls;
             }
-            KeyCode::KeyP => self.open_page(if self.menu.page == menu::Page::Levels {
-                menu::Page::Explore
-            } else {
-                menu::Page::Levels
-            }),
+            KeyCode::KeyP if self.menu.explore_enabled => {
+                self.open_page(if self.menu.page == menu::Page::Levels {
+                    menu::Page::Explore
+                } else {
+                    menu::Page::Levels
+                })
+            }
             KeyCode::ArrowUp => self.menu.move_selection(false, page),
             KeyCode::ArrowDown => self.menu.move_selection(true, page),
             KeyCode::Enter | KeyCode::ArrowRight => {
