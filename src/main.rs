@@ -648,6 +648,11 @@ impl State {
         let Some(target) = self.view_lock else {
             return;
         };
+        // Only background-star locks hold the sky's orientation fixed.
+        // Body locks follow their target with the normal local horizon.
+        if matches!(target, ViewLock::Body(_)) {
+            self.observer.star_orientation = None;
+        }
         let positions = self.scene.positions(self.sim_time);
         let vf = self.observer.frame(&self.scene, self.sim_time, &positions);
         let dir = match target {
@@ -710,7 +715,7 @@ impl State {
             None => Some(ViewLock::Background(dir)),
         };
         // A sky lock holds a direction among the stars, so the view rolls
-        // with them too. A body lock leaves the orientation as it was.
+        // with them too. Body locks restore the local horizon in track().
         if matches!(self.view_lock, Some(ViewLock::Background(_))) {
             self.fix_to_stars();
         }
@@ -1262,6 +1267,20 @@ impl App {
             let lock_label = self
                 .state
                 .lock_label(self.show_labels && self.show_hud && self.game.is_none());
+            let lock_icon = self.state.view_lock.map(|target| match target {
+                ViewLock::Background(_) => hud::LockIcon::Background,
+                ViewLock::Body(i) if self.state.scene.body(i).kind == BodyKind::Star => {
+                    hud::LockIcon::Star
+                }
+                ViewLock::Body(_) => hud::LockIcon::Planet,
+            });
+            ui::build_lock_marker(
+                &mut vertices,
+                &frame.labels,
+                self.state.locked_body(),
+                hud::scale(w as f32, h as f32, self.scale),
+                [w as f32, h as f32],
+            );
             let samples = self.renderer.as_ref().map(|r| {
                 (
                     r.samples(),
@@ -1284,6 +1303,7 @@ impl App {
                             locked: self.state.locked_body(),
                         },
                         lock_label: lock_label.as_deref(),
+                        lock_icon,
                         sim_time: self.state.sim_time,
                         day_step_failed: self.state.day_step_failed,
                         auto_exposure: self.auto_exposure,
@@ -1301,6 +1321,7 @@ impl App {
                     [w as f32, h as f32],
                     self.scale,
                     lock_label.as_deref(),
+                    lock_icon,
                 );
             }
         }
@@ -3246,14 +3267,14 @@ mod app_tests {
     }
 
     #[test]
-    fn body_lock_keeps_the_orientation_and_left_click_levels_the_horizon() {
+    fn body_lock_restores_the_horizon_after_a_background_lock() {
         let mut app = app();
         app.state.point_at(2);
         // Locking a body from a level view stays level.
         assert!(app.observation_button(MouseButton::Right, ElementState::Pressed, (800, 600)));
         assert_eq!(app.state.view_lock, Some(ViewLock::Body(2)));
         assert!(app.state.observer.star_orientation.is_none());
-        // Locking a body from a sky lock keeps rolling with the stars.
+        // Locking a body from a sky lock restores normal sky rotation.
         app.state.lock_at(1.0, 1.0, 800, 600);
         let stars = app.state.observer.star_orientation;
         assert!(stars.is_some());
@@ -3261,39 +3282,39 @@ mod app_tests {
         app.state.observer.star_orientation = stars;
         assert!(app.observation_button(MouseButton::Right, ElementState::Pressed, (800, 600)));
         assert_eq!(app.state.view_lock, Some(ViewLock::Body(2)));
-        assert_eq!(app.state.observer.star_orientation, stars);
+        assert!(app.state.observer.star_orientation.is_none());
         assert!(app.observation_button(MouseButton::Left, ElementState::Pressed, (800, 600)));
         assert_eq!(app.state.view_lock, None);
         assert!(app.state.observer.star_orientation.is_none());
     }
 
     #[test]
-    fn steady_stars_follow_planet_without_roll_or_changing_position_or_zoom() {
-        let mut state = State::with_scene(sim::default_scene());
-        state.point_at(3); // Mars: a body locked from a sky lock keeps star roll.
-        state.view_lock = Some(ViewLock::Body(3));
-        state.track();
-        let p = state.scene.positions(state.sim_time);
-        let before = state.observer.frame(&state.scene, state.sim_time, &p);
-        let fov = state.observer.fov_y;
-        state.fix_to_stars();
-        let start = state.sim_time;
-        for offset in [0.0, 0.25, 7.0, 90.0, -10.0] {
-            state.sim_time = start + offset;
-            state.track();
-            let p = state.scene.positions(state.sim_time);
-            let frame = state.observer.frame(&state.scene, state.sim_time, &p);
-            let direction = (p[3] - frame.position).normalize();
-            assert!(frame.forward.dot(direction) > 1.0 - 1e-12);
-            // Minimal transport back to the initial aim must show no accumulated roll.
-            let back = glam::DQuat::from_rotation_arc(frame.forward, before.forward);
-            assert!((back * frame.up).dot(before.up) > 1.0 - 1e-10);
-            assert!((frame.right.cross(frame.up) + frame.forward).length() < 1e-10);
-            assert_eq!(state.observer.fov_y, fov);
-            let reference = state.observer.star_orientation.take();
-            let natural = state.observer.frame(&state.scene, state.sim_time, &p);
-            assert!((frame.position - natural.position).length() < 1e-12);
-            state.observer.star_orientation = reference;
+    fn body_locks_keep_the_local_horizon_as_time_advances() {
+        for target in [0, 2, 3] {
+            let mut state = State::with_scene(sim::default_scene());
+            state.point_at(target);
+            state.fix_to_stars();
+            state.view_lock = Some(ViewLock::Body(target));
+            let fov = state.observer.fov_y;
+            let start = state.sim_time;
+            let mut first_up = None;
+            let mut rotation = 0.0_f64;
+            for offset in [0.0, 0.1, 0.25, 0.5, -0.1] {
+                state.sim_time = start + offset;
+                state.track();
+                assert!(state.observer.star_orientation.is_none());
+                let p = state.scene.positions(state.sim_time);
+                let frame = state.observer.frame(&state.scene, state.sim_time, &p);
+                let direction = (p[target] - frame.position).normalize();
+                assert!(frame.forward.dot(direction) > 1.0 - 1e-12);
+                let horizon_up =
+                    (frame.zenith - direction * frame.zenith.dot(direction)).normalize();
+                assert!(frame.up.dot(horizon_up) > 1.0 - 1e-12);
+                assert_eq!(state.observer.fov_y, fov);
+                let initial = *first_up.get_or_insert(frame.up);
+                rotation = rotation.max(1.0 - frame.up.dot(initial));
+            }
+            assert!(rotation > 0.01, "sky should rotate for body {target}");
         }
     }
 

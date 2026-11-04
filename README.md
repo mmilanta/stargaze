@@ -486,9 +486,9 @@ sequence is deterministic for a given pixel and sample index.
 
 In Play/Explore observation, moving the mouse looks around without holding a
 button. The pointer is captured and hidden. The HUD has no buttons: live
-readouts sit in the screen corners, and every action is shown with its key
-(time bottom-left, the lock bottom-centre, exposure bottom-right, the view
-top-left, everything else in a key legend top-right). A keycap lights up while
+readouts sit in four bordered panels with matching edge spacing: time bottom-left,
+the lock bottom-centre, exposure bottom-right, and the key legend, view controls
+and convergence readout top-right. A keycap lights up while
 its key is held. A small centre reticle helps aim; right-click locks the body
 or sky direction it points at. While locked, mouse movement pans around the
 target and keeps following it; left-click releases tracking.
@@ -560,8 +560,8 @@ Aiming with a target shortcut, resetting, or loading a different system releases
 
 Locking the background sky also holds the camera's roll against the stars, so the
 starfield stays fixed on screen as the observer's planet turns. Locking a body
-leaves the orientation as it was: level from a free view, or still rolling with
-the stars when switching from a sky lock. Releasing the lock (left-click)
+restores the local horizon, allowing normal sky rotation even when switching
+from a sky lock. Releasing the lock (left-click)
 turns the view back to a level horizon.
 
 Startup helpers (body indices depend on the selected system):

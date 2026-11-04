@@ -4,7 +4,7 @@
 use crate::typeface::{self, Face};
 use crate::ui::{
     ACCENT, BG, DEEP, HudState, INK, LINE, MAX_EV, MIN_EV, MUTED, OK, Rect, UiVertex, WARN,
-    brackets, disk, eyebrow, font_text, outline, push_rect, push_text, switch,
+    brackets, disk, eyebrow, font_text, outline, push_rect, switch,
 };
 use winit::keyboard::KeyCode;
 
@@ -12,6 +12,7 @@ const TEXT_PX: f32 = 12.5;
 const KEY_PX: f32 = 10.0;
 const KEY_H: f32 = 18.0;
 const MARGIN: f32 = 16.0;
+const PANEL_PAD: f32 = 8.0;
 const ROW: f32 = 28.0;
 const PLATE: [f32; 4] = [DEEP[0], DEEP[1], DEEP[2], 0.58];
 
@@ -27,8 +28,16 @@ pub enum Mouse {
     Wheel,
 }
 
+#[derive(Clone, Copy, Debug)]
+pub enum LockIcon {
+    Star,
+    Planet,
+    Background,
+}
+
 pub enum Seg {
     Key(&'static str),
+    Playback(bool),
     Text(String, [f32; 4]),
     Mouse(Mouse),
     /// The nine playback speeds, highlighting the current one.
@@ -46,6 +55,7 @@ pub(crate) fn text(t: impl Into<String>, color: [f32; 4]) -> Seg {
 fn width(seg: &Seg, s: f32) -> f32 {
     match seg {
         Seg::Key(k) => key_w(k) * s,
+        Seg::Playback(_) => (key_w("Space") + 12.0) * s,
         Seg::Text(t, _) => typeface::width(Face::Mono, t, TEXT_PX * s),
         Seg::Mouse(_) => 12.0 * s,
         Seg::Meter(_) => 43.0 * s,
@@ -59,11 +69,21 @@ fn key_w(key: &str) -> f32 {
     (typeface::width(Face::Mono, key, KEY_PX) + 10.0).max(KEY_H)
 }
 
-fn keycap(v: &mut Vec<UiVertex>, x: f32, cy: f32, key: &str, down: bool, s: f32, vp: [f32; 2]) {
+fn keycap(
+    v: &mut Vec<UiVertex>,
+    x: f32,
+    cy: f32,
+    label: (&str, Option<bool>),
+    down: bool,
+    s: f32,
+    vp: [f32; 2],
+) {
+    let (key, playing) = label;
+    let icon_width = if playing.is_some() { 12.0 * s } else { 0.0 };
     let r = Rect {
         x,
         y: cy - KEY_H * 0.5 * s,
-        w: key_w(key) * s,
+        w: key_w(key) * s + icon_width,
         h: KEY_H * s,
     };
     if down {
@@ -79,10 +99,34 @@ fn keycap(v: &mut Vec<UiVertex>, x: f32, cy: f32, key: &str, down: bool, s: f32,
         vp,
     );
     let px = KEY_PX * s;
+    let color = if down { BG } else { INK };
+    if let Some(playing) = playing {
+        let ix = x + 5.0 * s;
+        if playing {
+            for offset in [0.0, 4.0] {
+                push_rect(
+                    v,
+                    ix + offset * s,
+                    cy - 4.0 * s,
+                    2.0 * s,
+                    8.0 * s,
+                    color,
+                    vp,
+                );
+            }
+        } else {
+            crate::ui::triangle(
+                v,
+                [[ix, cy - 4.0 * s], [ix + 7.0 * s, cy], [ix, cy + 4.0 * s]],
+                color,
+                vp,
+            );
+        }
+    }
     font_text(
         v,
         [
-            r.x + (r.w - typeface::width(Face::Mono, key, px)) * 0.5,
+            r.x + icon_width + (r.w - icon_width - typeface::width(Face::Mono, key, px)) * 0.5,
             cy - px * 0.5,
         ],
         px,
@@ -190,7 +234,18 @@ pub fn row(
         let w = width(seg, s);
         match seg {
             Seg::Key(k) => {
-                keycap(v, x, cy, k, key.is_some() && code(k) == key, s, vp);
+                keycap(v, x, cy, (k, None), key.is_some() && code(k) == key, s, vp);
+            }
+            Seg::Playback(playing) => {
+                keycap(
+                    v,
+                    x,
+                    cy,
+                    ("Space", Some(*playing)),
+                    key == Some(KeyCode::Space),
+                    s,
+                    vp,
+                );
             }
             Seg::Text(t, color) => font_text(
                 v,
@@ -255,16 +310,15 @@ fn plated(
 ) -> Rect {
     let mut content = Vec::new();
     let r = f(&mut content);
-    let pad = 8.0 * s;
-    push_rect(
-        v,
-        r.x - pad,
-        r.y - pad,
-        r.w + 2.0 * pad,
-        r.h + 2.0 * pad,
-        PLATE,
-        vp,
-    );
+    let pad = PANEL_PAD * s;
+    let r = Rect {
+        x: r.x - pad,
+        y: r.y - pad,
+        w: r.w + 2.0 * pad,
+        h: r.h + 2.0 * pad,
+    };
+    push_rect(v, r.x, r.y, r.w, r.h, PLATE, vp);
+    outline(v, r, s, LINE, vp);
     v.append(&mut content);
     r
 }
@@ -315,23 +369,48 @@ fn legend(state: &HudState<'_>) -> Vec<Vec<Seg>> {
         second.extend(item("L", "labels", state.labels.show));
         second.extend(item("G", "targets", state.targets_open));
     }
-    second.extend(item("E", "next eclipse", false));
-    second.extend([Seg::Key("T"), text("next transit", MUTED)]);
-    let mut lines = vec![first, second];
+    let mut lines = Vec::new();
+    if !state.puzzle {
+        lines.push(vec![text("OBSERVATORY / EXPLORE", ACCENT)]);
+    }
+    lines.push(first);
+    if !second.is_empty() {
+        lines.push(second);
+    }
     if !state.puzzle {
         let mut third = Vec::new();
         third.extend(item("B", &format!("ground: {}", state.ground), false));
         third.extend([Seg::Key("J"), text("air", on(state.air_open))]);
         lines.push(third);
     }
+    let mut view = Vec::new();
+    if let Some((samples, _, converging)) = state.samples {
+        view.extend([
+            text(
+                format!(
+                    "{samples} spp · {}",
+                    if converging { "converging" } else { "ready" }
+                ),
+                MUTED,
+            ),
+            text("·", MUTED),
+        ]);
+    }
+    view.extend([
+        text(format!("FOV {:.3}°", state.fov_deg), INK),
+        Seg::Gap(4.0),
+        Seg::Mouse(Mouse::Wheel),
+        text("zoom", MUTED),
+    ]);
+    lines.push(view);
     lines
 }
 
-/// Bottom edge of the top-right key legend and sample meter; panels open below it.
+/// Bottom edge of the top-right key legend; panels open below it.
 pub fn legend_bottom(vp: [f32; 2], requested: f32, puzzle: bool) -> f32 {
     let s = scale(vp[0], vp[1], requested);
-    let lines = if puzzle { 2.0 } else { 3.0 };
-    MARGIN * s + lines * ROW * s + 30.0 * s
+    let lines = if puzzle { 2.0 } else { 5.0 };
+    (MARGIN + lines * ROW + 6.0) * s
 }
 
 fn speed_text(minutes_per_second: f64) -> String {
@@ -348,85 +427,30 @@ fn speed_text(minutes_per_second: f64) -> String {
     format!("{sign}{value} min/s")
 }
 
-/// The full corner HUD. Returns each cluster's bounds: view, legend, time,
-/// exposure and lock.
+/// The full corner HUD. Returns each cluster's bounds: legend, time, exposure and lock.
 pub fn build(
     v: &mut Vec<UiVertex>,
     vp: [f32; 2],
     requested: f32,
     state: &HudState<'_>,
-) -> [Rect; 5] {
+) -> [Rect; 4] {
     let [w, h] = vp;
     let s = scale(w, h, requested);
     let m = MARGIN * s;
+    let left = m + PANEL_PAD * s;
+    let right = w - m - PANEL_PAD * s;
 
-    // Top left: what you are looking at and how to frame it.
-    let view = vec![
-        text(format!("FOV {:.3}°", state.fov_deg), INK),
-        Seg::Gap(4.0),
-        Seg::Mouse(Mouse::Wheel),
-        Seg::Key("="),
-        Seg::Key("-"),
-        text("zoom", MUTED),
-        Seg::Gap(6.0),
-        Seg::Key("Home"),
-        text("reset view", MUTED),
-    ];
-    let view_bounds = if state.puzzle {
-        // The field-study brief holds the corner; the view row sits under it.
-        // It is laid out at `requested.min(w / 1280)` and ends 154 px down.
-        let brief = 154.0 * requested.min(w / 1280.0);
-        let y = brief + 16.0 * s + 0.5 * ROW * s;
-        plated(v, s, vp, |v| row(v, &view, m, y, false, s, vp))
-    } else {
-        plated(v, s, vp, |v| {
-            eyebrow(v, [m, m], 9.0 * s, "OBSERVATORY / EXPLORE", ACCENT, vp);
-            let r = row(v, &view, m, m + 30.0 * s, false, s, vp);
-            union(
-                Rect {
-                    x: m,
-                    y: m,
-                    w: 1.0,
-                    h: 1.0,
-                },
-                r,
-            )
-        })
-    };
-
-    // Top right: every other action, then the render's progress.
+    // Top right: view controls, key legend and convergence readout.
     let legend_bounds = plated(v, s, vp, |v| {
-        let lines = legend(state);
-        let mut r = rows(v, &lines, w - m, m - 4.0 * s, true, s, vp);
-        if let Some((samples, limit, converging)) = state.samples {
-            let y = r.y + r.h + 8.0 * s;
-            let label = format!(
-                "{samples} spp · {}",
-                if converging { "converging" } else { "ready" }
-            );
-            let bar = 174.0 * s;
-            push_text(v, w - m - bar, y, 0.75 * s, &label, MUTED, vp);
-            push_rect(v, w - m - bar, y + 15.0 * s, bar, 3.0 * s, LINE, vp);
-            push_rect(
-                v,
-                w - m - bar,
-                y + 15.0 * s,
-                bar * (samples as f32 / limit.max(1) as f32).min(1.0),
-                3.0 * s,
-                OK,
-                vp,
-            );
-            r = union(
-                r,
-                Rect {
-                    x: w - m - bar,
-                    y,
-                    w: bar,
-                    h: 18.0 * s,
-                },
-            );
-        }
-        r
+        rows(
+            v,
+            &legend(state),
+            right,
+            m + (PANEL_PAD + 9.0 - 0.5 * ROW) * s,
+            true,
+            s,
+            vp,
+        )
     });
 
     // Bottom left: time.
@@ -434,7 +458,6 @@ pub fn build(
         .iter()
         .position(|n| (*n * 1440.0 - state.minutes_per_second).abs() < 0.001)
         .unwrap_or(crate::STOP_WARP);
-    let stopped = state.minutes_per_second == 0.0;
     let minutes = (state.sim_time * 1440.0).floor() as i64;
     let day = if state.day_step_failed {
         text("no day: locked to its star", WARN)
@@ -449,65 +472,169 @@ pub fn build(
             INK,
         )
     };
-    let time = [
+    let readout = [
+        day,
+        text("·", MUTED),
+        text(speed_text(state.minutes_per_second), INK),
+    ];
+    let indicators = [
+        vec![text("−1 day", MUTED)],
+        vec![Seg::Meter(step)],
+        vec![text("+1 day", MUTED)],
+    ];
+    let controls = [
+        vec![Seg::Key("PgDn")],
         vec![
             Seg::Key("←"),
-            text(speed_text(state.minutes_per_second), INK),
+            Seg::Playback(state.minutes_per_second != 0.0),
             Seg::Key("→"),
-            Seg::Gap(2.0),
-            Seg::Meter(step),
         ],
-        vec![
-            Seg::Key("Space"),
-            if stopped {
-                text("stopped · play", MUTED)
-            } else {
-                text("playing · pause", ACCENT)
-            },
-        ],
-        vec![
-            Seg::Key("PgDn"),
-            text("−1d", MUTED),
-            day,
-            text("+1d", MUTED),
-            Seg::Key("PgUp"),
-        ],
+        vec![Seg::Key("PgUp")],
     ];
-    let bottom = h - m - 3.0 * ROW * s;
-    let time_bounds = plated(v, s, vp, |v| rows(v, &time, m, bottom, false, s, vp));
+    let bottom = h - m - (2.5 * ROW + 9.0 + PANEL_PAD) * s;
+    let time_bounds = plated(v, s, vp, |v| {
+        let mut bounds = row(v, &readout, left, bottom + 0.5 * ROW * s, false, s, vp);
+        let mut x = left;
+        for (indicator, control) in indicators.iter().zip(&controls) {
+            let column_width = row_width(indicator, s).max(row_width(control, s));
+            for (segs, line) in [(indicator, 1.5), (control, 2.5)] {
+                let r = row(
+                    v,
+                    segs,
+                    x + (column_width - row_width(segs, s)) * 0.5,
+                    bottom + line * ROW * s,
+                    false,
+                    s,
+                    vp,
+                );
+                bounds = union(bounds, r);
+            }
+            x += column_width + 14.0 * s;
+        }
+        bounds
+    });
 
     // Bottom right: exposure.
     let f = ((state.ev_bias - MIN_EV) / (MAX_EV - MIN_EV)).clamp(0.0, 1.0);
     let ev = if state.auto_exposure { MUTED } else { INK };
-    let exposure = [
-        vec![
-            text("exposure", MUTED),
-            Seg::Key(","),
-            text(format!("{:+.2} EV", state.ev_bias), ev),
-            Seg::Key("."),
-        ],
-        vec![Seg::Slider(f, 150.0)],
-        vec![
-            Seg::Key("A"),
-            text("auto", on(state.auto_exposure)),
-            Seg::Switch(state.auto_exposure),
-        ],
+    let headings = [
+        vec![text("−", MUTED)],
+        vec![text("exposure", MUTED)],
+        vec![text("+", MUTED)],
     ];
-    let exposure_bounds = plated(v, s, vp, |v| rows(v, &exposure, w - m, bottom, true, s, vp));
+    let adjustments = [
+        vec![Seg::Key(",")],
+        vec![Seg::Slider(f, 150.0)],
+        vec![Seg::Key(".")],
+    ];
+    let exposure_footer = [
+        text(format!("{:+.2} EV", state.ev_bias), ev),
+        Seg::Gap(8.0),
+        text("[A]uto", on(state.auto_exposure)),
+        Seg::Switch(state.auto_exposure),
+    ];
+    let exposure_bounds = plated(v, s, vp, |v| {
+        let widths: Vec<_> = headings
+            .iter()
+            .zip(&adjustments)
+            .map(|(heading, adjustment)| row_width(heading, s).max(row_width(adjustment, s)))
+            .collect();
+        let total = widths.iter().sum::<f32>() + 2.0 * 8.0 * s;
+        let mut x = right - total;
+        let mut bounds = row(
+            v,
+            &exposure_footer,
+            right,
+            bottom + 2.5 * ROW * s,
+            true,
+            s,
+            vp,
+        );
+        for ((heading, adjustment), column_width) in headings.iter().zip(&adjustments).zip(widths) {
+            for (segs, line) in [(heading, 0.5), (adjustment, 1.5)] {
+                let r = row(
+                    v,
+                    segs,
+                    x + (column_width - row_width(segs, s)) * 0.5,
+                    bottom + line * ROW * s,
+                    false,
+                    s,
+                    vp,
+                );
+                bounds = union(bounds, r);
+            }
+            x += column_width + 8.0 * s;
+        }
+        bounds
+    });
 
     // Bottom centre: the lock.
-    let lock_bounds = lock(v, vp, s, state.lock_label);
-    [
-        view_bounds,
-        legend_bounds,
-        time_bounds,
-        exposure_bounds,
-        lock_bounds,
-    ]
+    let lock_bounds = lock(v, vp, s, state.lock_label, state.lock_icon);
+    [legend_bounds, time_bounds, exposure_bounds, lock_bounds]
+}
+
+fn lock_glyph(v: &mut Vec<UiVertex>, center: [f32; 2], icon: LockIcon, s: f32, vp: [f32; 2]) {
+    use crate::ui::{line, triangle};
+    let star = |v: &mut Vec<UiVertex>, p: [f32; 2], radius: f32| {
+        disk(v, p, radius * 0.32, OK, vp);
+        for i in 0..8 {
+            let angle = i as f32 * std::f32::consts::TAU / 8.0;
+            let direction = [angle.cos(), angle.sin()];
+            line(
+                v,
+                [
+                    p[0] + direction[0] * radius * 0.55,
+                    p[1] + direction[1] * radius * 0.55,
+                ],
+                [p[0] + direction[0] * radius, p[1] + direction[1] * radius],
+                s,
+                OK,
+                vp,
+            );
+        }
+    };
+    match icon {
+        LockIcon::Star => star(v, center, 6.0 * s),
+        LockIcon::Background => {
+            for (x, y, radius) in [(-4.0, 2.5, 2.8), (0.0, -3.5, 3.5), (4.5, 2.0, 2.5)] {
+                star(v, [center[0] + x * s, center[1] + y * s], radius * s);
+            }
+        }
+        LockIcon::Planet => {
+            let radius = 6.0 * s;
+            disk(
+                v,
+                center,
+                radius,
+                [OK[0] * 0.25, OK[1] * 0.25, OK[2] * 0.25, 1.0],
+                vp,
+            );
+            for i in 0..24 {
+                let a = -std::f32::consts::FRAC_PI_2 + i as f32 * std::f32::consts::PI / 24.0;
+                let b = a + std::f32::consts::PI / 24.0;
+                triangle(
+                    v,
+                    [
+                        center,
+                        [center[0] + radius * a.cos(), center[1] + radius * a.sin()],
+                        [center[0] + radius * b.cos(), center[1] + radius * b.sin()],
+                    ],
+                    OK,
+                    vp,
+                );
+            }
+        }
+    }
 }
 
 /// The lock reticle, bottom centre. Also drawn with the rest of the HUD hidden.
-fn lock(v: &mut Vec<UiVertex>, vp: [f32; 2], s: f32, target: Option<&str>) -> Rect {
+fn lock(
+    v: &mut Vec<UiVertex>,
+    vp: [f32; 2],
+    s: f32,
+    target: Option<&str>,
+    icon: Option<LockIcon>,
+) -> Rect {
     let [w, h] = vp;
     let r = Rect {
         x: (w - 260.0 * s) * 0.5,
@@ -529,14 +656,18 @@ fn lock(v: &mut Vec<UiVertex>, vp: [f32; 2], s: f32, target: Option<&str>) -> Re
         },
         vp,
     );
-    brackets(v, r, color, s, vp);
+    let center = [r.x + 19.0 * s, r.center_y()];
+    outline(v, r, s, LINE, vp);
     let reticle = Rect {
-        x: r.x + 14.0 * s,
-        y: r.center_y() - 5.0 * s,
-        w: 10.0 * s,
-        h: 10.0 * s,
+        x: center[0] - 7.0 * s,
+        y: center[1] - 7.0 * s,
+        w: 14.0 * s,
+        h: 14.0 * s,
     };
     brackets(v, reticle, color, s * 0.5, vp);
+    if let Some(icon) = icon {
+        lock_glyph(v, center, icon, s, vp);
+    }
     let x = r.x + 36.0 * s;
     let top = r.y + 15.0 * s;
     let bottom = r.y + 35.0 * s;
@@ -582,11 +713,17 @@ fn lock(v: &mut Vec<UiVertex>, vp: [f32; 2], s: f32, target: Option<&str>) -> Re
 }
 
 /// With the HUD hidden: the lock (only while following) and how to come back.
-pub fn build_hidden(v: &mut Vec<UiVertex>, vp: [f32; 2], requested: f32, target: Option<&str>) {
+pub fn build_hidden(
+    v: &mut Vec<UiVertex>,
+    vp: [f32; 2],
+    requested: f32,
+    target: Option<&str>,
+    icon: Option<LockIcon>,
+) {
     let [w, h] = vp;
     let s = scale(w, h, requested);
     if target.is_some() {
-        lock(v, vp, s, target);
+        lock(v, vp, s, target, icon);
     }
     let m = MARGIN * s;
     plated(v, s, vp, |v| {
@@ -626,6 +763,7 @@ mod tests {
         HudState {
             labels: LabelOptions::default(),
             lock_label: lock,
+            lock_icon: lock.map(|_| LockIcon::Planet),
             sim_time: time,
             day_step_failed: time < 0.0,
             auto_exposure: true,
@@ -674,7 +812,19 @@ mod tests {
                             .all(|c| c.is_finite() && (-1.001..=1.001).contains(c))
                     }));
                     // Panels open below the legend.
-                    assert!(legend_bottom([w, h], requested, puzzle) >= bounds[1].y + bounds[1].h);
+                    assert!(
+                        legend_bottom([w, h], requested, puzzle) + 0.001
+                            >= bounds[0].y + bounds[0].h
+                    );
+                    let inset = MARGIN * scale(w, h, requested);
+                    let near = |a: f32, b: f32| (a - b).abs() < 0.001;
+                    assert!(near(bounds[0].y, inset));
+                    assert!(near(w - bounds[0].right(), inset));
+                    assert!(near(bounds[1].x, inset));
+                    assert!(near(w - bounds[2].right(), inset));
+                    for r in &bounds[1..] {
+                        assert!(near(h - r.y - r.h, inset));
+                    }
                 }
             }
         }

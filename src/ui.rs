@@ -76,6 +76,7 @@ pub const MAX_EV: f32 = 8.0;
 pub struct HudState<'a> {
     pub labels: LabelOptions,
     pub lock_label: Option<&'a str>,
+    pub lock_icon: Option<crate::hud::LockIcon>,
     pub sim_time: f64,
     pub day_step_failed: bool,
     pub auto_exposure: bool,
@@ -828,6 +829,50 @@ pub fn build(
     crate::hud::build(verts, [w, h], scale, &state);
 }
 
+pub(crate) fn build_lock_marker(
+    verts: &mut Vec<UiVertex>,
+    labels: &[Label],
+    locked: Option<usize>,
+    s: f32,
+    viewport: [f32; 2],
+) {
+    let [w, h] = viewport;
+    if let Some(label) = labels.iter().find(|label| locked == Some(label.body)) {
+        // Corner brackets around the tracked body.
+        let r = (label.radius + 5.0 * s).max(8.0 * s);
+        let len = (r * 0.45).max(4.0 * s);
+        let t = (1.5 * s).max(1.0);
+        let c = [0.55, 0.85, 1.0, 0.95];
+        for (x, y, dx, dy) in [
+            (label.x - r, label.y - r, 1.0, 1.0),
+            (label.x + r, label.y - r, -1.0, 1.0),
+            (label.x - r, label.y + r, 1.0, -1.0),
+            (label.x + r, label.y + r, -1.0, -1.0),
+        ] {
+            // Horizontal arm, then vertical arm, each tucked inside the
+            // corner so the two overlap into a clean bracket.
+            push_rect(
+                verts,
+                if dx > 0.0 { x } else { x - len },
+                if dy > 0.0 { y } else { y - t },
+                len,
+                t,
+                c,
+                [w, h],
+            );
+            push_rect(
+                verts,
+                if dx > 0.0 { x } else { x - t },
+                if dy > 0.0 { y } else { y - len },
+                t,
+                len,
+                c,
+                [w, h],
+            );
+        }
+    }
+}
+
 fn build_labels(
     verts: &mut Vec<UiVertex>,
     labels: &[Label],
@@ -839,40 +884,6 @@ fn build_labels(
     let text_scale = TEXT_SCALE * s * 0.85;
     for label in labels {
         let is_locked = locked == Some(label.body);
-        if is_locked {
-            // Corner brackets around the tracked body.
-            let r = (label.radius + 5.0 * s).max(8.0 * s);
-            let len = (r * 0.45).max(4.0 * s);
-            let t = (1.5 * s).max(1.0);
-            let c = [0.55, 0.85, 1.0, 0.95];
-            for (x, y, dx, dy) in [
-                (label.x - r, label.y - r, 1.0, 1.0),
-                (label.x + r, label.y - r, -1.0, 1.0),
-                (label.x - r, label.y + r, 1.0, -1.0),
-                (label.x + r, label.y + r, -1.0, -1.0),
-            ] {
-                // Horizontal arm, then vertical arm, each tucked inside the
-                // corner so the two overlap into a clean bracket.
-                push_rect(
-                    verts,
-                    if dx > 0.0 { x } else { x - len },
-                    if dy > 0.0 { y } else { y - t },
-                    len,
-                    t,
-                    c,
-                    [w, h],
-                );
-                push_rect(
-                    verts,
-                    if dx > 0.0 { x } else { x - t },
-                    if dy > 0.0 { y } else { y - len },
-                    t,
-                    len,
-                    c,
-                    [w, h],
-                );
-            }
-        }
         let tw = text_width(&label.text, text_scale);
         let th = 8.0 * text_scale;
         let mut x = label.x + label.radius + 7.0 * s;
