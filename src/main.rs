@@ -7,6 +7,7 @@ mod game;
 mod graphics;
 mod ground;
 mod gui;
+mod hud;
 mod menu;
 mod motion;
 mod observation;
@@ -79,7 +80,7 @@ fn scene_for_startup() -> Result<Option<Scene>> {
         match arg.to_str() {
             Some("--help" | "-h") => {
                 println!(
-                    "Stargaze — an observatory in a configurable star system\n\nUsage: stargaze [--game] [--unguided-ground] [--config FILE | --check-config FILE]\n\n--version, -V        Print the application version\n--game               Play the anonymous system reconstruction puzzle\n--unguided-ground    Use the original ground sampler for comparison\n--guided-ground      Use guided ground sampling (default)\n--config FILE        Load a YAML system and its camera\n--check-config FILE  Validate without opening a window\n--texture [STYLE]    Planet texture editor (plain, gas_giant, cratered, rocky, icy, volcanic, terran)\n\nDefaults to the first level, configs/1-halo-volcano.yaml (also with --game). STARGAZE_CONFIG also selects a file."
+                    "Stargaze — an observatory in a configurable star system\n\nUsage: stargaze [--game] [--explore] [--unguided-ground] [--config FILE | --check-config FILE]\n\n--version, -V        Print the application version\n--game               Play the anonymous system reconstruction puzzle\n--explore            Enable the Explore menu and free observation\n--unguided-ground    Use the original ground sampler for comparison\n--guided-ground      Use guided ground sampling (default)\n--config FILE        Load a YAML system and its camera\n--check-config FILE  Validate without opening a window\n--texture [STYLE]    Planet texture editor (plain, gas_giant, cratered, rocky, icy, volcanic, terran)\n\nDefaults to the first level, configs/1-halo-volcano.yaml (also with --game). STARGAZE_CONFIG also selects a file."
                 );
                 return Ok(None);
             }
@@ -87,7 +88,7 @@ fn scene_for_startup() -> Result<Option<Scene>> {
                 println!("stargaze {}", env!("CARGO_PKG_VERSION"));
                 return Ok(None);
             }
-            Some("--game") => {}
+            Some("--game" | "--explore") => {}
             Some("--guided-ground" | "--unguided-ground") => {
                 let guided = arg == "--guided-ground";
                 anyhow::ensure!(
@@ -647,6 +648,11 @@ impl State {
         let Some(target) = self.view_lock else {
             return;
         };
+        // Only background-star locks hold the sky's orientation fixed.
+        // Body locks follow their target with the normal local horizon.
+        if matches!(target, ViewLock::Body(_)) {
+            self.observer.star_orientation = None;
+        }
         let positions = self.scene.positions(self.sim_time);
         let vf = self.observer.frame(&self.scene, self.sim_time, &positions);
         let dir = match target {
@@ -709,7 +715,7 @@ impl State {
             None => Some(ViewLock::Background(dir)),
         };
         // A sky lock holds a direction among the stars, so the view rolls
-        // with them too. A body lock leaves the orientation as it was.
+        // with them too. Body locks restore the local horizon in track().
         if matches!(self.view_lock, Some(ViewLock::Background(_))) {
             self.fix_to_stars();
         }
@@ -1261,13 +1267,31 @@ impl App {
             let lock_label = self
                 .state
                 .lock_label(self.show_labels && self.show_hud && self.game.is_none());
-            let layout = ui::layout(w as f32, h as f32, self.scale)
-                .with_puzzle(self.game.is_some())
-                .with_hidden(!self.show_hud);
+            let lock_icon = self.state.view_lock.map(|target| match target {
+                ViewLock::Background(_) => hud::LockIcon::Background,
+                ViewLock::Body(i) if self.state.scene.body(i).kind == BodyKind::Star => {
+                    hud::LockIcon::Star
+                }
+                ViewLock::Body(_) => hud::LockIcon::Planet,
+            });
+            ui::build_lock_marker(
+                &mut vertices,
+                &frame.labels,
+                self.state.locked_body(),
+                hud::scale(w as f32, h as f32, self.scale),
+                [w as f32, h as f32],
+            );
+            let samples = self.renderer.as_ref().map(|r| {
+                (
+                    r.samples(),
+                    self.graphics.settings.sample_limit(),
+                    r.needs_redraw(),
+                )
+            });
             if self.show_hud {
                 ui::build(
                     &mut vertices,
-                    &layout,
+                    self.scale,
                     w as f32,
                     h as f32,
                     ui::HudState {
@@ -1279,21 +1303,20 @@ impl App {
                             locked: self.state.locked_body(),
                         },
                         lock_label: lock_label.as_deref(),
+                        lock_icon,
                         sim_time: self.state.sim_time,
                         day_step_failed: self.state.day_step_failed,
                         auto_exposure: self.auto_exposure,
                         ev_bias: self.ev_bias,
                         minutes_per_second: WARPS[self.state.warp] * 1440.0,
+                        puzzle: self.game.is_some(),
+                        fov_deg: self.state.observer.fov_y.to_degrees(),
+                        samples,
                     },
                     &frame.labels,
                 );
             } else {
-                ui::build_hidden(
-                    &mut vertices,
-                    &layout,
-                    [w as f32, h as f32],
-                    lock_label.as_deref(),
-                );
+                hud::build_hidden(&mut vertices, [w as f32, h as f32], self.scale);
             }
         }
         if !self.menu.open
@@ -1417,6 +1440,11 @@ impl App {
     }
 
     fn open_page(&mut self, page: menu::Page) {
+        let page = if page == menu::Page::Explore && !self.menu.explore_enabled {
+            menu::Page::Levels
+        } else {
+            page
+        };
         if let Some(game) = &mut self.game {
             game.release();
         }
@@ -1431,6 +1459,9 @@ impl App {
     }
 
     fn open_initial_view(&mut self, explicit: Option<&std::path::Path>, preset_selected: bool) {
+        if !self.menu.explore_enabled && (explicit.is_some() || preset_selected) {
+            self.game.get_or_insert_with(game::Game::default);
+        }
         let puzzle = self.game.is_some();
         if let Some(path) = explicit {
             self.open_page(if puzzle {
@@ -1680,7 +1711,10 @@ impl App {
 
     fn menu_layout(&self) -> Option<menu::Layout> {
         let (w, h) = self.renderer.as_ref()?.size();
-        (w > 0 && h > 0).then(|| menu::Layout::new(w as f32, h as f32, self.scale))
+        (w > 0 && h > 0).then(|| {
+            menu::Layout::new(w as f32, h as f32, self.scale)
+                .with_explore(self.menu.explore_enabled)
+        })
     }
 
     fn menu_click(&mut self, cx: f64, cy: f64) -> bool {
@@ -2328,9 +2362,13 @@ fn main() -> Result<()> {
     let event_loop = EventLoop::new()?;
     event_loop.set_control_flow(ControlFlow::Wait);
 
+    let explore_enabled = std::env::args_os().any(|arg| arg == "--explore");
     let mut app = App {
         state: State::with_scene(scene),
-        menu: menu::Menu::default(),
+        menu: menu::Menu {
+            explore_enabled,
+            ..Default::default()
+        },
         game: game_requested().then(game::Game::default),
         window: None,
         renderer: None,
@@ -2435,7 +2473,10 @@ mod app_tests {
     fn app() -> App {
         App {
             state: State::with_scene(sim::default_scene()),
-            menu: menu::Menu::default(),
+            menu: menu::Menu {
+                explore_enabled: true,
+                ..Default::default()
+            },
             game: None,
             window: None,
             renderer: None,
@@ -2776,9 +2817,8 @@ mod app_tests {
                 app.game = Some(game::Game::default());
             }
             app.state.point_at(2);
-            let layout = ui::layout(800.0, 600.0, 1.0);
-            // A stale pointer position over Settings must not affect sky picking.
-            app.cursor = (layout.settings.x as f64, layout.settings.center_y() as f64);
+            // A stale pointer position away from the reticle must not affect sky picking.
+            app.cursor = (700.0, 580.0);
             assert!(app.observation_button(MouseButton::Right, ElementState::Pressed, (800, 600)));
             assert_eq!(app.state.view_lock, Some(ViewLock::Body(2)));
             assert!(!app.graphics.open);
@@ -2863,7 +2903,7 @@ mod app_tests {
     }
 
     #[test]
-    fn keyboard_controls_and_menus_preserve_lock_until_u_releases_it() {
+    fn keyboard_controls_and_menus_preserve_lock_until_left_click_releases_it() {
         let mut app = app();
         for lock in [ViewLock::Body(2), ViewLock::Background(DVec3::X)] {
             app.state.view_lock = Some(lock);
@@ -2890,8 +2930,13 @@ mod app_tests {
             app.toggle_notebook();
             assert_eq!(app.state.view_lock, Some(lock));
             app.game = None;
+            // Lock and release are mouse-only.
+            for key in [KeyCode::KeyK, KeyCode::KeyU] {
+                app.observation_key(key);
+                assert_eq!(app.state.view_lock, Some(lock));
+            }
             app.show_hud = false;
-            app.observation_key(KeyCode::KeyU);
+            assert!(app.observation_button(MouseButton::Left, ElementState::Pressed, (800, 600)));
             assert_eq!(app.state.view_lock, None);
             app.show_hud = true;
         }
@@ -3234,14 +3279,14 @@ mod app_tests {
     }
 
     #[test]
-    fn body_lock_keeps_the_orientation_and_left_click_levels_the_horizon() {
+    fn body_lock_restores_the_horizon_after_a_background_lock() {
         let mut app = app();
         app.state.point_at(2);
         // Locking a body from a level view stays level.
         assert!(app.observation_button(MouseButton::Right, ElementState::Pressed, (800, 600)));
         assert_eq!(app.state.view_lock, Some(ViewLock::Body(2)));
         assert!(app.state.observer.star_orientation.is_none());
-        // Locking a body from a sky lock keeps rolling with the stars.
+        // Locking a body from a sky lock restores normal sky rotation.
         app.state.lock_at(1.0, 1.0, 800, 600);
         let stars = app.state.observer.star_orientation;
         assert!(stars.is_some());
@@ -3249,39 +3294,39 @@ mod app_tests {
         app.state.observer.star_orientation = stars;
         assert!(app.observation_button(MouseButton::Right, ElementState::Pressed, (800, 600)));
         assert_eq!(app.state.view_lock, Some(ViewLock::Body(2)));
-        assert_eq!(app.state.observer.star_orientation, stars);
+        assert!(app.state.observer.star_orientation.is_none());
         assert!(app.observation_button(MouseButton::Left, ElementState::Pressed, (800, 600)));
         assert_eq!(app.state.view_lock, None);
         assert!(app.state.observer.star_orientation.is_none());
     }
 
     #[test]
-    fn steady_stars_follow_planet_without_roll_or_changing_position_or_zoom() {
-        let mut state = State::with_scene(sim::default_scene());
-        state.point_at(3); // Mars: a body locked from a sky lock keeps star roll.
-        state.view_lock = Some(ViewLock::Body(3));
-        state.track();
-        let p = state.scene.positions(state.sim_time);
-        let before = state.observer.frame(&state.scene, state.sim_time, &p);
-        let fov = state.observer.fov_y;
-        state.fix_to_stars();
-        let start = state.sim_time;
-        for offset in [0.0, 0.25, 7.0, 90.0, -10.0] {
-            state.sim_time = start + offset;
-            state.track();
-            let p = state.scene.positions(state.sim_time);
-            let frame = state.observer.frame(&state.scene, state.sim_time, &p);
-            let direction = (p[3] - frame.position).normalize();
-            assert!(frame.forward.dot(direction) > 1.0 - 1e-12);
-            // Minimal transport back to the initial aim must show no accumulated roll.
-            let back = glam::DQuat::from_rotation_arc(frame.forward, before.forward);
-            assert!((back * frame.up).dot(before.up) > 1.0 - 1e-10);
-            assert!((frame.right.cross(frame.up) + frame.forward).length() < 1e-10);
-            assert_eq!(state.observer.fov_y, fov);
-            let reference = state.observer.star_orientation.take();
-            let natural = state.observer.frame(&state.scene, state.sim_time, &p);
-            assert!((frame.position - natural.position).length() < 1e-12);
-            state.observer.star_orientation = reference;
+    fn body_locks_keep_the_local_horizon_as_time_advances() {
+        for target in [0, 2, 3] {
+            let mut state = State::with_scene(sim::default_scene());
+            state.point_at(target);
+            state.fix_to_stars();
+            state.view_lock = Some(ViewLock::Body(target));
+            let fov = state.observer.fov_y;
+            let start = state.sim_time;
+            let mut first_up = None;
+            let mut rotation = 0.0_f64;
+            for offset in [0.0, 0.1, 0.25, 0.5, -0.1] {
+                state.sim_time = start + offset;
+                state.track();
+                assert!(state.observer.star_orientation.is_none());
+                let p = state.scene.positions(state.sim_time);
+                let frame = state.observer.frame(&state.scene, state.sim_time, &p);
+                let direction = (p[target] - frame.position).normalize();
+                assert!(frame.forward.dot(direction) > 1.0 - 1e-12);
+                let horizon_up =
+                    (frame.zenith - direction * frame.zenith.dot(direction)).normalize();
+                assert!(frame.up.dot(horizon_up) > 1.0 - 1e-12);
+                assert_eq!(state.observer.fov_y, fov);
+                let initial = *first_up.get_or_insert(frame.up);
+                rotation = rotation.max(1.0 - frame.up.dot(initial));
+            }
+            assert!(rotation > 0.01, "sky should rotate for body {target}");
         }
     }
 
@@ -3530,6 +3575,38 @@ mod app_tests {
         });
         assert!(visible_transit, "view must center the transited planet");
         assert!(vf.sun_altitude < -0.1, "it should be night");
+    }
+
+    #[test]
+    fn explore_requires_opt_in_for_title_and_menu_navigation() {
+        let mut app = app();
+        app.menu.explore_enabled = false;
+        app.open_page(menu::Page::Title);
+        for expected in [2, 3, 0] {
+            app.menu_key(KeyCode::ArrowDown, None, None);
+            assert_eq!(app.menu.title_selected, expected);
+        }
+        for expected in [3, 2, 0] {
+            app.menu_key(KeyCode::ArrowUp, None, None);
+            assert_eq!(app.menu.title_selected, expected);
+        }
+        app.title_action(1, None);
+        assert!(app.menu.page == menu::Page::Title);
+        app.open_page(menu::Page::Explore);
+        assert!(app.menu.page == menu::Page::Levels);
+        app.menu_key(KeyCode::KeyP, None, None);
+        assert!(app.menu.page == menu::Page::Levels);
+        let enabled = menu::Layout::new(1280.0, 720.0, 1.0);
+        let disabled = menu::Layout::new(1280.0, 720.0, 1.0).with_explore(false);
+        assert_eq!(disabled.titles[1].w, 0.0);
+        assert_eq!(disabled.titles[2].y, enabled.titles[1].y);
+        app.menu.explore_enabled = true;
+        app.open_page(menu::Page::Title);
+        app.menu.title_selected = 0;
+        app.menu_key(KeyCode::ArrowDown, None, None);
+        assert_eq!(app.menu.title_selected, 1);
+        app.title_action(1, None);
+        assert!(app.menu.page == menu::Page::Explore);
     }
 
     #[test]

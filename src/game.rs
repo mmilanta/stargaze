@@ -2288,14 +2288,6 @@ mod tests {
                 ..Game::default()
             };
             let l = g.layout(w, h, scale);
-            let observe = crate::ui::layout(w, h, scale).with_puzzle(true);
-            for (a, b) in [
-                (l.maps, observe.home),
-                (l.toggle, observe.toggle),
-                (l.bar, observe.bar),
-            ] {
-                assert_eq!([a.x, a.y, a.w, a.h], [b.x, b.y, b.w, b.h]);
-            }
             let controls = [
                 l.maps,
                 l.toggle,

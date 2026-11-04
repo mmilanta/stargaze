@@ -104,6 +104,10 @@ impl Motion {
                 || state.selection_at.elapsed() < Duration::from_millis(260))
     }
 }
+/// The key held this frame, if any (after screen-change filtering).
+pub fn key() -> Option<KeyCode> {
+    FRAME.get().and_then(|f| f.input.key)
+}
 pub fn pressed(label: &str, r: Rect) -> bool {
     FRAME.get().is_some_and(|f| {
         if f.input.mouse && r.contains(f.input.cursor.0, f.input.cursor.1) {

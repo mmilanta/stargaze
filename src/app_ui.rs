@@ -54,7 +54,7 @@ impl App {
         self.menu.title_selected = i;
         match i {
             0 => self.open_page(menu::Page::Levels),
-            1 => self.open_page(menu::Page::Explore),
+            1 if self.menu.explore_enabled => self.open_page(menu::Page::Explore),
             2 => self.open_settings(),
             3 => {
                 if self.game.as_ref().is_some_and(|g| g.has_progress())
@@ -164,8 +164,8 @@ impl App {
         }
         if self.menu.page == menu::Page::Title {
             match key {
-                KeyCode::ArrowUp => self.menu.title_selected = (self.menu.title_selected + 3) % 4,
-                KeyCode::ArrowDown => self.menu.title_selected = (self.menu.title_selected + 1) % 4,
+                KeyCode::ArrowUp => self.menu.move_title(false),
+                KeyCode::ArrowDown => self.menu.move_title(true),
                 KeyCode::Enter | KeyCode::ArrowRight => {
                     self.title_action(self.menu.title_selected, event_loop)
                 }
@@ -210,11 +210,13 @@ impl App {
                 self.controls_back = self.menu.page;
                 self.menu.page = menu::Page::Controls;
             }
-            KeyCode::KeyP => self.open_page(if self.menu.page == menu::Page::Levels {
-                menu::Page::Explore
-            } else {
-                menu::Page::Levels
-            }),
+            KeyCode::KeyP if self.menu.explore_enabled => {
+                self.open_page(if self.menu.page == menu::Page::Levels {
+                    menu::Page::Explore
+                } else {
+                    menu::Page::Levels
+                })
+            }
             KeyCode::ArrowUp => self.menu.move_selection(false, page),
             KeyCode::ArrowDown => self.menu.move_selection(true, page),
             KeyCode::Enter | KeyCode::ArrowRight => {
@@ -438,8 +440,8 @@ impl App {
                 })
                 .unwrap_or_else(|| "Field study".into());
             let r = Rect {
-                x: 16.0 * s,
-                y: 24.0 * s,
+                x: 8.0 * s,
+                y: 8.0 * s,
                 w: 320.0 * s,
                 h: 130.0 * s,
             };
@@ -506,97 +508,60 @@ impl App {
                 "Place yourself, then check [Enter]",
                 ui::MUTED,
             );
-        } else {
-            text(
-                v,
-                16.0 * s,
-                16.0 * s,
-                0.8,
-                "OBSERVATORY / EXPLORE",
-                ui::ACCENT,
-            );
-            text(
-                v,
-                16.0 * s,
-                36.0 * s,
-                0.75,
-                &format!(
-                    "FOV {:.3}° / [G] targets / [Home] reset",
-                    self.state.observer.fov_y.to_degrees()
-                ),
-                ui::MUTED,
-            );
-            if self.targets_open {
-                let page = self.target_page.min(self.target_pages() - 1);
-                let targets = &self.state.scene.targets[page * 10..];
-                let r = Self::targets_panel(vp, s, targets.len());
-                ui::push_rect(
-                    v,
-                    r.x,
-                    r.y,
-                    r.w,
-                    r.h,
-                    [ui::BG[0], ui::BG[1], ui::BG[2], 0.88],
-                    vp,
-                );
-                ui::outline(v, r, s, ui::LINE, vp);
-                text(
-                    v,
-                    r.x + 12.0 * s,
-                    r.y + 12.0 * s,
-                    0.8,
-                    &format!("TARGETS [G]  {}/{}", page + 1, self.target_pages()),
-                    ui::ACCENT,
-                );
-                for (i, &target) in targets.iter().take(10).enumerate() {
-                    let row = Self::target_row(r, s, i);
-                    ui::button(
-                        v,
-                        row,
-                        &format!("{} [{}]", self.state.scene.body(target).name, (i + 1) % 10),
-                        s,
-                        false,
-                        false,
-                        vp,
-                    );
-                }
-                let row = Self::target_row(r, s, targets.len().min(10));
-                ui::button(v, row, "PgUp/PgDn · E/T", s, false, false, vp);
-            }
-        }
-        if let Some(r) = &self.renderer {
-            let samples = r.samples();
-            let limit = self.graphics.settings.sample_limit();
-            let x = vp[0] - 190.0 * s;
-            text(
-                v,
-                x,
-                18.0 * s,
-                0.8,
-                &format!(
-                    "{samples} spp · {}",
-                    if r.needs_redraw() {
-                        "converging"
-                    } else {
-                        "ready"
-                    }
-                ),
-                ui::MUTED,
-            );
-            ui::push_rect(v, x, 37.0 * s, 174.0 * s, 3.0 * s, ui::LINE, vp);
+        } else if self.targets_open {
+            let page = self.target_page.min(self.target_pages() - 1);
+            let targets = &self.state.scene.targets[page * 10..];
+            let n = targets.len().min(10);
+            let (r, s) = crate::hud::panel(vp, self.scale, false, 238.0, 58.0 + n as f32 * 22.0);
             ui::push_rect(
                 v,
-                x,
-                37.0 * s,
-                174.0 * s * (samples as f32 / limit as f32).min(1.0),
-                3.0 * s,
-                ui::OK,
+                r.x,
+                r.y,
+                r.w,
+                r.h,
+                [ui::BG[0], ui::BG[1], ui::BG[2], 0.88],
+                vp,
+            );
+            ui::outline(v, r, s, ui::LINE, vp);
+            ui::eyebrow(
+                v,
+                [r.x + 12.0 * s, r.y + 10.0 * s],
+                7.5 * s,
+                &format!("TARGETS  {}/{}", page + 1, self.target_pages()),
+                ui::ACCENT,
+                vp,
+            );
+            for (i, &target) in targets.iter().take(10).enumerate() {
+                crate::hud::row(
+                    v,
+                    &[
+                        crate::hud::Seg::Key(crate::hud::DIGITS[i]),
+                        crate::hud::text(self.state.scene.body(target).name.clone(), ui::INK),
+                    ],
+                    r.x + 12.0 * s,
+                    r.y + (38.0 + i as f32 * 22.0) * s,
+                    false,
+                    s,
+                    vp,
+                );
+            }
+            crate::hud::row(
+                v,
+                &[
+                    crate::hud::Seg::Key("PgUp"),
+                    crate::hud::Seg::Key("PgDn"),
+                    crate::hud::text("page", ui::MUTED),
+                ],
+                r.x + 12.0 * s,
+                r.y + r.h - 14.0 * s,
+                false,
+                s,
                 vp,
             );
         }
     }
 
-    /// The atmosphere panel above the bar's Air button, when open.
+    /// The atmosphere panel under the key legend, when open.
     fn air_panel_in(&self, vp: [f32; 2]) -> Option<(Rect, f32)> {
         if !self.air_open || self.game.is_some() || !self.show_hud || self.menu.open {
             return None;
@@ -604,19 +569,7 @@ impl App {
         if vp[0] < 1.0 || vp[1] < 1.0 {
             return None;
         }
-        let layout = ui::layout(vp[0], vp[1], self.scale);
-        let s = layout.scale;
-        let (w, h) = (330.0 * s, 132.0 * s);
-        let x = (layout.air.right() - w).clamp(8.0 * s, (layout.bar.w - w - 8.0 * s).max(8.0 * s));
-        Some((
-            Rect {
-                x,
-                y: layout.bar.y - h - 8.0 * s,
-                w,
-                h,
-            },
-            s,
-        ))
+        Some(crate::hud::panel(vp, self.scale, false, 330.0, 132.0))
     }
     fn air_track(panel: Rect, s: f32, slider: crate::AirSlider) -> Rect {
         let row = if slider == crate::AirSlider::Density {
@@ -710,14 +663,7 @@ impl App {
             vp,
         );
         ui::outline(v, r, s, ui::LINE, vp);
-        text(
-            v,
-            r.x + 12.0 * s,
-            r.y + 12.0 * s,
-            0.8,
-            "AIR [J]",
-            ui::ACCENT,
-        );
+        text(v, r.x + 12.0 * s, r.y + 12.0 * s, 0.8, "AIR", ui::ACCENT);
         let airless = self.state.scene.atmosphere.is_none() || self.state.scene.ground.airless();
         if airless {
             let why = if self.state.scene.atmosphere.is_none() {
@@ -730,9 +676,10 @@ impl App {
             for slider in [crate::AirSlider::Density, crate::AirSlider::Colour] {
                 let track = Self::air_track(r, s, slider);
                 let t = self.air_value(slider);
-                let (label, value) = match slider {
+                let (keys, label, value) = match slider {
                     crate::AirSlider::Density => (
-                        "Air [ ]",
+                        ["[", "]"],
+                        "density",
                         if self.state.air.density <= 0.005 {
                             "off".to_string()
                         } else {
@@ -740,14 +687,27 @@ impl App {
                         },
                     ),
                     crate::AirSlider::Colour => (
-                        "Hue ; '",
+                        [";", "'"],
+                        "hue",
                         self.state
                             .air
                             .hue
                             .map_or("natural".into(), |h| hue_name(h).into()),
                     ),
                 };
-                text(v, r.x + 12.0 * s, track.y - 5.0 * s, 0.75, label, ui::INK);
+                crate::hud::row(
+                    v,
+                    &[
+                        crate::hud::Seg::Key(keys[0]),
+                        crate::hud::Seg::Key(keys[1]),
+                        crate::hud::text(label, ui::INK),
+                    ],
+                    r.x + 12.0 * s,
+                    track.y + track.h * 0.5,
+                    false,
+                    s,
+                    vp,
+                );
                 text(
                     v,
                     track.right() + 14.0 * s,
@@ -790,25 +750,20 @@ impl App {
             }
         }
         let reset = Self::air_reset(r, s);
-        ui::button(v, reset, "Reset [Bksp]", s, false, false, vp);
+        crate::hud::row(
+            v,
+            &[
+                crate::hud::Seg::Key("Bksp"),
+                crate::hud::text("reset", ui::MUTED),
+            ],
+            reset.right(),
+            reset.center_y(),
+            true,
+            s,
+            vp,
+        );
     }
 
-    fn targets_panel(vp: [f32; 2], s: f32, n: usize) -> Rect {
-        Rect {
-            x: vp[0] - 254.0 * s,
-            y: 60.0 * s,
-            w: 238.0 * s,
-            h: (70.0 + n.min(10) as f32 * 34.0) * s,
-        }
-    }
-    fn target_row(r: Rect, s: f32, i: usize) -> Rect {
-        Rect {
-            x: r.x + 8.0 * s,
-            y: r.y + (36.0 + i as f32 * 34.0) * s,
-            w: r.w - 16.0 * s,
-            h: 28.0 * s,
-        }
-    }
     pub(crate) fn find_event(&mut self, transit: bool) {
         let found = if transit {
             self.state.next_moon_transit()

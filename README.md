@@ -364,12 +364,14 @@ is attached to Saturn and to Calyx in the Halo preset; any body may carry one. T
 ### Blueprint menus and saved levels
 
 The native menus follow `prototypes/menu-ui/suite.html`: **Play** opens anonymous
-field studies, **Explore** opens named systems, and **Settings** edits a draft.
+field studies and **Settings** edits a draft. Explore is available only when
+launched with `--explore` (for example, `cargo run --release -- --explore`).
+With that flag, **Explore** opens named systems.
 Use Up/Down to select, Enter to open, and Esc to go back. In Explore, `/` searches,
 `F` favorites the selected system, and `B` filters favorites. `P` switches between
 Explore and Levels, `C` opens the controls reference, and `T` returns to the main menu.
-Explicit `--config`, `STARGAZE_CONFIG`, and `STARGAZE_SYSTEM` selections still open
-an observatory directly. `--game` opens the first field study directly and
+Explicit `--config`, `STARGAZE_CONFIG`, and `STARGAZE_SYSTEM` selections open
+a field study directly, or free observation with `--explore`. `--game` opens the first field study directly and
 restores its saved progress; Play on the main menu opens Levels.
 
 In a field study, **Theory [Tab]** opens the full-page diagram. Right-click adds
@@ -485,10 +487,13 @@ sequence is deterministic for a given pixel and sample index.
 ### Controls
 
 In Play/Explore observation, moving the mouse looks around without holding a
-button. The pointer is captured and hidden; HUD controls are **keyboard-only**.
-Mouse buttons do not activate the HUD. A small centre reticle helps aim;
-right-click (or `K`) locks the body or sky direction it points at. While locked, mouse
-movement pans around the target and keeps following it; left-click (or `U`) releases tracking.
+button. The pointer is captured and hidden. The HUD has no buttons: live
+readouts sit in four bordered panels with matching edge spacing: time bottom-left,
+the lock bottom-centre, exposure bottom-right, and the key legend, view controls
+and convergence readout top-right. A keycap lights up while
+its key is held. A small centre reticle helps aim; right-click locks the body
+or sky direction it points at. While locked, mouse movement pans around the
+target and keeps following it; left-click releases tracking.
 Zoom sensitivity follows the field of view, including at deep magnification.
 
 `Esc` / `M`, `P`, or `Tab` (Play) release the pointer for the menu, settings,
@@ -499,8 +504,8 @@ or minimizing also releases capture; returning to observation captures it again.
 | --- | --- |
 | `M` / `Esc` | open the menu or resume the current view |
 | mouse movement | look around (no button held); pans around a locked target |
-| right-click / `K` | track the body at the centre, or hold that background sky direction |
-| left-click / `U` | release the view lock |
+| right-click | track the body at the centre, or hold that background sky direction |
+| left-click | release the view lock |
 | scroll / `=` / `-` | zoom, down to 0.001° |
 | `Space` | pause or resume the previous signed playback speed |
 | `Page Down` / `Page Up` | backward / forward one day (exactly 24 hours on Mirador; targets panel closed) |
@@ -543,22 +548,22 @@ Its day jumps then move by that fixed duration in simulated days. Mirador uses
 the current eclipse phase, camera view and tracking. Eclipse search (`E`)
 remains a separate action.
 
-Right-clicking (or pressing `K`) with a body at the centre locks the telescope onto it as time advances.
+Right-clicking with a body at the centre locks the telescope onto it as time advances.
 With empty sky at the centre, right-click holds that direction fixed against the background stars,
 compensating for the observer's rotation. The selected target is centred without
 changing zoom. The ground is not a lock target.
 
-The bottom bar shows **Locked [U]** with the target name when labels are visible. With labels
+The bottom-centre reticle shows **FOLLOWING** with the target name when labels are visible. With labels
 hidden, including in game mode, it shows **Star**, **Planet / moon**, or
-**Background sky** instead. The lock indicator remains available when the HUD
-is hidden. Left-click or `U` releases it; mouse movement pans around it.
+**Background sky** instead. Hiding the HUD also hides the lock panel.
+Left-click releases tracking; mouse movement pans around it.
 Menus, playback controls, exposure controls, and the diagram preserve the lock.
 Aiming with a target shortcut, resetting, or loading a different system releases it.
 
 Locking the background sky also holds the camera's roll against the stars, so the
 starfield stays fixed on screen as the observer's planet turns. Locking a body
-leaves the orientation as it was: level from a free view, or still rolling with
-the stars when switching from a sky lock. Releasing the lock (left-click or `U`)
+restores the local horizon, allowing normal sky rotation even when switching
+from a sky lock. Releasing the lock (left-click)
 turns the view back to a level horizon.
 
 Startup helpers (body indices depend on the selected system):

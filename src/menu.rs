@@ -70,6 +70,7 @@ pub enum Page {
 
 #[derive(Default)]
 pub struct Menu {
+    pub explore_enabled: bool,
     pub open: bool,
     pub page: Page,
     pub entries: Vec<Entry>,
@@ -88,6 +89,14 @@ pub struct Menu {
 }
 
 impl Menu {
+    pub fn move_title(&mut self, forward: bool) {
+        loop {
+            self.title_selected = (self.title_selected + if forward { 1 } else { 3 }) % 4;
+            if self.explore_enabled || self.title_selected != 1 {
+                break;
+            }
+        }
+    }
     pub fn refresh(&mut self) {
         self.open = true;
         self.offset = 0;
@@ -166,8 +175,6 @@ impl Menu {
 }
 
 pub struct Layout {
-    #[cfg(test)]
-    pub home: Rect,
     pub rows: Vec<Rect>,
     pub play: Vec<Rect>,
     pub discard: Vec<Rect>,
@@ -178,6 +185,16 @@ pub struct Layout {
 }
 
 impl Layout {
+    pub fn with_explore(mut self, enabled: bool) -> Self {
+        if !enabled {
+            let shift = self.titles[2].y - self.titles[1].y;
+            self.titles[1] = Rect::default();
+            for r in &mut self.titles[2..] {
+                r.y -= shift;
+            }
+        }
+        self
+    }
     pub fn play_for(&self, row: usize, page: Page) -> Rect {
         let r = self.play[row];
         if page == Page::Explore {
@@ -223,8 +240,6 @@ impl Layout {
         let px = (w * 0.125).clamp(96.0 * s, 196.0 * s).min(h * 0.23);
         let top = (h - px - 368.0 * s) * 0.5;
         Self {
-            #[cfg(test)]
-            home: ui::layout(w, h, scale).home,
             rows,
             play,
             discard,
@@ -275,7 +290,7 @@ pub fn build(
         return;
     }
     let [w, h] = vp;
-    let l = Layout::new(w, h, scale);
+    let l = Layout::new(w, h, scale).with_explore(menu.explore_enabled);
     let s = l.scale;
     ui::menu_background(v, vp, s);
     let button = |v: &mut Vec<UiVertex>, r: Rect, label: &str, primary: bool| {
@@ -328,6 +343,9 @@ pub fn build(
         .iter()
         .enumerate()
         {
+            if i == 1 && !menu.explore_enabled {
+                continue;
+            }
             let row_start = v.len();
             let r = l.titles[i];
             let active = menu.title_selected == i;
@@ -377,7 +395,7 @@ pub fn build(
         ui::eyebrow(v, [x, 48.0 * s], 9.0 * s, sub, ui::ACCENT, vp);
         ui::tracked_heading(v, [x, 71.0 * s], 50.0 * s, title, -2.0 * s, ui::INK, vp);
         if menu.page == Page::Controls {
-            build_controls(v, vp, &l, menu.controls_scroll);
+            build_controls(v, vp, &l, menu.controls_scroll, menu.explore_enabled);
         } else {
             let indices = menu.visible();
             if indices.is_empty() {
@@ -656,7 +674,13 @@ pub fn build(
 pub fn controls_max_scroll(l: &Layout, h: f32) -> f32 {
     (740.0 - h / l.scale).max(0.0)
 }
-fn build_controls(v: &mut Vec<UiVertex>, vp: [f32; 2], l: &Layout, scroll: f32) {
+fn build_controls(
+    v: &mut Vec<UiVertex>,
+    vp: [f32; 2],
+    l: &Layout,
+    scroll: f32,
+    explore_enabled: bool,
+) {
     let s = l.scale;
     let x = l.rows[0].x;
     let offset = scroll.clamp(0.0, controls_max_scroll(l, vp[1])) * s;
@@ -682,8 +706,8 @@ fn build_controls(v: &mut Vec<UiVertex>, vp: [f32; 2], l: &Layout, scroll: f32) 
             "OBSERVATION",
             &[
                 ("mouse", "look around (no button)"),
-                ("right-click K", "lock body / sky at centre"),
-                ("left-click U", "release lock"),
+                ("right-click", "lock body / sky at centre"),
+                ("left-click", "release lock"),
                 ("scroll = -", "zoom (to 0.001°)"),
                 ("← →", "signed speed"),
                 ("Space", "stop / resume"),
@@ -728,7 +752,13 @@ fn build_controls(v: &mut Vec<UiVertex>, vp: [f32; 2], l: &Layout, scroll: f32) 
         let cx = x + column as f32 * 299.0 * s;
         ui::eyebrow(v, [cx, 160.0 * s - offset], 9.0 * s, title, ui::ACCENT, vp);
         ui::push_rect(v, cx, 179.0 * s - offset, 273.0 * s, s, ui::LINE, vp);
-        for (row, (key, desc)) in keys.iter().enumerate() {
+        for (row, (key, desc)) in keys
+            .iter()
+            .filter(|(key, _)| {
+                explore_enabled || column != 0 || !matches!(*key, "/" | "F" | "P" | "B")
+            })
+            .enumerate()
+        {
             let y = (194.0 + row as f32 * 31.0) * s - offset;
             let mut kx = cx;
             for k in key.split_whitespace() {
@@ -860,18 +890,13 @@ mod tests {
             (320.0, 240.0, 1.0),
         ] {
             let l = Layout::new(w, h, scale);
-            for r in l.rows.iter().chain([&l.home, &l.previous, &l.next]) {
+            for r in l.rows.iter().chain([&l.previous, &l.next]) {
                 assert!(r.x >= 0.0 && r.y >= 0.0);
                 assert!(r.x + r.w <= w && r.y + r.h <= h);
             }
             assert!(l.previous.x + l.previous.w < l.next.x);
             let last = l.rows.last().unwrap();
             assert!(last.y + last.h < l.previous.y);
-            let hud = crate::ui::layout(w, h, scale);
-            assert!(l.home.y >= hud.bar.y);
-            assert!(l.home.y + l.home.h <= hud.bar.y + hud.bar.h);
-            assert!(l.home.x + l.home.w < hud.toggle.x);
-            assert_eq!(l.home.y, hud.toggle.y);
         }
     }
 }
