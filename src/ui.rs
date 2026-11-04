@@ -657,6 +657,8 @@ pub(crate) fn outline(
     color: [f32; 4],
     vp: [f32; 2],
 ) {
+    let thickness = thickness.min(r.w * 0.5).min(r.h * 0.5).max(0.0);
+    // The horizontal strokes own the corners so translucent borders blend once.
     for edge in [
         Rect { h: thickness, ..r },
         Rect {
@@ -664,10 +666,17 @@ pub(crate) fn outline(
             h: thickness,
             ..r
         },
-        Rect { w: thickness, ..r },
+        Rect {
+            y: r.y + thickness,
+            w: thickness,
+            h: r.h - 2.0 * thickness,
+            ..r
+        },
         Rect {
             x: r.x + r.w - thickness,
+            y: r.y + thickness,
             w: thickness,
+            h: r.h - 2.0 * thickness,
             ..r
         },
     ] {
