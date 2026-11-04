@@ -156,9 +156,12 @@ fn gpu_night_air_is_independent_of_sample_batch() {
 #[ignore = "requires a GPU; level-1 Calyx must produce an off-disc atmospheric glow at night"]
 fn gpu_calyx_textures_preserve_night_glare() {
     let (device, queue) = gpu();
-    let state = crate::State::with_scene(
+    let mut state = crate::State::with_scene(
         crate::config::parse(include_str!("../configs/1-halo-volcano.yaml")).unwrap(),
     );
+    // The level opens by day; search for a night view of Calyx instead.
+    state.find_good_start();
+    state.point_initial_view();
     let size = (160, 90);
     let mut tracer = PathTracer::new_with_guided_ground(
         &device,

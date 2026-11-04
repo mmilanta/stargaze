@@ -245,6 +245,7 @@ fn state(scene: crate::sim::Scene, time: f64) -> crate::State {
         day_step_failed: false,
         last: Instant::now(),
         view_lock: None,
+        lock_offset: (0.0, 0.0),
         air: Default::default(),
         no_ground: false,
     }

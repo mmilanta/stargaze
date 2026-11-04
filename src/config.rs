@@ -865,6 +865,46 @@ mod tests {
     }
 
     #[test]
+    fn level_one_opens_by_day_and_calyx_hides_both_suns_before_they_set() {
+        let src = include_str!("../configs/1-halo-volcano.yaml");
+        let scene = parse(src).unwrap();
+        let state = crate::State::with_scene(parse(src).unwrap());
+        let id = |name: &str| scene.bodies.iter().position(|b| b.name == name).unwrap();
+        let (calyx, suns) = (id("Calyx"), [id("Aur"), id("Igni")]);
+        let start = scene.initial_time_days.unwrap();
+        let sky = |t: f64| {
+            let p = scene.positions(t);
+            let vf = state.observer.frame(&scene, t, &p);
+            let dc = p[calyx] - vf.position;
+            let rc = (scene.body(calyx).radius / dc.length()).asin();
+            suns.map(|s| {
+                let ds = p[s] - vf.position;
+                let rs = (scene.body(s).radius / ds.length()).asin();
+                let alt = ds.normalize().dot(vf.zenith).asin().to_degrees();
+                (alt, ds.angle_between(dc) < rc - rs)
+            })
+        };
+        // A clear day: both suns well up and uncovered.
+        assert!(
+            sky(start)
+                .iter()
+                .all(|&(alt, hidden)| alt > 25.0 && !hidden)
+        );
+        let times = (0..2000).map(|i| start + i as f64 * 0.005);
+        let both = times
+            .clone()
+            .find(|&t| sky(t).iter().all(|&(_, hidden)| hidden))
+            .expect("Calyx never hides both suns at once");
+        let set = times
+            .clone()
+            .find(|&t| sky(t).iter().all(|&(alt, _)| alt < 0.0))
+            .expect("the suns never set");
+        assert!(both - start > 1.0, "the day should last before the eclipse");
+        assert!(sky(both).iter().all(|&(alt, _)| alt > 5.0));
+        assert!(set - both > 0.5, "the suns re-emerge before setting");
+    }
+
+    #[test]
     fn corona_level_opens_before_puna_occults_the_ringed_star_at_night() {
         let scene = parse(CORONA).unwrap();
         assert_eq!(scene.ground, crate::ground::Theme::Desert);
