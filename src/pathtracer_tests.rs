@@ -12,6 +12,9 @@ mod sky;
 #[path = "surface_tests.rs"]
 mod surfaces;
 
+#[path = "motion_noise_tests.rs"]
+mod motion_noise;
+
 #[path = "planetshine_tests.rs"]
 mod planetshine;
 

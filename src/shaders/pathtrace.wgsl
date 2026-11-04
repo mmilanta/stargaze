@@ -208,17 +208,57 @@ fn light_index(slot: u32) -> u32 {
     if (settings.lights.w <= 3u) { return settings.lights[slot]; }
     return slot;
 }
-fn sample_light(ray: Ray, index: u32, rng: ptr<function, u32>) -> LightSample {
+// A stratum covers an equal area of the light's solid-angle cone. One
+// sample is exactly the original sampler; four use a jittered 2x2 partition.
+fn sample_light_stratum(ray: Ray, index: u32, stratum: u32, count: u32, rng: ptr<function, u32>) -> LightSample {
     let axis = normalize(relative_center(ray, index));
     let width = cone_width(ray, index);
-    let one_minus_cos = random(rng) * width;
+    var radial = random(rng);
+    var azimuth = random(rng);
+    if (count == 4u) {
+        radial = (f32(stratum & 1u) + radial) * 0.5;
+        azimuth = (f32(stratum >> 1u) + azimuth) * 0.5;
+    }
+    let one_minus_cos = radial * width;
     // Also avoid cancellation in 1-cos(theta)^2 for small stellar discs.
     let sin_theta = sqrt(one_minus_cos * (2.0 - one_minus_cos));
-    let phi = TAU * random(rng);
+    let phi = TAU * azimuth;
     return LightSample(
         basis_direction(axis, sin_theta * cos(phi), sin_theta * sin(phi), 1.0 - one_minus_cos),
         1.0 / (TAU * width),
     );
+}
+fn sample_light(ray: Ray, index: u32, rng: ptr<function, u32>) -> LightSample {
+    return sample_light_stratum(ray, index, 0u, 1u, rng);
+}
+
+// Spend additional shadow samples only on a fresh frame and where a spherical
+// limb can cross the stellar disc. Test from each scattering point:
+// the camera can be in totality while distant air sees a partial sun.
+fn eclipse_light_samples(ray: Ray, index: u32) -> u32 {
+    if (settings.counts.y != 0u) { return 1u; }
+    let source = relative_center(ray, index);
+    let distance = length(source);
+    let axis = source / distance;
+    let source_chord = sqrt(2.0 * cone_width(ray, index));
+    for (var b = 0u; b < settings.counts.x; b += 1u) {
+        if (b == index) { continue; }
+        let offset = relative_center(ray, b);
+        let d2 = dot(offset, offset);
+        let radius = bodies[b].center.w;
+        if (d2 <= radius * radius) { continue; }
+        let d = sqrt(d2);
+        if (d - radius >= distance + bodies[index].center.w) { continue; }
+        let sin2 = clamp(radius * radius / d2, 0.0, 1.0);
+        let limb_chord = sqrt(2.0 * sin2 / (1.0 + sqrt(1.0 - sin2)));
+        // Chord distances avoid acos cancellation for tiny stellar discs.
+        // Triangle bounds conservatively include partial overlap; extra
+        // samples near very large limbs affect cost, never visibility.
+        let separation = length(axis - offset / d);
+        if (separation < source_chord + limb_chord
+            && separation + source_chord > limb_chord) { return 4u; }
+    }
+    return 1u;
 }
 fn power_weight(a: f32, b: f32) -> f32 {
     let ratio = b / max(a, 1.0e-30);
@@ -1030,7 +1070,8 @@ fn reflected_radiance(ray: Ray, index: u32, rng: ptr<function, u32>) -> vec3<f32
 }
 
 // Largest unoccluded irradiance (max channel) from a star above the
-// observer's horizon, or 0 when every star has set.
+// observer's horizon, or 0 when every star has set. This is only an
+// importance proxy; eclipses can hide the sun while it is above the horizon.
 fn brightest_risen_light(origin: vec3<f32>) -> f32 {
     let ray = Ray(origin, vec3<f32>(0.0, 0.0, -1.0), MISS);
     var brightest = 0.0;
@@ -1101,12 +1142,15 @@ fn atmosphere(origin: vec3<f32>, dir: vec3<f32>, limit: f32, rng: ptr<function, 
     // In daylight, planetshine is a vanishing fraction of the sky (moonlight
     // is ~1e-6 of sunlight). Russian roulette keeps it unbiased while rarely
     // paying for its per-step shadow rays. At night or twilight (no sun above
-    // the observer's horizon) it is always evaluated.
+    // the observer's horizon) it is always evaluated. A fresh frame also keeps
+    // every contribution. Introduce thinning gradually as samples accumulate,
+    // so a 64x sample cannot become a bright dot when time or the camera moves.
     if (any(reflected > vec3<f32>(0.0))) {
         let sun = brightest_risen_light(origin);
         if (sun > 0.0) {
             let ratio = max(reflected.r, max(reflected.g, reflected.b)) / sun;
-            let keep = clamp(ratio * 1.0e3, 1.0 / 64.0, 1.0);
+            let minimum = inverseSqrt(clamp(f32(settings.counts.y) + 1.0, 1.0, 4096.0));
+            let keep = clamp(ratio * 1.0e3, minimum, 1.0);
             reflected = select(vec3<f32>(0.0), reflected / keep, random(&reflected_rng) < keep);
         }
     }
@@ -1137,18 +1181,21 @@ fn atmosphere(origin: vec3<f32>, dir: vec3<f32>, limit: f32, rng: ptr<function, 
             // A tangent-plane horizon test wrongly kills twilight at altitude
             // and cannot see eclipses caused by moons or other planets.
             var light_ray = Ray(p, dir, MISS);
-            let light = sample_light(light_ray, b, rng);
-            light_ray.direction = light.direction;
-            let visibility = air_light_visibility(light_ray, b);
-            if (visibility == 0.0) {
-                continue;
+            let light_samples = eclipse_light_samples(light_ray, b);
+            for (var light_sample = 0u; light_sample < light_samples; light_sample += 1u) {
+                let light = sample_light_stratum(light_ray, b, light_sample, light_samples, rng);
+                light_ray.direction = light.direction;
+                let visibility = air_light_visibility(light_ray, b);
+                if (visibility == 0.0) {
+                    continue;
+                }
+                let e_sun = bodies[b].material.rgb * (visibility / (f32(light_samples) * light.pdf));
+                let sun_t = exp(-beta_ext * density_integral(p, light.direction, ATMO_SUN_STEPS));
+                let cos_theta = dot(dir, light.direction);
+                let beta_phase = beta_r * rayleigh_phase(cos_theta)
+                    + vec3<f32>(beta_m) * mie_phase(cos_theta, g);
+                inscatter += t_view * segment * beta_phase * e_sun * sun_t;
             }
-            let e_sun = bodies[b].material.rgb * (visibility / light.pdf);
-            let sun_t = exp(-beta_ext * density_integral(p, light.direction, ATMO_SUN_STEPS));
-            let cos_theta = dot(dir, light.direction);
-            let beta_phase = beta_r * rayleigh_phase(cos_theta)
-                + vec3<f32>(beta_m) * mie_phase(cos_theta, g);
-            inscatter += t_view * segment * beta_phase * e_sun * sun_t;
         }
         if (planetshine) {
             let visibility = air_light_visibility(Ray(p, reflected_direction, MISS), reflector.index);
