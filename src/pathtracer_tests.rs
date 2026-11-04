@@ -6,6 +6,9 @@ mod rings;
 #[path = "ground_tests.rs"]
 mod ground;
 
+#[path = "eclipse_tests.rs"]
+mod eclipses;
+
 #[path = "sky_tests.rs"]
 mod sky;
 
