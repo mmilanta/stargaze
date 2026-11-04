@@ -151,7 +151,6 @@ impl App {
         }
         match key {
             KeyCode::KeyP => self.open_settings(),
-            KeyCode::KeyR | KeyCode::KeyS | KeyCode::KeyO => self.state.toggle_star_orientation(),
             KeyCode::KeyK => {
                 if let Some(r) = &self.renderer {
                     let (w, h) = r.size();

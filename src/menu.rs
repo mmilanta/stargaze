@@ -688,7 +688,6 @@ fn build_controls(v: &mut Vec<UiVertex>, vp: [f32; 2], l: &Layout, scroll: f32) 
                 ("← →", "signed speed"),
                 ("Space", "stop / resume"),
                 ("PgDn PgUp", "−1 / +1 day"),
-                ("R", "horizon level / stars fixed"),
                 (", .", "exposure ±0.25 EV"),
                 ("A", "auto exposure"),
                 ("L", "labels"),

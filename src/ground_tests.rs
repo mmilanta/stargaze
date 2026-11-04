@@ -345,7 +345,7 @@ fn gpu_ground_preview() {
 fn ground_view_and_geometry_follow_the_surface_frame() {
     let mut state = crate::State::with_scene(crate::sim::halo_scene());
     state.view_lock = Some(crate::ViewLock::Body(state.scene.default_target));
-    state.toggle_star_orientation();
+    state.fix_to_stars();
     let time = state.sim_time;
     state.ground_view();
     assert_eq!(state.view_lock, None);
