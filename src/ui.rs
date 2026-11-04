@@ -677,7 +677,6 @@ pub(crate) fn outline(
             y: r.y + thickness,
             w: thickness,
             h: r.h - 2.0 * thickness,
-            ..r
         },
     ] {
         push_rect(v, edge.x, edge.y, edge.w, edge.h, color, vp);

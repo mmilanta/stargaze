@@ -553,8 +553,8 @@ changing zoom. The ground is not a lock target.
 
 The bottom-centre reticle shows **FOLLOWING** with the target name when labels are visible. With labels
 hidden, including in game mode, it shows **Star**, **Planet / moon**, or
-**Background sky** instead. The lock indicator remains available when the HUD
-is hidden. Left-click releases it; mouse movement pans around it.
+**Background sky** instead. Hiding the HUD also hides the lock panel.
+Left-click releases tracking; mouse movement pans around it.
 Menus, playback controls, exposure controls, and the diagram preserve the lock.
 Aiming with a target shortcut, resetting, or loading a different system releases it.
 

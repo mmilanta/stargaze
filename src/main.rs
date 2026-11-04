@@ -1316,13 +1316,7 @@ impl App {
                     &frame.labels,
                 );
             } else {
-                hud::build_hidden(
-                    &mut vertices,
-                    [w as f32, h as f32],
-                    self.scale,
-                    lock_label.as_deref(),
-                    lock_icon,
-                );
+                hud::build_hidden(&mut vertices, [w as f32, h as f32], self.scale);
             }
         }
         if !self.menu.open

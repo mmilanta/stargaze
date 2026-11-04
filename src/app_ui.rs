@@ -438,8 +438,8 @@ impl App {
                 })
                 .unwrap_or_else(|| "Field study".into());
             let r = Rect {
-                x: 16.0 * s,
-                y: 24.0 * s,
+                x: 8.0 * s,
+                y: 8.0 * s,
                 w: 320.0 * s,
                 h: 130.0 * s,
             };

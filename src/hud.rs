@@ -627,7 +627,7 @@ fn lock_glyph(v: &mut Vec<UiVertex>, center: [f32; 2], icon: LockIcon, s: f32, v
     }
 }
 
-/// The lock reticle, bottom centre. Also drawn with the rest of the HUD hidden.
+/// The lock reticle, bottom centre.
 fn lock(
     v: &mut Vec<UiVertex>,
     vp: [f32; 2],
@@ -712,19 +712,10 @@ fn lock(
     r
 }
 
-/// With the HUD hidden: the lock (only while following) and how to come back.
-pub fn build_hidden(
-    v: &mut Vec<UiVertex>,
-    vp: [f32; 2],
-    requested: f32,
-    target: Option<&str>,
-    icon: Option<LockIcon>,
-) {
+/// With the HUD hidden: only the hint for how to show it again.
+pub fn build_hidden(v: &mut Vec<UiVertex>, vp: [f32; 2], requested: f32) {
     let [w, h] = vp;
     let s = scale(w, h, requested);
-    if target.is_some() {
-        lock(v, vp, s, target, icon);
-    }
     let m = MARGIN * s;
     plated(v, s, vp, |v| {
         row(
