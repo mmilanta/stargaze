@@ -14,6 +14,12 @@ pub struct Session {
     pub fov: f64,
     pub orientation: Option<[[f64; 3]; 2]>,
     pub lock: Option<SavedLock>,
+    /// Pan (yaw, pitch radians) around the locked target; older saves have none.
+    #[serde(default)]
+    pub lock_offset: [f64; 2],
+    /// The level's configured start when this sky was saved; see [`sky_start`].
+    #[serde(default)]
+    pub start: Option<String>,
     pub ev: f32,
     pub auto: bool,
 }
@@ -22,6 +28,21 @@ pub struct Session {
 pub enum SavedLock {
     Body(usize),
     Sky([f64; 3]),
+}
+
+/// Fingerprint of a level's configured opening: start time, site and view.
+/// A saved sky only resumes while it still matches.
+pub fn sky_start(scene: &crate::sim::Scene) -> String {
+    format!(
+        "{:?}",
+        (
+            scene.initial_time_days,
+            scene.observer_lat_deg,
+            scene.observer_lon_deg,
+            scene.initial_direction_deg,
+            scene.default_target,
+        )
+    )
 }
 
 fn unit(v: [f64; 3]) -> bool {
@@ -45,6 +66,7 @@ impl Session {
                 SavedLock::Body(_) => true,
                 SavedLock::Sky(v) => unit(*v),
             })
+            && self.lock_offset.iter().all(|x| x.is_finite())
     }
     pub fn summary(&self) -> (usize, usize, Option<f32>) {
         Game::restore(&self.theory)
@@ -204,6 +226,8 @@ mod tests {
             fov: 0.7,
             orientation: None,
             lock: None,
+            lock_offset: [0.0, 0.0],
+            start: None,
             ev: 0.0,
             auto: true,
         };
@@ -242,6 +266,8 @@ mod tests {
                 fov: 0.7,
                 orientation: None,
                 lock: None,
+                lock_offset: [0.0, 0.0],
+                start: None,
                 ev: 0.0,
                 auto: true,
             },
