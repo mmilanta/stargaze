@@ -347,25 +347,25 @@ pub(crate) fn font_text(
     viewport: [f32; 2],
 ) {
     let mut cx = x;
+    let baseline = (y + px * 0.8).round();
     for ch in text.chars() {
         let g = typeface::glyph(face, ch, px);
-        let s = px / g.em;
         let m = g.metrics;
-        let x0 = cx + m.xmin as f32 * s;
-        let y0 = y + px * 0.8 - (m.ymin as f32 + m.height as f32) * s;
+        // The atlas already contains antialiased pixel coverage. Keep its texels
+        // at 1:1 screen size and snap only the ink, preserving fractional advances
+        // for layout. Rescaling or shifting the bitmap filters the strokes twice.
+        let x0 = cx.round() + m.xmin as f32;
+        let y0 = baseline - (m.ymin as f32 + m.height as f32);
         if m.width > 0 && m.height > 0 {
             push_quad(
                 verts,
-                [
-                    [x0, y0],
-                    [x0 + m.width as f32 * s, y0 + m.height as f32 * s],
-                ],
+                [[x0, y0], [x0 + m.width as f32, y0 + m.height as f32]],
                 g.uv,
                 color,
                 viewport,
             );
         }
-        cx += m.advance_width * s;
+        cx += m.advance_width * (px / g.em);
     }
 }
 
