@@ -65,7 +65,8 @@ impl Atlas {
 
     fn glyph(&mut self, face: Face, ch: char, px: f32) -> Glyph {
         // Quarter-pixel sizes prevent animated/fitted text filling the cache with
-        // near-identical bitmaps; resampling is at most 1/8px away from native size.
+        // near-identical bitmaps. Render the chosen bitmap at native size rather
+        // than resampling it back to the requested size (at most 1/8px different).
         let em = (px * 4.0).round().max(1.0) / 4.0;
         let ch = supported(ch);
         let key = (face, ch, em.to_bits());
@@ -239,6 +240,8 @@ mod tests {
         for (face, requested, ch) in [
             (Face::Mono, 10.5, 'g'),
             (Face::Mono, 13.125, 'W'),
+            (Face::Mono, 13.13, 'W'),
+            (Face::Sans, 26.23, 'g'),
             (Face::Mono, 21.0, 'g'),
             (Face::Sans, 52.0, 'A'),
             (Face::Display, 392.0, 'g'),
@@ -248,30 +251,39 @@ mod tests {
             begin_frame([3840, 2160], requested);
             let g = glyph(face, ch, requested);
             let (m, reference) = font(face).rasterize(ch, g.em);
-            let (w, h) = (m.width as u32 + 8, m.height as u32 + 8);
-            let mut v = Vec::new();
-            crate::ui::font_text(
-                &mut v,
-                [
-                    4.0 - m.xmin as f32,
-                    4.0 + (m.ymin as f32 + m.height as f32) - g.em * 0.8,
-                ],
-                g.em,
-                face,
-                &ch.to_string(),
-                [1.0; 4],
-                [w as f32, h as f32],
-            );
-            let pixels = gpu.render(&v, w, h, None);
-            for y in 0..m.height {
-                for x in 0..m.width {
-                    let sample = pixels[((y + 4) * w as usize + x + 4) * 4];
-                    let expected = reference[y * m.width + x];
-                    assert!(
-                        sample.abs_diff(expected) <= 2,
-                        "{face:?} {ch} at {}px: ({x},{y}) expected {expected}, got {sample}",
-                        g.em
-                    );
+            let (w, h) = (m.width as u32 + 10, m.height as u32 + 10);
+            for [dx, dy] in [[0.0_f32, 0.0_f32], [0.25, 0.375], [0.625, 0.875]] {
+                let mut v = Vec::new();
+                crate::ui::font_text(
+                    &mut v,
+                    [
+                        4.0 + dx - m.xmin as f32,
+                        4.0 + dy + (m.ymin as f32 + m.height as f32) - requested * 0.8,
+                    ],
+                    requested,
+                    face,
+                    &ch.to_string(),
+                    [1.0; 4],
+                    [w as f32, h as f32],
+                );
+                let pixels = gpu.render(&v, w, h, None);
+                let left = 4 + dx.round() as usize;
+                let top = 4 + dy.round() as usize;
+                for y in 0..h as usize {
+                    for x in 0..w as usize {
+                        let sample = pixels[(y * w as usize + x) * 4];
+                        let expected = if (left..left + m.width).contains(&x)
+                            && (top..top + m.height).contains(&y)
+                        {
+                            reference[(y - top) * m.width + x - left]
+                        } else {
+                            0
+                        };
+                        assert!(
+                            sample.abs_diff(expected) <= 2,
+                            "{face:?} {ch} at {requested}px offset {dx},{dy}: ({x},{y}) expected {expected}, got {sample}",
+                        );
+                    }
                 }
             }
         }
