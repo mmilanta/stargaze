@@ -63,14 +63,34 @@ jobs:
           VERSION=$(python -c 'import tomllib; print(tomllib.load(open("Cargo.toml", "rb"))["package"]["version"])')
           python scripts/package_release.py --profile debug --target "$TARGET" --tag "v$VERSION"
 
+  ui:
+    name: Browser interface tests
+    runs-on: ubuntu-24.04
+    defaults:
+      run:
+        working-directory: ui
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: npm
+          cache-dependency-path: ui/package-lock.json
+      - run: npm ci
+      - run: npm run check
+      - run: npm test
+      - run: npx playwright install --with-deps chromium
+      - run: npm run test:browser
+
   required:
     name: CI required
     if: always()
-    needs: [quality, test]
+    needs: [quality, test, ui]
     runs-on: ubuntu-24.04
     steps:
       - name: Require every check to pass
         env:
           QUALITY: ${{ needs.quality.result }}
           TEST: ${{ needs.test.result }}
-        run: test "$QUALITY" = success && test "$TEST" = success
+          UI: ${{ needs.ui.result }}
+        run: test "$QUALITY" = success && test "$TEST" = success && test "$UI" = success
