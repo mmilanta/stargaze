@@ -1,5 +1,9 @@
 # stargaze
 
+The browser interface preview lives in [`ui/`](ui/README.md). Run
+`cd ui && npm run dev` to open it locally at http://localhost:5188/.
+It runs independently of the Rust renderer; see its README for scope and tests.
+
 An observatory on a planet, looking out at a star system. Stand still and watch
 Keplerian orbits through an alt-azimuth telescope—or stop time and let the
 **progressive, fully ray-traced image** converge.
