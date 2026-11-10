@@ -1,0 +1,137 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Stargaze · Drift</title>
+<link rel="preconnect" href="https://fonts.googleapis.com"><link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Sora:wght@200;300;500&family=Martian+Mono:wght@300;400&display=swap" rel="stylesheet">
+<style>
+:root{--text:#fff6f0;--soft:#fff6f0a6;--faint:#fff6f05c;--glow:#ffd2b8}
+*{box-sizing:border-box;margin:0}
+html,body{height:100%;background:#120a24;color:var(--text);overflow:hidden;font:300 14px/1.6 Sora,sans-serif}
+canvas{position:fixed;inset:0;width:100%;height:100%}
+.screen{position:fixed;inset:0;display:none}.screen.on{display:block;animation:rise 1s cubic-bezier(.2,.7,.2,1)}
+@keyframes rise{from{opacity:0;transform:translateY(14px)}to{opacity:1;transform:none}}
+.mono{font:300 10.5px/1.4 'Martian Mono',monospace;letter-spacing:.08em;color:var(--soft)}
+/* Title */
+.center{position:absolute;left:0;right:0;top:20vh;text-align:center}
+.center h1{font:200 clamp(54px,8vw,124px)/1 Sora;letter-spacing:.28em;text-indent:.28em;text-shadow:0 0 40px #ffb38a66}
+.center .mono{margin-top:18px}
+.menu{list-style:none;padding:0;margin-top:9vh;display:flex;flex-direction:column;align-items:center;gap:6px}
+.menu li{position:relative;font:300 20px/1.8 Sora;letter-spacing:.04em;color:var(--faint);cursor:pointer;transition:color .4s,letter-spacing .4s}
+.menu li.sel{color:var(--text);letter-spacing:.12em}
+.menu li.sel::before,.menu li.sel::after{content:'';position:absolute;top:50%;width:6px;height:6px;border-radius:50%;background:var(--glow);box-shadow:0 0 12px var(--glow)}
+.menu li.sel::before{left:-30px}.menu li.sel::after{right:-30px}
+/* Levels */
+.slide{position:absolute;left:0;right:0;top:16vh;text-align:center}
+.slide .mono{letter-spacing:.3em}
+.slide h2{font:200 clamp(48px,7.5vw,112px)/1.05 Sora;margin:16px 0 8px;text-shadow:0 0 50px #ffffff30}
+.slide .sys{font-size:17px;color:var(--soft)}
+.facts{display:flex;justify-content:center;gap:56px;margin-top:6vh}
+.facts div{text-align:center}.facts b{display:block;font:300 26px Sora;margin-bottom:2px}
+.dots{position:absolute;left:0;right:0;bottom:12vh;display:flex;justify-content:center;gap:34px;align-items:center}
+.dots span{width:7px;height:7px;border-radius:50%;background:var(--faint);transition:all .4s}
+.dots span.sel{width:44px;border-radius:4px;background:var(--text)}
+.hint{position:absolute;left:0;right:0;bottom:4vh;text-align:center;white-space:pre}
+/* Observe */
+.line{position:absolute;left:0;right:0;bottom:5vh;display:flex;justify-content:center;gap:48px;align-items:baseline}
+.line .v{font:300 18px Sora;color:var(--text);margin-left:10px}
+.whisper{position:absolute;left:0;right:0;top:6vh;text-align:center;font:300 15px Sora;color:var(--soft);transition:opacity 1.2s}
+.keys{position:absolute;right:3vw;top:50%;transform:translateY(-50%);display:flex;flex-direction:column;gap:12px;text-align:right;opacity:.75}
+.keys kbd{font:400 10px 'Martian Mono';color:var(--glow);margin-left:12px}
+</style>
+</head>
+<body>
+<canvas id="cv"></canvas>
+
+<section class="screen" id="title">
+  <div class="center"><h1>STARGAZE</h1><div class="mono">drift under unknown skies</div>
+  <ul class="menu" id="menu"></ul></div>
+</section>
+
+<section class="screen" id="levels">
+  <div class="slide"><div class="mono" id="num"></div><h2 id="lt"></h2><div class="sys" id="ls"></div>
+  <div class="facts" id="facts"></div></div>
+  <div class="dots" id="dots"></div>
+  <div class="hint mono">← →  choose      enter  descend      esc  rise</div>
+</section>
+
+<section class="screen" id="observe">
+  <div class="whisper" id="whisper">six lights move here. which of them belong together?</div>
+  <div class="keys mono"><span>slower · faster<kbd>← →</kbd></span><span>hold time<kbd>space</kbd></span><span>lock on<kbd>L</kbd></span><span>exposure<kbd>, .</kbd></span><span>draw theory<kbd>tab</kbd></span><span>hide<kbd>H</kbd></span></div>
+  <div class="line mono"><span>day<span class="v" id="clock">731 · 12:00</span></span><span>flow<span class="v" id="spd">still</span></span><span>looking<span class="v">ESE 31°</span></span><span>light<span class="v" id="ev">+0.0</span></span></div>
+</section>
+
+<script>
+const LEVELS=[
+  {t:'Ember summit',s:'Calyx and Halo — the volcano',g:'basalt',fov:70,n:6,sky:['#1a0b1f','#5a1a2e','#e0703f','#ffc48a'],ground:'#14080c'},
+  {t:'Shadow season',s:'Erg — the ringed dune sea',g:'dunes',fov:60,n:5,sky:['#160f2a','#4b2a5e','#d58a5e','#ffe0a6'],ground:'#2a1610'},
+  {t:'The long shadow',s:'Umbra — the daily eclipse',g:'ice field',fov:25,n:5,sky:['#060d22','#16305a','#4f8fb3','#c9f0ff'],ground:'#0a1424'}];
+const TITLE_SKY=['#120a24','#3a1d4f','#b0507a','#ffb38a'];
+const MENU=['begin','settings','controls','leave'];
+let screen='title',sel=0,lvl=0,minutes=0,spd=0,ev=0,hud=true;
+let sky=TITLE_SKY.map(hex),target=sky;
+const $=s=>document.querySelector(s);
+function hex(h){return[1,3,5].map(i=>parseInt(h.slice(i,i+2),16));}
+function show(s){screen=s;document.querySelectorAll('.screen').forEach(e=>e.classList.toggle('on',e.id===s));
+  if(s==='observe'){$('#whisper').style.opacity=1;setTimeout(()=>$('#whisper').style.opacity=0,4000);}draw();}
+function draw(){
+  $('#menu').innerHTML=MENU.map((m,i)=>`<li class="${i===sel?'sel':''}" data-i="${i}">${m}</li>`).join('');
+  const L=LEVELS[lvl];$('#num').textContent=`field study  0${lvl+1}`;$('#lt').textContent=L.t.toLowerCase();$('#ls').textContent=L.s;
+  $('#facts').innerHTML=`<div><b>${L.n}</b><span class="mono">lights</span></div><div><b>${L.fov}°</b><span class="mono">view</span></div><div><b>${L.g}</b><span class="mono">ground</span></div><div><b>${lvl?'—':'72'}</b><span class="mono">best</span></div>`;
+  $('#dots').innerHTML=LEVELS.map((_,i)=>`<span class="${i===lvl?'sel':''}"></span>`).join('');
+  target=(screen==='title'?TITLE_SKY:LEVELS[lvl].sky).map(hex);
+}
+addEventListener('keydown',e=>{
+  if(screen==='title'){
+    if(e.key==='ArrowDown')sel=(sel+1)%MENU.length;if(e.key==='ArrowUp')sel=(sel+MENU.length-1)%MENU.length;
+    if((e.key==='Enter'||e.key==='ArrowRight')&&sel===0)return show('levels');
+  }else if(screen==='levels'){
+    if(e.key==='ArrowRight')lvl=Math.min(2,lvl+1);if(e.key==='ArrowLeft'){if(lvl===0)return show('title');lvl--;}
+    if(e.key==='Enter')return show('observe');if(e.key==='Escape')return show('title');
+  }else{
+    if(e.key==='Escape')return show('levels');
+    if(e.key==='ArrowRight')spd=Math.min(3,spd+1);if(e.key==='ArrowLeft')spd=Math.max(-3,spd-1);
+    if(e.key===' '){spd=0;e.preventDefault();}
+    if(e.key==='.')ev=Math.min(4,ev+.5);if(e.key===',')ev=Math.max(-4,ev-.5);
+    if(e.key==='h'||e.key==='H'){hud=!hud;document.querySelectorAll('#observe .keys,#observe .line').forEach(n=>n.style.opacity=hud?'':'0');}
+    $('#spd').textContent=spd?`${spd>0?'forward':'back'} ${10**(Math.abs(spd)-1)}×`:'still';
+    $('#ev').textContent=`${ev>=0?'+':'−'}${Math.abs(ev).toFixed(1)}`;
+  }
+  draw();
+});
+document.addEventListener('click',e=>{const li=e.target.closest('[data-i]');if(li){sel=+li.dataset.i;sel===0?show('levels'):draw();}});
+
+const c=$('#cv'),x=c.getContext('2d');let W,H,k,stars,motes;
+function resize(){k=devicePixelRatio;W=c.width=innerWidth*k;H=c.height=innerHeight*k;
+  stars=Array.from({length:420},()=>[Math.random(),Math.random()**1.6*.75,Math.random()**3*1.8+.3,Math.random()*6]);
+  motes=Array.from({length:40},()=>[Math.random(),Math.random(),Math.random()*.4+.1]);}
+addEventListener('resize',resize);resize();
+const rgb=a=>`rgb(${a.map(Math.round).join(',')})`;
+function frame(now){
+  const t=now/1000;sky=sky.map((c3,i)=>c3.map((v,j)=>v+(target[i][j]-v)*.04));
+  const g=x.createLinearGradient(0,0,0,H);g.addColorStop(0,rgb(sky[0]));g.addColorStop(.45,rgb(sky[1]));g.addColorStop(.78,rgb(sky[2]));g.addColorStop(1,rgb(sky[3]));
+  x.fillStyle=g;x.fillRect(0,0,W,H);
+  for(const [sx,sy,r,p] of stars){x.globalAlpha=(1-sy/.75)*(.6+.4*Math.sin(t*1.1+p));x.fillStyle='#fff';x.beginPath();x.arc(sx*W,sy*H,r*k,0,7);x.fill();}
+  x.globalAlpha=1;
+  if(screen==='observe'){
+    minutes+=spd?Math.sign(spd)*10**(Math.abs(spd)-1)*.5:0;const pa=minutes/800;
+    [[.6,.28,10,'#ffe7cf'],[.32,.2,3,'#ffffff'],[.78,.4,2.5,'#ffffff'],[.46,.12,3,'#ffd2b8']].forEach(([px,py,r,col],i)=>{
+      const X=(px+Math.sin(pa*(i+1))*.03)*W,Y=(py+Math.cos(pa*(i+1))*.02)*H;const gl=x.createRadialGradient(X,Y,0,X,Y,r*5*k);gl.addColorStop(0,col+'aa');gl.addColorStop(1,col+'00');
+      x.fillStyle=gl;x.beginPath();x.arc(X,Y,r*5*k,0,7);x.fill();x.fillStyle=col;x.beginPath();x.arc(X,Y,r*k,0,7);x.fill();});
+    x.strokeStyle='#ffffff55';x.lineWidth=k;x.beginPath();x.arc(W/2,H/2,14*k,0,7);x.stroke();
+    const d=731+Math.floor(minutes/1440),m=((minutes%1440)+1440+720)%1440;$('#clock').textContent=`${d} · ${String(Math.floor(m/60)).padStart(2,'0')}:${String(Math.floor(m%60)).padStart(2,'0')}`;
+  }
+  // planet limb / horizon
+  const R=W*1.6,cy=H*(screen==='observe'?.86:.92)+R;
+  const halo=x.createRadialGradient(W/2,cy,R*.985,W/2,cy,R*1.03);halo.addColorStop(0,'#ffffff55');halo.addColorStop(1,'#ffffff00');
+  x.fillStyle=halo;x.beginPath();x.arc(W/2,cy,R*1.03,0,7);x.fill();
+  x.fillStyle=screen==='title'?'#0c0618':LEVELS[lvl].ground;x.beginPath();x.arc(W/2,cy,R,0,7);x.fill();
+  x.fillStyle='#ffffff';for(const m of motes){m[1]-=m[2]*.0006;if(m[1]<0)m[1]=1;x.globalAlpha=.18;x.beginPath();x.arc(m[0]*W+Math.sin(t+m[2]*20)*8*k,m[1]*H,1.2*k,0,7);x.fill();}
+  x.globalAlpha=1;requestAnimationFrame(frame);
+}
+show('title');requestAnimationFrame(frame);
+</script>
+<script src="concept-nav.js"></script>
+</body>
+</html>

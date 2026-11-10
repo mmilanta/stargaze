@@ -1,0 +1,152 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Stargaze · Orrery</title>
+<link rel="preconnect" href="https://fonts.googleapis.com"><link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Cormorant+Garamond:ital,wght@0,300;0,500;1,300;1,500&family=Jost:wght@300;400;500&display=swap" rel="stylesheet">
+<style>
+:root{--ink:#0d0a07;--brass:#d6a75c;--brass-dim:#d6a75c55;--paper:#efe4cc;--muted:#a8987a;--faint:#6b5f4b}
+*{box-sizing:border-box;margin:0}
+html,body{height:100%;background:var(--ink);color:var(--paper);overflow:hidden;font:300 15px/1.5 Jost,sans-serif}
+canvas{position:fixed;inset:0;width:100%;height:100%}
+.screen{position:fixed;inset:0;display:none}.screen.on{display:block;animation:fade .6s ease}
+@keyframes fade{from{opacity:0}to{opacity:1}}
+.serif{font-family:'Cormorant Garamond',serif}
+.caps{font:400 10px/1 Jost,sans-serif;letter-spacing:.42em;text-transform:uppercase;color:var(--muted)}
+/* Title */
+.title-block{position:absolute;left:8vw;top:50%;transform:translateY(-50%)}
+.title-block h1{font:300 clamp(64px,9vw,140px)/.9 'Cormorant Garamond',serif;letter-spacing:-.02em}
+.title-block h1 i{color:var(--brass);font-weight:300}
+.title-block .caps{margin-bottom:28px}
+.menu{list-style:none;padding:0;margin-top:56px}
+.menu li{display:flex;align-items:baseline;gap:22px;padding:7px 0;font:300 italic 30px/1.2 'Cormorant Garamond',serif;color:var(--faint);transition:color .3s,transform .3s;cursor:pointer}
+.menu li .num{font:400 11px Jost;letter-spacing:.2em;font-style:normal;width:26px;color:var(--faint)}
+.menu li.sel{color:var(--paper);transform:translateX(14px)}
+.menu li.sel .num{color:var(--brass)}
+.menu li.sel::after{content:'';flex:0 0 60px;height:1px;background:var(--brass);align-self:center;margin-left:4px}
+.foot{position:absolute;left:8vw;bottom:5vh;color:var(--faint);font-size:12px;letter-spacing:.08em}
+/* Levels */
+.level-copy{position:absolute;right:8vw;top:50%;transform:translateY(-50%);width:min(420px,34vw)}
+.level-copy .roman{font:300 italic 120px/.8 'Cormorant Garamond',serif;color:var(--brass);opacity:.85}
+.level-copy h2{font:300 56px/1 'Cormorant Garamond',serif;margin:18px 0 10px}
+.level-copy .sys{font-style:italic;font-family:'Cormorant Garamond',serif;font-size:22px;color:var(--muted)}
+.level-copy dl{display:grid;grid-template-columns:auto 1fr;gap:10px 28px;margin:34px 0;font-size:13px}
+.level-copy dt{color:var(--faint);letter-spacing:.3em;text-transform:uppercase;font-size:10px;padding-top:3px}
+.level-copy .begin{display:inline-flex;gap:18px;align-items:center;font:500 italic 24px 'Cormorant Garamond',serif;color:var(--brass)}
+.level-copy .begin::before{content:'';width:42px;height:1px;background:var(--brass)}
+.back{position:absolute;left:8vw;top:6vh}
+/* Observe */
+.corner{position:absolute;font-size:12px;letter-spacing:.06em;color:var(--muted)}
+.corner b{font:300 34px/1 'Cormorant Garamond',serif;color:var(--paper);display:block;margin:6px 0 2px;letter-spacing:0}
+.corner em{font-family:'Cormorant Garamond',serif;color:var(--brass);font-size:17px}
+.tl{left:4vw;top:5vh}.tr{right:4vw;top:5vh;text-align:right}.bl{left:4vw;bottom:5vh}.br{right:4vw;bottom:5vh;text-align:right}
+.key{display:inline-block;min-width:16px;padding:0 4px;margin-right:6px;border-bottom:1px solid var(--brass-dim);color:var(--brass);font-size:11px;text-align:center}
+.keys{display:flex;gap:22px;margin-top:10px}
+.brief{position:absolute;left:50%;top:7vh;transform:translateX(-50%);text-align:center;width:640px}
+.brief p{font:300 italic 21px/1.4 'Cormorant Garamond',serif;color:var(--paper);margin-top:12px}
+</style>
+</head>
+<body>
+<canvas id="sky"></canvas>
+
+<section class="screen" id="title">
+  <div class="title-block">
+    <div class="caps">An instrument for unknown skies</div>
+    <h1>Star<i>gaze</i></h1>
+    <ul class="menu" id="title-menu"></ul>
+  </div>
+  <div class="foot">Watch the lights. Infer the system. Draw it true.</div>
+</section>
+
+<section class="screen" id="levels">
+  <div class="back caps">← Return to the orrery</div>
+  <div class="level-copy" id="level-copy"></div>
+</section>
+
+<section class="screen" id="observe">
+  <div class="brief" id="brief"><div class="caps">Field study · I</div><p>Six lights wander this sky. Watch them, and find which ones circle which.</p></div>
+  <div class="corner tl"><div class="caps">Local time</div><b id="clock">Day 731 · 12:00</b><em id="speed">time held still</em></div>
+  <div class="corner tr"><div class="caps">Aim</div><b id="aim">az 142° · alt 31°</b><em>field of view 70°</em></div>
+  <div class="corner bl"><div class="caps">Instrument</div><div class="keys"><span><span class="key">←→</span>speed</span><span><span class="key">␣</span>hold</span><span><span class="key">L</span>lock</span></div></div>
+  <div class="corner br"><div class="caps">Exposure</div><b id="ev">±0.0 ev</b><div class="keys" style="justify-content:flex-end"><span><span class="key">,.</span>exposure</span><span><span class="key">Tab</span>theory</span><span><span class="key">Esc</span>leave</span></div></div>
+</section>
+
+<script>
+const LEVELS=[
+  {t:'Ember summit',s:'Calyx and Halo — the volcano',g:'Basalt',fov:70,n:6,hue:'#e0894a'},
+  {t:'Shadow season',s:'Erg — the ringed dune sea',g:'Dunes',fov:60,n:5,hue:'#e8c37a'},
+  {t:'The long shadow',s:'Umbra — the daily eclipse',g:'Ice field',fov:25,n:5,hue:'#9fc4d8'}];
+const ROMAN=['I','II','III'];
+const MENU=['Begin a field study','Settings','Controls','Leave the observatory'];
+let screen='title',sel=0,lvl=0,minutes=0,speed=0,ev=0,t0=performance.now();
+const $=s=>document.querySelector(s);
+function show(s){screen=s;document.querySelectorAll('.screen').forEach(e=>e.classList.toggle('on',e.id===s));draw();}
+function draw(){
+  $('#title-menu').innerHTML=MENU.map((m,i)=>`<li class="${i===sel?'sel':''}" data-i="${i}"><span class="num">${String(i+1).padStart(2,'0')}</span>${m}</li>`).join('');
+  const L=LEVELS[lvl];
+  $('#level-copy').innerHTML=`<div class="roman">${ROMAN[lvl]}</div><h2>${L.t}</h2><div class="sys">${L.s}</div>
+  <dl><dt>Ground</dt><dd>${L.g}</dd><dt>Lights</dt><dd>${L.n} wandering bodies</dd><dt>Field</dt><dd>${L.fov}° of sky</dd><dt>Record</dt><dd>${lvl===0?'Best 72.4 of 100':'Not yet attempted'}</dd></dl>
+  <div class="begin">Begin observation</div>`;
+}
+addEventListener('keydown',e=>{
+  if(screen==='title'){
+    if(e.key==='ArrowDown')sel=(sel+1)%MENU.length;
+    if(e.key==='ArrowUp')sel=(sel+MENU.length-1)%MENU.length;
+    if((e.key==='Enter'||e.key==='ArrowRight')&&sel===0)return show('levels');
+  }else if(screen==='levels'){
+    if(e.key==='ArrowDown')lvl=(lvl+1)%3;
+    if(e.key==='ArrowUp')lvl=(lvl+2)%3;
+    if(e.key==='Enter')return show('observe');
+    if(e.key==='Escape'||e.key==='ArrowLeft')return show('title');
+  }else{
+    if(e.key==='Escape')return show('levels');
+    if(e.key==='ArrowRight')speed=Math.min(3,speed+1);
+    if(e.key==='ArrowLeft')speed=Math.max(-3,speed-1);
+    if(e.key===' '){speed=0;e.preventDefault();}
+    if(e.key==='.')ev=Math.min(4,ev+.5);if(e.key===',')ev=Math.max(-4,ev-.5);
+    $('#speed').textContent=speed?`${speed>0?'forward':'backward'} ×${10**(Math.abs(speed)-1)}`:'time held still';
+    $('#ev').textContent=`${ev>=0?'+':'−'}${Math.abs(ev).toFixed(1)} ev`;
+  }
+  draw();
+});
+document.addEventListener('click',e=>{const li=e.target.closest('[data-i]');if(li){sel=+li.dataset.i;if(sel===0)show('levels');else draw();}});
+
+/* Canvas: orrery for menus, sky for observation */
+const c=$('#sky'),x=c.getContext('2d');let W,H,stars=[];
+function resize(){W=c.width=innerWidth*devicePixelRatio;H=c.height=innerHeight*devicePixelRatio;
+  stars=Array.from({length:520},()=>({x:Math.random(),y:Math.random(),r:Math.random()**3*1.6+.25,a:Math.random()*.7+.15,p:Math.random()*6}));}
+addEventListener('resize',resize);resize();
+function orrery(cx,cy,R,t,focus){
+  const k=devicePixelRatio;x.lineWidth=k;
+  x.strokeStyle='#d6a75c22';for(let i=0;i<72;i++){const a=i/72*Math.PI*2,l=i%6?6:14;x.beginPath();x.moveTo(cx+Math.cos(a)*(R+8*k),cy+Math.sin(a)*(R+8*k));x.lineTo(cx+Math.cos(a)*(R+(8+l)*k),cy+Math.sin(a)*(R+(8+l)*k));x.stroke();}
+  const rings=[.22,.4,.58,.78,1];
+  rings.forEach((f,i)=>{x.strokeStyle=focus===i-1?'#d6a75caa':'#d6a75c30';x.setLineDash(i%2?[2*k,6*k]:[]);x.beginPath();x.arc(cx,cy,R*f,0,Math.PI*2);x.stroke();});
+  x.setLineDash([]);
+  const g=x.createRadialGradient(cx,cy,0,cx,cy,R*.12);g.addColorStop(0,'#fff3d6');g.addColorStop(.4,'#d6a75c');g.addColorStop(1,'#d6a75c00');x.fillStyle=g;x.beginPath();x.arc(cx,cy,R*.12,0,7);x.fill();
+  rings.forEach((f,i)=>{const a=t*(.35/(f*f))+i*1.9,px=cx+Math.cos(a)*R*f,py=cy+Math.sin(a)*R*f,isF=focus===i-1;
+    x.strokeStyle='#d6a75c18';x.beginPath();x.moveTo(cx,cy);x.lineTo(px,py);x.stroke();
+    x.fillStyle=isF?LEVELS[i-1]?.hue||'#efe4cc':'#efe4cc';x.beginPath();x.arc(px,py,(isF?7:3+i*.6)*k,0,7);x.fill();
+    if(isF){x.strokeStyle='#d6a75c';x.beginPath();x.arc(px,py,16*k,0,7);x.stroke();}
+    if(i===3){x.strokeStyle='#efe4cc66';x.beginPath();x.ellipse(px,py,12*k,4*k,a,0,7);x.stroke();}});
+}
+function frame(now){
+  const t=(now-t0)/1000,k=devicePixelRatio;x.fillStyle='#0d0a07';x.fillRect(0,0,W,H);
+  for(const s of stars){x.globalAlpha=s.a*(.75+.25*Math.sin(t*1.3+s.p));x.fillStyle='#efe4cc';x.fillRect(s.x*W,s.y*H,s.r*k,s.r*k);}x.globalAlpha=1;
+  if(screen==='title')orrery(W*.68,H*.5,Math.min(W,H)*.4,t,-1);
+  if(screen==='levels')orrery(W*.36,H*.52,Math.min(W,H)*.4,t*.6,lvl);
+  if(screen==='observe'){
+    minutes+=speed?Math.sign(speed)*10**(Math.abs(speed)-1)*.5:0;
+    const h=H*.78;const gr=x.createLinearGradient(0,h-H*.3,0,h);gr.addColorStop(0,'#0d0a0700');gr.addColorStop(1,'#3a2414aa');x.fillStyle=gr;x.fillRect(0,h-H*.3,W,H*.3);x.fillStyle='#3a2414aa';x.fillRect(0,h,W,H-h);
+    x.fillStyle='#070504';x.beginPath();x.moveTo(0,H);for(let i=0;i<=80;i++){const px=i/80*W;x.lineTo(px,h-Math.sin(i*.31)*18*k-Math.sin(i*.07)*50*k-(i>30&&i<52?(1-Math.abs(i-41)/11)*140*k:0));}x.lineTo(W,H);x.fill();
+    const pa=minutes/900;[[.62,.3,9,'#e0894a'],[.3,.22,3,'#efe4cc'],[.8,.42,2,'#efe4cc'],[.45,.12,2.5,'#d6a75c']].forEach(([px,py,r,col],i)=>{x.fillStyle=col;x.beginPath();x.arc((px+Math.sin(pa*(i+1))*.03)*W,(py+Math.cos(pa*(i+1))*.02)*H,r*k,0,7);x.fill();});
+    x.strokeStyle='#d6a75c66';x.lineWidth=k;const cx=W/2,cy=H/2;[[-1,0],[1,0],[0,-1],[0,1]].forEach(([a,b])=>{x.beginPath();x.moveTo(cx+a*8*k,cy+b*8*k);x.lineTo(cx+a*22*k,cy+b*22*k);x.stroke();});
+    const d=731+Math.floor(minutes/1440),m=((minutes%1440)+1440+720)%1440;$('#clock').textContent=`Day ${d} · ${String(Math.floor(m/60)).padStart(2,'0')}:${String(Math.floor(m%60)).padStart(2,'0')}`;
+  }
+  requestAnimationFrame(frame);
+}
+show('title');requestAnimationFrame(frame);
+</script>
+<script src="concept-nav.js"></script>
+</body>
+</html>

@@ -1,0 +1,143 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Stargaze · Signal</title>
+<link rel="preconnect" href="https://fonts.googleapis.com"><link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Syne:wght@500;700;800&family=JetBrains+Mono:wght@300;400;600&display=swap" rel="stylesheet">
+<style>
+:root{--void:#050505;--signal:#ff5a1f;--white:#f2f0ea;--grey:#6d6b66;--dim:#2a2927}
+*{box-sizing:border-box;margin:0}
+html,body{height:100%;background:var(--void);color:var(--white);overflow:hidden;font:300 12px/1.5 'JetBrains Mono',monospace}
+canvas{position:fixed;inset:0;width:100%;height:100%}
+.screen{position:fixed;inset:0;display:none}.screen.on{display:block}
+.mono{font-family:'JetBrains Mono',monospace}
+.tag{font:400 10px/1 'JetBrains Mono';letter-spacing:.16em;text-transform:uppercase;color:var(--grey)}
+.tag .hot{color:var(--signal)}
+/* Title */
+.wordmark{position:absolute;left:4vw;top:6vh;font:800 clamp(60px,11vw,190px)/.82 Syne,sans-serif;letter-spacing:-.045em;text-transform:uppercase}
+.wordmark span{color:var(--signal)}
+.status{position:absolute;right:4vw;top:6.5vh;text-align:right;line-height:2}
+.menu{position:absolute;left:4vw;bottom:9vh;list-style:none;padding:0}
+.menu li{font:700 clamp(28px,3.4vw,52px)/1.08 Syne,sans-serif;letter-spacing:-.02em;text-transform:uppercase;color:var(--dim);display:flex;align-items:center;gap:20px;cursor:pointer;transition:color .15s}
+.menu li .idx{font:400 11px 'JetBrains Mono';letter-spacing:.1em;width:28px;color:var(--dim)}
+.menu li.sel{color:var(--white)}.menu li.sel .idx{color:var(--signal)}
+.menu li.sel::after{content:'● TRANSMIT';font:600 10px 'JetBrains Mono';letter-spacing:.2em;color:var(--signal);animation:blink 1s steps(2) infinite}
+@keyframes blink{50%{opacity:.2}}
+.freq{position:absolute;right:4vw;bottom:9vh;text-align:right}
+.freq b{display:block;font:700 64px/1 Syne;color:var(--signal);letter-spacing:-.03em}
+/* Levels */
+.channel{position:absolute;left:4vw;top:8vh}
+.channel h2{font:800 clamp(56px,9vw,150px)/.85 Syne;text-transform:uppercase;letter-spacing:-.045em;margin-top:20px;max-width:80vw}
+.channel .sub{font:400 15px 'JetBrains Mono';margin-top:22px;color:var(--white)}
+.readout{position:absolute;right:4vw;top:8vh;display:grid;grid-template-columns:auto auto;gap:6px 26px;text-align:right}
+.readout dt{color:var(--grey);letter-spacing:.14em;text-transform:uppercase;font-size:10px;padding-top:2px}
+.readout dd{font-size:13px}
+.tuner{position:absolute;left:4vw;right:4vw;bottom:7vh;display:flex;justify-content:space-between}
+.tuner span{letter-spacing:.14em;text-transform:uppercase;font-size:10px;color:var(--grey)}
+.tuner span.sel{color:var(--signal)}
+/* Observe */
+.edge{position:absolute;letter-spacing:.06em}
+.edge .big{font:700 30px/1 Syne;letter-spacing:-.01em;display:block;margin:8px 0 10px;color:var(--white)}
+.e-tl{left:3vw;top:4vh}.e-tr{right:3vw;top:4vh;text-align:right}.e-bl{left:3vw;bottom:4vh}.e-br{right:3vw;bottom:4vh;text-align:right}
+.k{color:var(--signal);margin-right:6px}
+.cmds{display:flex;gap:18px;margin-top:10px;color:var(--grey)}
+.e-br .cmds{justify-content:flex-end}
+</style>
+</head>
+<body>
+<canvas id="cv"></canvas>
+
+<section class="screen" id="title">
+  <h1 class="wordmark">Star<br>gaze<span>.</span></h1>
+  <div class="status tag">Array online <span class="hot">●</span><br>Receivers 12 / 12<br>Noise floor −142 dBm</div>
+  <ul class="menu" id="menu"></ul>
+  <div class="freq tag">Listening<b id="mhz">1420.405</b>MHz · hydrogen line</div>
+</section>
+
+<section class="screen" id="levels">
+  <div class="channel"><div class="tag">Channel <span class="hot" id="ch">01</span> / 03 · field study</div><h2 id="lt"></h2><div class="sub" id="ls"></div></div>
+  <dl class="readout" id="lr"></dl>
+  <div class="tuner" id="tuner"></div>
+</section>
+
+<section class="screen" id="observe">
+  <div class="edge e-tl tag">T+ <span class="big mono" id="clock" style="font-family:Syne">731d 12:00</span><span id="spd">rate 0 · held</span></div>
+  <div class="edge e-tr tag">Pointing<span class="big" id="aim">142.0 / +31.0</span>fov 70.0°</div>
+  <div class="edge e-bl tag"><div class="cmds"><span><span class="k">←→</span>rate</span><span><span class="k">SPC</span>hold</span><span><span class="k">L</span>lock</span><span><span class="k">TAB</span>model</span></div></div>
+  <div class="edge e-br tag">Gain<span class="big" id="ev">+0.0 EV</span><div class="cmds"><span><span class="k">, .</span>gain</span><span><span class="k">ESC</span>abort</span></div></div>
+</section>
+
+<script>
+const LEVELS=[
+  {t:'Ember summit',s:'Calyx and Halo — the volcano',g:'Basalt',fov:70,n:6,f:1420.405},
+  {t:'Shadow season',s:'Erg — the ringed dune sea',g:'Dunes',fov:60,n:5,f:1612.231},
+  {t:'The long shadow',s:'Umbra — the daily eclipse',g:'Ice field',fov:25,n:5,f:1665.402}];
+const MENU=['Field studies','Settings','Controls','Disconnect'];
+let screen='title',sel=0,lvl=0,minutes=0,rate=0,ev=0;
+const $=s=>document.querySelector(s);
+function show(s){screen=s;document.querySelectorAll('.screen').forEach(e=>e.classList.toggle('on',e.id===s));draw();}
+function draw(){
+  $('#menu').innerHTML=MENU.map((m,i)=>`<li class="${i===sel?'sel':''}" data-i="${i}"><span class="idx">0${i+1}</span>${m}</li>`).join('');
+  const L=LEVELS[lvl];$('#ch').textContent='0'+(lvl+1);$('#lt').textContent=L.t;$('#ls').textContent=L.s;
+  $('#lr').innerHTML=`<dt>Carrier</dt><dd>${L.f.toFixed(3)} MHz</dd><dt>Ground</dt><dd>${L.g}</dd><dt>Sources</dt><dd>${L.n} moving</dd><dt>Beam</dt><dd>${L.fov}°</dd><dt>Best fit</dt><dd style="color:${lvl?'var(--grey)':'var(--signal)'}">${lvl?'—':'72.4 / 100'}</dd><dt></dt><dd style="color:var(--signal);margin-top:14px">ENTER ▸ acquire</dd>`;
+  $('#tuner').innerHTML=LEVELS.map((l,i)=>`<span class="${i===lvl?'sel':''}">${i===lvl?'▸ ':''}0${i+1} ${l.t}</span>`).join('');
+}
+addEventListener('keydown',e=>{
+  if(screen==='title'){
+    if(e.key==='ArrowDown')sel=(sel+1)%MENU.length;if(e.key==='ArrowUp')sel=(sel+MENU.length-1)%MENU.length;
+    if((e.key==='Enter'||e.key==='ArrowRight')&&sel===0)return show('levels');
+  }else if(screen==='levels'){
+    if(e.key==='ArrowRight'||e.key==='ArrowDown')lvl=Math.min(2,lvl+1);if(e.key==='ArrowUp')lvl=Math.max(0,lvl-1);
+    if(e.key==='ArrowLeft'){if(lvl===0)return show('title');lvl--;}
+    if(e.key==='Enter')return show('observe');if(e.key==='Escape')return show('title');
+  }else{
+    if(e.key==='Escape')return show('levels');
+    if(e.key==='ArrowRight')rate=Math.min(3,rate+1);if(e.key==='ArrowLeft')rate=Math.max(-3,rate-1);
+    if(e.key===' '){rate=0;e.preventDefault();}
+    if(e.key==='.')ev=Math.min(4,ev+.5);if(e.key===',')ev=Math.max(-4,ev-.5);
+    $('#spd').textContent=rate?`rate ${rate>0?'+':'−'}${10**(Math.abs(rate)-1)}× · running`:'rate 0 · held';
+    $('#ev').textContent=`${ev>=0?'+':'−'}${Math.abs(ev).toFixed(1)} EV`;
+  }
+  draw();
+});
+document.addEventListener('click',e=>{const li=e.target.closest('[data-i]');if(li){sel=+li.dataset.i;sel===0?show('levels'):draw();}});
+
+const c=$('#cv'),x=c.getContext('2d');let W,H,k,stars;
+function resize(){k=devicePixelRatio;W=c.width=innerWidth*k;H=c.height=innerHeight*k;stars=Array.from({length:380},()=>[Math.random(),Math.random(),Math.random()**4*2+.4]);}
+addEventListener('resize',resize);resize();
+function wave(y,amp,t,seed,col,peakAt){
+  x.strokeStyle=col;x.lineWidth=1.2*k;x.beginPath();
+  for(let i=0;i<=W;i+=2*k){const u=i/W;let v=Math.sin(u*60+t*3+seed)*.12+Math.sin(u*137-t*5)*.08+(Math.random()-.5)*.18;
+    if(peakAt!=null){const d=(u-peakAt)*28;v+=Math.exp(-d*d)*(2.2+Math.sin(t*8)*.3);}
+    x.lineTo(i,y-v*amp);}
+  x.stroke();
+}
+function frame(now){
+  const t=now/1000;x.fillStyle='#050505';x.fillRect(0,0,W,H);
+  if(screen!=='observe'){
+    x.fillStyle='#f2f0ea';for(const [sx,sy,r] of stars){x.globalAlpha=.25;x.fillRect(sx*W,sy*H,r*k,r*k);}x.globalAlpha=1;
+    const y=screen==='title'?H*.6:H*.72;
+    x.strokeStyle='#2a2927';x.lineWidth=k;for(let i=0;i<=40;i++){const px=W*.04+i/40*W*.92;x.beginPath();x.moveTo(px,y+40*k);x.lineTo(px,y+(i%5?46:54)*k);x.stroke();}
+    wave(y,48*k,t,0,'#2a2927',null);
+    const peak=screen==='title'?.18+sel*.2:.15+lvl*.35;
+    wave(y,48*k,t,1,'#ff5a1f',peak);
+    if(screen==='title')$('#mhz').textContent=(1420.405+sel*61.7+Math.sin(t*2)*.004).toFixed(3);
+  }else{
+    minutes+=rate?Math.sign(rate)*10**(Math.abs(rate)-1)*.5:0;
+    for(const [sx,sy,r] of stars){x.globalAlpha=.5+.4*Math.sin(t*2+sx*90);x.fillStyle='#f2f0ea';x.fillRect(sx*W,sy*H*.82,r*k,r*k);}x.globalAlpha=1;
+    const pa=minutes/800;[[.6,.33,8,'#ff5a1f'],[.33,.25,3,'#f2f0ea'],[.78,.45,2.5,'#f2f0ea'],[.47,.16,3,'#f2f0ea']].forEach(([px,py,r,col],i)=>{x.fillStyle=col;x.beginPath();x.arc((px+Math.sin(pa*(i+1))*.03)*W,(py+Math.cos(pa*(i+1))*.02)*H,r*k,0,7);x.fill();});
+    const h=H*.84;x.fillStyle='#000';x.fillRect(0,h,W,H-h);x.strokeStyle='#ff5a1f';x.lineWidth=k;x.beginPath();x.moveTo(0,h);x.lineTo(W,h);x.stroke();
+    x.fillStyle='#6d6b66';x.font=`${10*k}px JetBrains Mono`;
+    for(let a=0;a<=360;a+=5){const px=((a-142+180+360)%360)/360*W;x.fillRect(px,h,k,(a%15?5:12)*k);if(a%45===0)x.fillText(['N','NE','E','SE','S','SW','W','NW','N'][a/45],px+4*k,h+24*k);}
+    for(let i=0;i<=20;i++){const py=H*.1+i/20*H*.7;x.fillRect(W-2*k-(i%5?5:12)*k,py,(i%5?5:12)*k,k);x.fillRect(2*k,py,(i%5?5:12)*k,k);}
+    const cx=W/2,cy=H/2;x.strokeStyle='#ff5a1f';x.beginPath();x.moveTo(cx-26*k,cy);x.lineTo(cx-8*k,cy);x.moveTo(cx+8*k,cy);x.lineTo(cx+26*k,cy);x.moveTo(cx,cy-26*k);x.lineTo(cx,cy-8*k);x.moveTo(cx,cy+8*k);x.lineTo(cx,cy+26*k);x.stroke();
+    const d=731+Math.floor(minutes/1440),m=((minutes%1440)+1440+720)%1440;$('#clock').textContent=`${d}d ${String(Math.floor(m/60)).padStart(2,'0')}:${String(Math.floor(m%60)).padStart(2,'0')}`;
+  }
+  requestAnimationFrame(frame);
+}
+show('title');requestAnimationFrame(frame);
+</script>
+<script src="concept-nav.js"></script>
+</body>
+</html>
