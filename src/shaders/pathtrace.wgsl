@@ -19,6 +19,7 @@ struct Globals {
 struct Settings {
     g: Globals,
     counts: vec4<u32>, // bodies, accumulated samples, samples this dispatch, max surface vertices
+    sampling: vec4<u32>, // independent noise sequence, separate from accumulation weights
     background: vec4<f32>, // Milky Way brightness, map width, map height, point-source gain
     lights: vec4<u32>, // first three emissive indices, total count; fallback for >3
 };
@@ -1631,7 +1632,7 @@ fn integrate_camera_air(@builtin(global_invocation_id) id: vec3<u32>) {
     let dimensions = vec2<u32>(settings.g.viewport.xy);
     if (id.x >= dimensions.x || id.y >= dimensions.y) { return; }
     let pixel = id.y * dimensions.x + id.x;
-    var rng = hash(pixel ^ hash(settings.counts.y + 0x9e3779b9u));
+    var rng = hash(pixel ^ hash(settings.sampling.x + 0x9e3779b9u));
     let ray = Ray(vec3<f32>(0.0), camera_direction(id.xy, &rng), MISS);
     var hit = closest_hit(ray);
     var disc_scale = 1.0;
@@ -1652,7 +1653,7 @@ fn main(@builtin(global_invocation_id) id: vec3<u32>) {
     var sum = vec4<f32>(0.0);
     var backdrop_sum = vec3<f32>(0.0);
     for (var s = 0u; s < settings.counts.z; s += 1u) {
-        var rng = hash(pixel ^ hash(settings.counts.y + s + 0x9e3779b9u));
+        var rng = hash(pixel ^ hash(settings.sampling.x + s + 0x9e3779b9u));
         let direction = camera_direction(id.xy, &rng);
         var backdrop = vec3<f32>(0.0);
         sum += trace(Ray(vec3<f32>(0.0), direction, MISS), &rng, &backdrop);

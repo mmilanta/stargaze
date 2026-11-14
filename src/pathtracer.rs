@@ -10,6 +10,8 @@ mod benchmark;
 #[path = "guided_ground.rs"]
 mod guided_ground;
 
+use std::hash::BuildHasher;
+
 use bytemuck::{Pod, Zeroable};
 use wgpu::util::DeviceExt;
 
@@ -44,8 +46,9 @@ pub(crate) fn exposure_meter_size((w, h): (u32, u32)) -> (u32, u32) {
 struct Settings {
     globals: Globals,
     counts: [u32; 4],
+    sampling: [u32; 4], // independent noise sequence; never used as an averaging weight
     background: [f32; 4], // Milky Way brightness, map width, map height, point-source gain
-    lights: [u32; 4],     // up to three star indices and total count (larger scenes fall back)
+    lights: [u32; 4],   // up to three star indices and total count (larger scenes fall back)
 }
 
 /// Display-only exposure state, shared with the shaders. `value` is eased on
@@ -72,6 +75,8 @@ struct ExposureTail {
 
 #[derive(Clone, Copy, Debug)]
 pub struct Options {
+    /// Fixed for reproducible renders; the interactive app chooses a random seed.
+    pub noise_seed: u32,
     pub samples_per_frame: u32,
     pub max_bounces: u32,
     pub sample_limit: u32,
@@ -90,6 +95,7 @@ pub struct Options {
 impl Default for Options {
     fn default() -> Self {
         Self {
+            noise_seed: 0,
             samples_per_frame: 1,
             max_bounces: 8,
             sample_limit: crate::graphics::MAX_SAMPLES,
@@ -122,6 +128,7 @@ impl Options {
                 .unwrap_or(default)
         };
         Self {
+            noise_seed: std::collections::hash_map::RandomState::new().hash_one(()) as u32,
             samples_per_frame: integer("STARGAZE_SPP", defaults.samples_per_frame),
             max_bounces: integer("STARGAZE_BOUNCES", defaults.max_bounces),
             sample_limit: defaults.sample_limit,
@@ -159,6 +166,8 @@ impl Options {
 struct History {
     key: Vec<u8>,
     samples: u32,
+    /// Total samples dispatched, preserved when image accumulation resets.
+    sequence: u32,
 }
 impl History {
     fn update(&mut self, frame: &Frame, options: Options) {
@@ -724,7 +733,10 @@ impl PathTracer {
                 &self.exposure,
             ],
         );
-        self.history = History::default();
+        self.history = History {
+            sequence: self.history.sequence,
+            ..History::default()
+        };
         self.exposure_idle_frames = 0;
     }
     pub fn samples(&self) -> u32 {
@@ -749,7 +761,10 @@ impl PathTracer {
     pub fn set_quality(&mut self, samples: u32, bounces: u32, limit: u32) {
         let bounces = bounces.clamp(1, 64);
         if self.options.max_bounces != bounces {
-            self.history = History::default();
+            self.history = History {
+                sequence: self.history.sequence,
+                ..History::default()
+            };
             self.exposure_idle_frames = 0;
         }
         self.options.samples_per_frame = samples.clamp(1, 64);
@@ -823,6 +838,12 @@ impl PathTracer {
         let settings = Settings {
             globals,
             lights,
+            sampling: [
+                self.options.noise_seed.wrapping_add(self.history.sequence),
+                0,
+                0,
+                0,
+            ],
             counts: [
                 frame.bodies.len() as u32,
                 self.history.samples,
@@ -844,6 +865,7 @@ impl PathTracer {
             let mut slices = vec![0u8; self.settings_stride as usize * count as usize];
             for sample in 0..count {
                 let one = Settings {
+                    sampling: [settings.sampling[0].wrapping_add(sample), 0, 0, 0],
                     counts: [
                         settings.counts[0],
                         self.history.samples + sample,
@@ -978,6 +1000,7 @@ impl PathTracer {
             pass.dispatch_workgroups(1, 1, 1);
         }
         self.history.samples += count;
+        self.history.sequence = self.history.sequence.wrapping_add(count);
         self.exposure_idle_frames = if count > 0 {
             0
         } else {

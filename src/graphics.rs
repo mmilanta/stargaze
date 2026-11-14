@@ -341,13 +341,12 @@ impl Menu {
     }
     pub fn reveal_selection(&mut self, w: f32, h: f32, scale: f32) {
         let l = Layout::new(w, h, scale).scrolled(self.scroll);
-        let r = if self.selected == 0 {
-            l.rows[0]
-        } else if self.selected < ACTIONS_ROW {
-            l.rows[self.selected]
-        } else {
-            l.apply
-        };
+        // The action buttons are fixed outside the scrolling content.
+        if self.selected == ACTIONS_ROW {
+            self.scroll = self.scroll.clamp(0.0, l.max_scroll);
+            return;
+        }
+        let r = l.rows[self.selected];
         if r.y < l.viewport.y {
             self.scroll -= (l.viewport.y - r.y) / l.scale;
         }
@@ -437,13 +436,13 @@ impl Layout {
             }),
             back: Rect {
                 x: x + 432.0 * s,
-                y: 1112.5 * s,
+                y: h - 70.0 * s,
                 w: 144.0 * s,
                 h: 46.0 * s,
             },
             apply: Rect {
                 x: x + 592.0 * s,
-                y: 1112.5 * s,
+                y: h - 70.0 * s,
                 w: 168.0 * s,
                 h: 46.0 * s,
             },
@@ -451,9 +450,9 @@ impl Layout {
                 x: x - 8.0 * s,
                 y: 150.0 * s,
                 w: 890.0 * s,
-                h: h - 162.0 * s,
+                h: h - 244.0 * s,
             },
-            max_scroll: (1170.5 - h / s).max(0.0),
+            max_scroll: (1072.5 + 94.0 - h / s).max(0.0),
         }
     }
     pub fn scrolled(mut self, scroll: f32) -> Self {
@@ -463,7 +462,6 @@ impl Layout {
             .iter_mut()
             .chain(self.tracks.iter_mut())
             .chain(self.rows.iter_mut())
-            .chain([&mut self.back, &mut self.apply])
         {
             r.y -= dy;
         }
@@ -672,11 +670,12 @@ pub fn build(v: &mut Vec<UiVertex>, vp: [f32; 2], scale: f32, menu: &Menu, curso
             ui::INK,
         );
     }
+    ui::clip(v, start, l.viewport, vp);
     if menu.draft != menu.settings {
         text(
             v,
             x,
-            1041.0 * s - offset,
+            l.apply.y + 18.0 * s,
             0.825,
             "Unsaved changes",
             ui::ACCENT,
@@ -709,7 +708,6 @@ pub fn build(v: &mut Vec<UiVertex>, vp: [f32; 2], scale: f32, menu: &Menu, curso
             vp,
         );
     }
-    ui::clip(v, start, l.viewport, vp);
     if l.max_scroll > 0.0 {
         let r = l.viewport;
         let track = Rect {
@@ -817,6 +815,38 @@ mod tests {
     }
 
     #[test]
+    fn settings_footer_stays_visible_while_content_scrolls() {
+        for (w, h, scale) in [
+            (1280., 720., 1.),
+            (640., 480., 2.),
+            (320., 240., 1.),
+            (1920., 1440., 1.),
+        ] {
+            let top = Layout::new(w, h, scale);
+            let bottom = Layout::new(w, h, scale).scrolled(top.max_scroll);
+            for (fixed, scrolled) in [(top.back, bottom.back), (top.apply, bottom.apply)] {
+                assert_eq!(fixed.y, scrolled.y);
+                assert!(fixed.y >= top.viewport.y + top.viewport.h);
+                assert!(fixed.y + fixed.h <= h);
+            }
+            let last = bottom.rows[ACTIONS_ROW - 1];
+            assert!(last.y + last.h <= bottom.viewport.y + bottom.viewport.h + 0.001);
+            let mut menu = Menu::default();
+            menu.begin();
+            menu.selected = ACTIONS_ROW - 1;
+            menu.reveal_selection(w, h, scale);
+            let scroll = menu.scroll;
+            menu.selected = ACTIONS_ROW;
+            menu.reveal_selection(w, h, scale);
+            assert_eq!(menu.scroll, scroll);
+            menu.draft.resolution_percent = 25;
+            assert!(menu.click(&top, ((top.apply.x + 1.) as f64, (top.apply.y + 1.) as f64)));
+            assert!(!menu.open);
+            assert_eq!(menu.settings.resolution_percent, 25);
+        }
+    }
+
+    #[test]
     fn settings_draft_keyboard_and_scroll_keep_committed_values() {
         for (w, h, scale) in [(1280., 720., 1.), (640., 480., 2.), (320., 240., 1.)] {
             let mut menu = Menu::default();
@@ -838,10 +868,8 @@ mod tests {
             menu.selected = ACTIONS_ROW;
             menu.reveal_selection(w, h, scale);
             let l = Layout::new(w, h, scale).scrolled(menu.scroll);
-            assert!(
-                l.viewport
-                    .contains(l.apply.x as f64, (l.apply.y + l.apply.h) as f64)
-            );
+            assert!(l.apply.y >= l.viewport.y + l.viewport.h);
+            assert!(l.apply.y + l.apply.h <= h);
             assert!(menu.key(KeyCode::Enter));
             assert_eq!(menu.settings.resolution_percent, 100);
             menu.begin();

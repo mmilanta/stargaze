@@ -21,6 +21,7 @@ struct Globals {
 struct Settings {
     g: Globals,
     counts: vec4<u32>,
+    sampling: vec4<u32>, // independent noise sequence, separate from accumulation weights
     background: vec4<f32>,
     lights: vec4<u32>, // first three emissive indices, total count; fallback for >3
 };
