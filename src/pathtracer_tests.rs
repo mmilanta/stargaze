@@ -198,6 +198,46 @@ pub(super) fn sample(
 
 #[test]
 #[ignore = "requires a GPU"]
+fn gpu_noise_sequence_changes_after_reset_and_with_seed() {
+    let (device, queue) = gpu();
+    let mut scene = frame();
+    scene.globals.viewport = [32.0, 32.0, 1.0, 1.0];
+    scene.globals.cam_forward[3] = 0.5;
+    scene
+        .bodies
+        .push(body([0.0, 0.0, -3.0], 1.0, [1.0; 3], true));
+    let make = |noise_seed| {
+        PathTracer::new(
+            &device,
+            wgpu::TextureFormat::Rgba8UnormSrgb,
+            (32, 32),
+            &[],
+            Options {
+                noise_seed,
+                samples_per_frame: 1,
+                ..test_options()
+            },
+        )
+    };
+    let mut tracer = make(0);
+    let first = sample(&device, &queue, &mut tracer, &scene, 1);
+    scene.scene_time = 1.0; // Same geometry, fresh accumulation.
+    let reset = sample(&device, &queue, &mut tracer, &scene, 1);
+    assert_eq!(tracer.samples(), 1);
+    assert_ne!(first, reset);
+    let mut same_seed = make(0);
+    assert_eq!(first, sample(&device, &queue, &mut same_seed, &scene, 1));
+    let mut other_seed = make(12345);
+    assert_ne!(first, sample(&device, &queue, &mut other_seed, &scene, 1));
+    tracer.set_quality(1, 4, 10);
+    let quality_reset = sample(&device, &queue, &mut tracer, &scene, 1);
+    assert_eq!(tracer.samples(), 1);
+    assert_ne!(first, quality_reset);
+    assert_ne!(reset, quality_reset);
+}
+
+#[test]
+#[ignore = "requires a GPU"]
 fn gpu_quality_limits_rest_resume_and_preserve_valid_samples() {
     let (device, queue) = gpu();
     let mut tracer = PathTracer::new(

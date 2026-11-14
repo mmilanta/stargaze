@@ -271,7 +271,6 @@ impl Game {
             orbit_rank,
             traits: Traits::default(),
         });
-        self.selected = self.nodes.len() - 1;
         self.reorder_by_distance();
         self.message = "Added. Distance from its parent sets the orbit order.".into();
     }
@@ -2084,6 +2083,8 @@ mod tests {
         g.right_click(&l, (pos[0] as f64, pos[1] as f64));
         assert_eq!(g.nodes.len(), 2);
         assert_eq!(g.nodes[1].parent, Some(0));
+        g.click(&l, (pos[0] as f64, pos[1] as f64), &scene);
+        g.release();
         g.click(&l, center(l.buttons[1]), &scene);
         assert_eq!(g.viewer, Some(1));
         g.click(&l, center(l.buttons[4]), &scene);
@@ -2207,6 +2208,32 @@ mod tests {
     }
 
     #[test]
+    fn adding_planets_keeps_the_last_clicked_orbit_anchor() {
+        let mut g = Game {
+            open: true,
+            ..Game::default()
+        };
+        let l = g.layout(1280.0, 720.0, 1.0);
+        for pos in [[0.8, 0.5], [0.9, 0.8]] {
+            let p = l.point(pos);
+            g.right_click(&l, (p[0] as f64, p[1] as f64));
+            assert_eq!(g.selected, 0);
+        }
+        assert_eq!(g.nodes[1].parent, Some(0));
+        assert_eq!(g.nodes[2].parent, Some(0));
+        let p = l.point(g.nodes[1].pos);
+        g.click(&l, (p[0] as f64, p[1] as f64), &puzzle());
+        g.release();
+        assert_eq!(g.selected, 1);
+        for pos in [[0.7, 0.3], [0.6, 0.7]] {
+            let p = l.point(pos);
+            g.right_click(&l, (p[0] as f64, p[1] as f64));
+            assert_eq!(g.selected, 1);
+            assert_eq!(g.nodes.last().unwrap().parent, Some(1));
+        }
+    }
+
+    #[test]
     fn right_click_add_uses_selected_parent_and_delete_redo_restores_branch_edit() {
         let mut g = Game {
             open: true,
@@ -2216,6 +2243,8 @@ mod tests {
         let scene = puzzle();
         for pos in [[0.8, 0.5], [0.9, 0.8]] {
             let p = l.point(pos);
+            g.right_click(&l, (p[0] as f64, p[1] as f64));
+            // Explicitly select each new body to build a nested branch.
             g.right_click(&l, (p[0] as f64, p[1] as f64));
         }
         assert_eq!(g.nodes[1].parent, Some(0));

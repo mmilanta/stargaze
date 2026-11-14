@@ -741,48 +741,16 @@ pub(crate) fn button(
 }
 
 pub(crate) fn menu_background(v: &mut Vec<UiVertex>, vp: [f32; 2], s: f32) {
-    let nx = 32;
-    let ny = 18;
-    for iy in 0..ny {
-        for ix in 0..nx {
-            let corners = [[ix, iy], [ix + 1, iy], [ix, iy + 1], [ix + 1, iy + 1]];
-            let vertices = corners.map(|[x, y]| {
-                let px = x as f32 / nx as f32;
-                let py = y as f32 / ny as f32;
-                let d = (((px - 0.5) / 0.7).powi(2) + ((py - 0.42) / 0.6).powi(2)).sqrt();
-                let f = (d / 0.75).clamp(0.0, 1.0);
-                let c = [
-                    BG[0] * (1.0 - f) + 0.00335 * f,
-                    BG[1] * (1.0 - f) + 0.016 * f,
-                    BG[2] * (1.0 - f) + 0.162 * f,
-                    0.66 + 0.20 * f,
-                ];
-                UiVertex {
-                    pos: to_ndc(px * vp[0], py * vp[1], vp[0], vp[1]),
-                    uv: solid_uv(),
-                    color: c,
-                    edge: [0.0, 0.0, -1.0, 0.0],
-                }
-            });
-            v.extend([
-                vertices[0],
-                vertices[1],
-                vertices[2],
-                vertices[2],
-                vertices[1],
-                vertices[3],
-            ]);
-        }
-    }
+    push_rect(v, 0.0, 0.0, vp[0], vp[1], BG, vp);
     let step = (32.0 * s).max(8.0);
-    let mut x = 0.0;
-    while x < vp[0] {
-        push_rect(v, x.round(), 0.0, 1.0, vp[1], [0.69, 0.75, 1.0, 0.015], vp);
-        x += step;
-    }
-    let mut y = 0.0;
+    let radius = (0.85 * s).max(0.65);
+    let mut y = step * 0.5;
     while y < vp[1] {
-        push_rect(v, 0.0, y.round(), vp[0], 1.0, [0.69, 0.75, 1.0, 0.015], vp);
+        let mut x = step * 0.5;
+        while x < vp[0] {
+            disk(v, [x, y], radius, [1.0, 1.0, 1.0, 0.30], vp);
+            x += step;
+        }
         y += step;
     }
 }
