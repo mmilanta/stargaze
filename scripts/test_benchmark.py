@@ -23,12 +23,22 @@ class BenchmarkTests(unittest.TestCase):
         self.assertEqual(changed["pixels_changed_over_1_255_percent"], 100)
 
     def test_median_p95_and_repeat_spread(self):
-        mode = {"repeats": [[{"gpu_ms": x, "wall_ms": x+1} for x in [1, 3]],
-                            [{"gpu_ms": x, "wall_ms": x+1} for x in [2, 100]]]}
+        mode = {"mode": "paused", "repeats": [[{"gpu_ms": x, "wall_ms": x+1} for x in [1, 3]],
+                                              [{"gpu_ms": x, "wall_ms": x+1} for x in [2, 100]]]}
         s = b.summary(mode)
         self.assertEqual(s["gpu_median_ms"], 2.5)
         self.assertAlmostEqual(s["gpu_p95_ms"], 85.45)
         self.assertEqual(s["repeat_medians_ms"], [2, 51])
+        self.assertEqual(s["gpu_first_frame_median_ms"], 1.5)
+        self.assertEqual(s["gpu_refining_median_ms"], 51.5)
+
+    def test_motion_errors_remove_scene_motion_and_detect_frozen_error(self):
+        result = b.motion_errors([
+            (bytes([12]), bytes([11]), bytes([10])),
+            (bytes([35]), bytes([32]), bytes([33])),
+        ])
+        self.assertEqual(result["baseline"], {"display_luma_rmse_255": 2.0, "temporal_luma_rmse_255": 0.0})
+        self.assertEqual(result["candidate"], {"display_luma_rmse_255": 1.0, "temporal_luma_rmse_255": 2.0})
 
     def test_png_round_trip_and_missing_hdr_is_explicit(self):
         pixels = bytes((10, 20, 30, 255, 255, 0, 99, 255))

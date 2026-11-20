@@ -183,6 +183,10 @@ struct Config {
     image_samples: u32,
     adapter: String,
     cases: Vec<String>,
+    #[serde(default)]
+    capture_motion: bool,
+    #[serde(default)]
+    motion_reference_samples: u32,
     #[serde(default = "reference_variant")]
     variant: String,
 }
@@ -217,8 +221,21 @@ impl Config {
             "invalid image samples"
         );
         ensure!(
+            self.motion_reference_samples == 0
+                || (2..=4096).contains(&self.motion_reference_samples),
+            "invalid motion reference samples"
+        );
+        ensure!(
             !self.cases.is_empty() && self.cases.iter().all(|s| CASES.contains(&s.as_str())),
             "unknown or empty case selection"
+        );
+        ensure!(
+            self.cases
+                .iter()
+                .collect::<std::collections::HashSet<_>>()
+                .len()
+                == self.cases.len(),
+            "duplicate case selection"
         );
         Ok(())
     }
@@ -666,25 +683,16 @@ fn reset(tracer: &mut PathTracer, options: Options) {
     tracer.exposure_was_enabled = false;
 }
 
-fn capture(
+fn read_display(
     device: &wgpu::Device,
     queue: &wgpu::Queue,
-    tracer: &PathTracer,
     texture: &wgpu::Texture,
-    cfg: &Config,
-    name: &str,
-) -> Result<serde_json::Value> {
-    let pitch = (cfg.width * 4).div_ceil(256) * 256;
+) -> Result<Vec<u8>> {
+    let width = texture.width();
+    let pitch = (width * 4).div_ceil(256) * 256;
     let rgba = device.create_buffer(&wgpu::BufferDescriptor {
         label: Some("benchmark-image-readback"),
-        size: u64::from(pitch) * u64::from(cfg.height),
-        usage: wgpu::BufferUsages::COPY_DST | wgpu::BufferUsages::MAP_READ,
-        mapped_at_creation: false,
-    });
-    let hdr_size = u64::from(tracer.dimensions.0) * u64::from(tracer.dimensions.1) * 16;
-    let hdr = device.create_buffer(&wgpu::BufferDescriptor {
-        label: Some("benchmark-linear-readback"),
-        size: hdr_size,
+        size: u64::from(pitch) * u64::from(texture.height()),
         usage: wgpu::BufferUsages::COPY_DST | wgpu::BufferUsages::MAP_READ,
         mapped_at_creation: false,
     });
@@ -696,18 +704,49 @@ fn capture(
             layout: wgpu::TexelCopyBufferLayout {
                 offset: 0,
                 bytes_per_row: Some(pitch),
-                rows_per_image: Some(cfg.height),
+                rows_per_image: Some(texture.height()),
             },
         },
         texture.size(),
     );
-    encoder.copy_buffer_to_buffer(&tracer.accumulation, 0, &hdr, 0, hdr_size);
     queue.submit(Some(encoder.finish()));
     let padded = map(device, &rgba)?;
-    let pixels: Vec<u8> = padded
+    Ok(padded
         .chunks(pitch as usize)
-        .flat_map(|r| r[..cfg.width as usize * 4].iter().copied())
-        .collect();
+        .flat_map(|r| r[..width as usize * 4].iter().copied())
+        .collect())
+}
+
+fn capture(
+    device: &wgpu::Device,
+    queue: &wgpu::Queue,
+    tracer: &PathTracer,
+    texture: &wgpu::Texture,
+    cfg: &Config,
+    name: &str,
+) -> Result<serde_json::Value> {
+    let pixels = read_display(device, queue, texture)?;
+    capture_pixels(device, queue, tracer, cfg, name, pixels)
+}
+
+fn capture_pixels(
+    device: &wgpu::Device,
+    queue: &wgpu::Queue,
+    tracer: &PathTracer,
+    cfg: &Config,
+    name: &str,
+    pixels: Vec<u8>,
+) -> Result<serde_json::Value> {
+    let hdr_size = u64::from(tracer.dimensions.0) * u64::from(tracer.dimensions.1) * 16;
+    let hdr = device.create_buffer(&wgpu::BufferDescriptor {
+        label: Some("benchmark-linear-readback"),
+        size: hdr_size,
+        usage: wgpu::BufferUsages::COPY_DST | wgpu::BufferUsages::MAP_READ,
+        mapped_at_creation: false,
+    });
+    let mut encoder = device.create_command_encoder(&Default::default());
+    encoder.copy_buffer_to_buffer(&tracer.accumulation, 0, &hdr, 0, hdr_size);
+    queue.submit(Some(encoder.finish()));
     let linear = map(device, &hdr)?;
     ensure!(
         linear.as_chunks::<4>().0.iter().all(|v| {
@@ -730,6 +769,19 @@ fn capture(
     Ok(
         serde_json::json!({"name": name, "spp": tracer.samples(), "exposure": tracer.options.exposure}),
     )
+}
+
+fn save_motion_luma(cfg: &Config, name: &str, pixels: &[u8]) -> Result<()> {
+    let luma: Vec<u8> = pixels
+        .chunks_exact(4)
+        .map(|p| {
+            // Rec.709 coefficients applied to the displayed sRGB channels.
+            let weighted = 2126 * u32::from(p[0]) + 7152 * u32::from(p[1]) + 722 * u32::from(p[2]);
+            ((weighted + 5000) / 10000) as u8
+        })
+        .collect();
+    std::fs::write(Path::new(&cfg.output).join(format!("{name}.luma")), luma)?;
+    Ok(())
 }
 
 fn fingerprint(frame: &Frame) -> String {
@@ -824,8 +876,18 @@ fn run_benchmark(cfg: &Config) -> Result<()> {
         auto_exposure: true,
         ..Options::default()
     };
-    let mut tracer = PathTracer::new(&device, FORMAT, cfg.trace_size(), &stars, options);
-    experiments::install(&device, &mut tracer, &cfg.variant);
+    let guided = cfg.variant == "guided-ground";
+    let mut tracer = PathTracer::new_with_guided_ground(
+        &device,
+        FORMAT,
+        cfg.trace_size(),
+        &stars,
+        options,
+        guided,
+    );
+    if !guided {
+        experiments::install(&device, &mut tracer, &cfg.variant);
+    }
     let mut cases = vec![];
     for name in &cfg.cases {
         let frames: Vec<_> = (0..cfg.frames.max(cfg.warmup))
@@ -868,12 +930,18 @@ fn run_benchmark(cfg: &Config) -> Result<()> {
             let mut times: Vec<_> = repeats.iter().flatten().map(|v| v.gpu_ms).collect();
             times.sort_by(f64::total_cmp);
             let mode = if moving { "advancing" } else { "paused" };
-            eprintln!(
-                "{name:20} {mode:9}: {:.3} ms GPU median",
-                times[times.len() / 2]
-            );
+            let median = (times[(times.len() - 1) / 2] + times[times.len() / 2]) * 0.5;
+            eprintln!("{name:20} {mode:9}: {median:.3} ms GPU median");
             modes.push(serde_json::json!({"mode": mode, "repeats": repeats}));
         }
+        cases.push(serde_json::json!({"name": name, "initial_time_days": frames[0].scene_time,
+            "frame_fingerprints": frames[..cfg.frames as usize].iter().map(fingerprint).collect::<Vec<_>>(),
+            "modes": modes }));
+    }
+    // Capture only after all timings. A baseline's extra reference renders
+    // should not change the GPU load leading into another timed case.
+    for (name, case) in cfg.cases.iter().zip(&mut cases) {
+        let frames: Vec<_> = (0..cfg.frames).map(|i| fixture(name, i, cfg)).collect();
         // Fixed manual exposure makes image differences independent of adaptation history.
         let exposure = match name.as_str() {
             "vantus-eclipse" | "vantus-airless" => 8.0,
@@ -912,29 +980,54 @@ fn run_benchmark(cfg: &Config) -> Result<()> {
             }
         }
         reset(&mut tracer, image_options);
-        for i in 0..cfg.frames {
-            render(
-                &device,
-                &queue,
-                &mut tracer,
-                &frames[i as usize],
-                &view,
-                None,
-            )?;
-            if i == cfg.frames / 2 || i == cfg.frames - 1 {
-                images.push(capture(
+        let motion_reference = cfg.motion_reference_samples;
+        let capture_motion = cfg.capture_motion || motion_reference != 0;
+        for (i, frame) in frames.iter().take(cfg.frames as usize).enumerate() {
+            render(&device, &queue, &mut tracer, frame, &view, None)?;
+            let checkpoint = i == (cfg.frames / 2) as usize || i == (cfg.frames - 1) as usize;
+            if !checkpoint && !capture_motion {
+                continue;
+            }
+            let pixels = read_display(&device, &queue, &texture)?;
+            let capture_name = format!("{name}-moving-{i}");
+            if capture_motion {
+                save_motion_luma(cfg, &capture_name, &pixels)?;
+            }
+            if checkpoint {
+                images.push(capture_pixels(
                     &device,
                     &queue,
                     &tracer,
-                    &texture,
                     cfg,
-                    &format!("{name}-moving-{i}"),
+                    &capture_name,
+                    pixels,
                 )?);
             }
         }
-        cases.push(serde_json::json!({"name": name, "initial_time_days": frames[0].scene_time,
-            "frame_fingerprints": frames[..cfg.frames as usize].iter().map(fingerprint).collect::<Vec<_>>(),
-            "modes": modes, "images": images }));
+        if motion_reference != 0 {
+            let reference_options = Options {
+                noise_seed: 0xe42db137,
+                samples_per_frame: MAX_BATCH_SAMPLES as u32,
+                sample_limit: motion_reference,
+                ..image_options
+            };
+            reset(&mut tracer, reference_options);
+            for (i, frame) in frames.iter().take(cfg.frames as usize).enumerate() {
+                for _ in 0..motion_reference.div_ceil(reference_options.samples_per_frame) {
+                    render(&device, &queue, &mut tracer, frame, &view, None)?;
+                }
+                ensure!(
+                    tracer.samples() == motion_reference,
+                    "unexpected motion reference spp"
+                );
+                save_motion_luma(
+                    cfg,
+                    &format!("{name}-motion-reference-{i}"),
+                    &read_display(&device, &queue, &texture)?,
+                )?;
+            }
+        }
+        case["images"] = serde_json::json!(images);
     }
     let result = serde_json::json!({"suite_version": 1, "variant": cfg.variant, "adapter": {
         "name": info.name, "vendor": info.vendor, "device": info.device,
@@ -961,6 +1054,8 @@ fn benchmark_fixtures_are_deterministic_and_cover_requested_workloads() {
         frames: 8,
         repeats: 3,
         image_samples: 32,
+        capture_motion: false,
+        motion_reference_samples: 0,
         adapter: String::new(),
         variant: reference_variant(),
         cases: CASES.iter().map(|v| v.to_string()).collect(),
@@ -1180,6 +1275,8 @@ fn umbra_config(output: String, variant: &str) -> Config {
         frames: 16,
         repeats: 3,
         image_samples: 32,
+        capture_motion: false,
+        motion_reference_samples: 0,
         adapter: String::new(),
         variant: variant.into(),
         cases: vec!["eclipse-umbra-edge".into()],
