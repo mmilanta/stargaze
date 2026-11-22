@@ -773,7 +773,9 @@ fn capture_pixels(
 
 fn save_motion_luma(cfg: &Config, name: &str, pixels: &[u8]) -> Result<()> {
     let luma: Vec<u8> = pixels
-        .chunks_exact(4)
+        .as_chunks::<4>()
+        .0
+        .iter()
         .map(|p| {
             // Rec.709 coefficients applied to the displayed sRGB channels.
             let weighted = 2126 * u32::from(p[0]) + 7152 * u32::from(p[1]) + 722 * u32::from(p[2]);
