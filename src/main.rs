@@ -7,6 +7,7 @@ mod game;
 mod graphics;
 mod ground;
 mod gui;
+mod headless;
 mod hud;
 mod menu;
 mod motion;
@@ -80,7 +81,7 @@ fn scene_for_startup() -> Result<Option<Scene>> {
         match arg.to_str() {
             Some("--help" | "-h") => {
                 println!(
-                    "Stargaze — an observatory in a configurable star system\n\nUsage: stargaze [--game] [--explore] [--unguided-ground] [--config FILE | --check-config FILE]\n\n--version, -V        Print the application version\n--game               Play the anonymous system reconstruction puzzle\n--explore            Enable the Explore menu and free observation\n--unguided-ground    Use the original ground sampler for comparison\n--guided-ground      Use guided ground sampling (default)\n--config FILE        Load a YAML system and its camera\n--check-config FILE  Validate without opening a window\n--texture [STYLE]    Planet texture editor (plain, gas_giant, cratered, rocky, icy, volcanic, terran)\n\nDefaults to the first level, configs/1-halo-volcano.yaml (also with --game). STARGAZE_CONFIG also selects a file."
+                    "Stargaze — an observatory in a configurable star system\n\nUsage: stargaze render --request FILE --output PNG\n       stargaze [--game] [--explore] [--unguided-ground] [--config FILE | --check-config FILE]\n\n--version, -V        Print the application version\n--game               Play the anonymous system reconstruction puzzle\n--explore            Enable the Explore menu and free observation\n--unguided-ground    Use the original ground sampler for comparison\n--guided-ground      Use guided ground sampling (default)\n--config FILE        Load a YAML system and its camera\n--check-config FILE  Validate without opening a window\n--texture [STYLE]    Planet texture editor (plain, gas_giant, cratered, rocky, icy, volcanic, terran)\n\nDefaults to the first level, configs/1-halo-volcano.yaml (also with --game). STARGAZE_CONFIG also selects a file."
                 );
                 return Ok(None);
             }
@@ -233,6 +234,10 @@ impl State {
     }
 
     fn with_scene(scene: Scene) -> Self {
+        Self::with_scene_settings(scene, true)
+    }
+
+    fn with_scene_settings(scene: Scene, interactive: bool) -> Self {
         let mut observer = Observer::new(scene.host);
         observer.lat = scene.observer_lat_deg.to_radians();
         observer.lon = scene.observer_lon_deg.to_radians();
@@ -254,6 +259,10 @@ impl State {
             state.sim_time = t;
         } else {
             state.find_good_start();
+        }
+        if !interactive {
+            state.point_initial_view();
+            return state;
         }
         if let Ok(t) = std::env::var("STARGAZE_TIME")
             && let Ok(v) = t.parse::<f64>()
@@ -2345,6 +2354,11 @@ impl ApplicationHandler for App {
 
 fn main() -> Result<()> {
     env_logger::Builder::from_env(env_logger::Env::default().default_filter_or("info")).init();
+
+    let mut args = std::env::args_os().skip(1);
+    if args.next().as_deref() == Some(std::ffi::OsStr::new("render")) {
+        return headless::run(args);
+    }
 
     let texture = texture_request()?;
     let scene = match &texture {
