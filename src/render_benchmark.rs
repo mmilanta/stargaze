@@ -1,6 +1,7 @@
 //! Opt-in, offscreen benchmark of production rendering and explicit quality experiments.
 //! Run through scripts/benchmark.py to capture provenance and compare artifacts.
 use super::*;
+use crate::headless::{map, read_display};
 use anyhow::{Context, Result, ensure};
 use serde::{Deserialize, Serialize};
 use std::{path::Path, time::Instant};
@@ -572,20 +573,6 @@ fn fixture(name: &str, step: u32, cfg: &Config) -> Frame {
     s.build_frame_with_vegetation(cfg.width, cfg.height, cfg.vegetation)
 }
 
-fn map(device: &wgpu::Device, buffer: &wgpu::Buffer) -> Result<Vec<u8>> {
-    let (tx, rx) = std::sync::mpsc::channel();
-    buffer.slice(..).map_async(wgpu::MapMode::Read, move |r| {
-        let _ = tx.send(r);
-    });
-    device.poll(wgpu::PollType::wait_indefinitely())?;
-    rx.recv()??;
-    let view = buffer.slice(..).get_mapped_range()?;
-    let bytes = view.to_vec();
-    drop(view);
-    buffer.unmap();
-    Ok(bytes)
-}
-
 struct Timer {
     queries: wgpu::QuerySet,
     resolve: wgpu::Buffer,
@@ -681,40 +668,6 @@ fn reset(tracer: &mut PathTracer, options: Options) {
     tracer.history = History::default();
     tracer.options = options;
     tracer.exposure_was_enabled = false;
-}
-
-fn read_display(
-    device: &wgpu::Device,
-    queue: &wgpu::Queue,
-    texture: &wgpu::Texture,
-) -> Result<Vec<u8>> {
-    let width = texture.width();
-    let pitch = (width * 4).div_ceil(256) * 256;
-    let rgba = device.create_buffer(&wgpu::BufferDescriptor {
-        label: Some("benchmark-image-readback"),
-        size: u64::from(pitch) * u64::from(texture.height()),
-        usage: wgpu::BufferUsages::COPY_DST | wgpu::BufferUsages::MAP_READ,
-        mapped_at_creation: false,
-    });
-    let mut encoder = device.create_command_encoder(&Default::default());
-    encoder.copy_texture_to_buffer(
-        texture.as_image_copy(),
-        wgpu::TexelCopyBufferInfo {
-            buffer: &rgba,
-            layout: wgpu::TexelCopyBufferLayout {
-                offset: 0,
-                bytes_per_row: Some(pitch),
-                rows_per_image: Some(texture.height()),
-            },
-        },
-        texture.size(),
-    );
-    queue.submit(Some(encoder.finish()));
-    let padded = map(device, &rgba)?;
-    Ok(padded
-        .chunks(pitch as usize)
-        .flat_map(|r| r[..width as usize * 4].iter().copied())
-        .collect())
 }
 
 fn capture(
