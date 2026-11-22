@@ -4,11 +4,9 @@
 its overall speedup and all screenshots. Regenerate it with
 `python3 scripts/benchmark_dashboard.py` after adding results.
 
-**Current app default:** guided ground sampling. For reproducibility, benchmark
-`reference` retains the original unguided sampler with 8/4 atmosphere integration;
-use `--variant guided-ground` to measure the accepted app default. Existing
-captures keep their original labels and source provenance. The app accepts
-`--unguided-ground` for direct comparison.
+New runs default to `guided-ground`, the sampler used by the app. Choose
+`--variant reference` for the historical unguided sampler with 8/4 atmosphere
+integration. Archived captures retain their original labels and source provenance.
 
 The [October 7 follow-up investigation](optimizations/followup-2026-10-07/README.md)
 adds raw and rendering-quality candidates, desert day/night fixtures, and a
@@ -17,8 +15,7 @@ hardware-timing limitation; no new speedup is claimed without measurements.
 
 This suite measures the existing production path tracer, exposure meter, and
 display shader on a hardware Vulkan GPU. It also captures deterministic images
-so a faster implementation can be checked for visual changes. It does not modify
-the rendering algorithm or solve the star-flicker issue.
+so each change can be assessed for both GPU cost and visual quality.
 
 The [RX 7600 XT baseline](baselines/rx7600xt-2026-10-04/summary.md) contains actual
 GPU timestamp measurements, raw timings, provenance, and reference PNGs. Open its
@@ -37,23 +34,29 @@ refuses software adapters. Use `--adapter 'RX 7600'` to select by name substring
 There is no display-server or window requirement.
 
 ```sh
-python3 scripts/benchmark.py run target/benchmarks/before
-# After implementing ONE optimization:
-python3 scripts/benchmark.py run target/benchmarks/after
+# Run from the base revision, with the benchmark harness available there.
+python3 scripts/benchmark.py run /tmp/stargaze-before
+# Run from the candidate revision with the same benchmark settings.
+python3 scripts/benchmark.py run /tmp/stargaze-after
 python3 scripts/benchmark.py compare \
-  target/benchmarks/before target/benchmarks/after target/benchmarks/comparison
+  /tmp/stargaze-before /tmp/stargaze-after /tmp/stargaze-comparison
 ```
 
-Open `target/benchmarks/comparison/index.html` in a browser. It links to a table
-of timing changes and shows baseline, candidate, and an 8× amplified absolute
-image difference side by side. All output directories must be new: previous
-measurements are never overwritten. Failed runs keep their logs and partial
-artifacts and are not valid baselines.
+Open `/tmp/stargaze-comparison/index.html` for the per-scene speed and image
+changes, revision links, and side-by-side baseline, candidate, and amplified
+differences. The speedup table separates advancing frames, the first paused
+frame, and ongoing paused refinement. Image error shows the largest change
+across the moving checkpoints and the change in the refined image. Use
+`--variant` on either run to compare named shader experiments in the same
+checkout. Choose fresh output directories for each run. Failed runs keep their
+logs and partial artifacts.
 
-Compare against the checked-in baseline using the default settings:
+Use the legacy profile for the original seven cases and unguided sampler when
+comparing with the checked-in baseline. The comparison still requires compatible
+scene fingerprints, settings, and GPU driver.
 
 ```sh
-python3 scripts/benchmark.py run target/benchmarks/candidate
+python3 scripts/benchmark.py run target/benchmarks/candidate --profile legacy
 python3 scripts/benchmark.py compare \
   benchmarks/baselines/rx7600xt-2026-10-04 \
   target/benchmarks/candidate target/benchmarks/baseline-comparison
@@ -86,8 +89,11 @@ python3 scripts/benchmark.py run target/benchmarks/smoke \
   --width 320 --height 180 --scale 100 --warmup 1 --frames 2 --repeats 1 --image-samples 8
 ```
 
-`--cases` accepts one or more names from the table below. The runner removes
-`STARGAZE_*` overrides and does not read saved graphics preferences.
+`--profile current` is the default. It covers all three game levels, Earth
+daylight, Halo rings, moonlit air, deep totality, and the umbra edge.
+`--profile low-light` selects the three synthetic low-light scenes and Atacama
+at night. Use `--cases` for an explicit list. The runner removes `STARGAZE_*`
+overrides and uses the settings recorded in the request.
 
 ## Fixed views
 
@@ -106,10 +112,12 @@ inputs, define a new fixture/version instead of silently comparing unlike work.
 | `vantus-eclipse` | Binary system, day 444.478; telescope tracks Vantus, FOV 2.5× angular radius | Multiple moon transits/shadows and atmospheric transport at deep zoom |
 | `vantus-airless` | Exactly the same Vantus geometry/time/camera, atmosphere disabled | Controlled airless counterpart, isolates atmospheric workload differences |
 | `dual-eclipse` | Synthetic ringed sphere, two finite suns and two aligned occluders | Overlapping soft eclipse shadows, colored lighting, ring transmission, indirect light without atmosphere |
-| `moonlit-air` (optional) | Synthetic large moon illuminated by a sun below the observer horizon | Reflected atmospheric glow |
-| `eclipse-umbra-edge` (optional) | Nearly point-like sun, observer just inside totality, transverse shadow motion | Sharp atmospheric illumination boundary: bright sky to the left, dark sky to the right and dark ground |
+| `moonlit-air` | Synthetic large moon illuminated by a sun below the observer horizon | Reflected atmospheric glow |
+| `eclipse-umbra-edge` | Nearly point-like sun, observer just inside totality, transverse shadow motion | Sharp atmospheric illumination boundary: bright sky to the left, dark sky to the right and dark ground |
 | `twilight-afterglow` (optional) | Earth, day 1.0525; sun about 5° below the horizon, view 25° left of it, altitude 12°, FOV 70° | Civil twilight: sunward glow and still-sunlit upper air on the right, darker sky on the left, terrain silhouette |
-| `eclipse-totality` (optional) | Synthetic Earth; Sun-sized, Sun-bright star 60° up, covered by an occultor giving a ~40 km umbra and ~990 km penumbra; view altitude 5°, FOV 80° | Deep totality: black ground and zenith, distant low air lit by a partial sun around the whole horizon; noisy partial-disc sampling |
+| `eclipse-totality` | Synthetic Earth; Sun-sized, Sun-bright star 60° up, covered by an occultor giving a ~40 km umbra and ~990 km penumbra; view altitude 5°, FOV 80° | Deep totality: black ground and zenith, distant low air lit by a partial sun around the whole horizon; noisy partial-disc sampling |
+| `level-1`, `level-2`, `level-3` | Authored starting view for each game level | Representative playable terrain, atmospheric lighting, and eclipse workloads |
+| `atacama-day`, `atacama-night` | Desert observatory at day 0.14 and day 0 | Lit terrain and moonlit ground |
 
 Advancing mode uses **one simulated second per sequence frame**, not elapsed
 wall time. Each repetition replays the same sequence. Telescope cases track their
@@ -127,7 +135,8 @@ cover fast camera pans, large time jumps, resize, or every application state.
   excludes mapping the timestamp result. GPU timing excludes CPU work and uploads
   queued before the encoded commands.
 - Shader compilation, scene/frame construction, terrain generation, image
-  readback, image compression, and report generation are outside timing.
+  readback, image compression, and report generation are outside timing. All
+  timed workloads finish before the image capture pass starts.
 - No window, HUD, compositor, VSync, application frame cap, or adaptive scheduler
   is involved. **1000 / milliseconds is a renderer throughput equivalent, not
   a measured application FPS.**
@@ -148,8 +157,8 @@ its observed same-code rerun spread; it is not a controlled laboratory claim.
 
 ## Image comparisons
 
-Images use a **fixed manual exposure** (8 for Vantus, 1 elsewhere), no automatic
-adaptation, and the production display shader. Timing still includes automatic
+Images use a **fixed manual exposure** recorded per capture and the production
+display shader. Timing still includes automatic
 exposure. Fixed seeds, samples, camera, and exposure prevent exposure adaptation
 from concealing lighting differences. One-sample, 32-sample, and two advancing
 checkpoints exercise both interactive and refining images. **32 spp is a noisy
@@ -166,8 +175,28 @@ Relative error is undefined for an all-black reference and reported as null.
 These are difference metrics, not a universal quality score. A better sampler
 can legitimately change every pixel. Inspect edges, shadow positions, ringing,
 energy/brightness, and fine detail, and compare higher-sample references where
-needed. Two animation checkpoints do not constitute a temporal-flicker metric.
-Keep correctness regression tests alongside the benchmark.
+needed. Keep correctness regression tests alongside the benchmark.
+
+### Motion quality
+
+Capture a high-sample reference for each advancing frame on the base revision
+and a matching 1-spp sequence on the candidate revision.
+
+```sh
+python3 scripts/benchmark.py run /tmp/stargaze-motion-before \
+  --profile low-light --width 480 --height 270 --scale 100 --motion-reference-samples 256
+python3 scripts/benchmark.py run /tmp/stargaze-motion-after \
+  --profile low-light --width 480 --height 270 --scale 100 --capture-motion
+python3 scripts/benchmark.py compare \
+  /tmp/stargaze-motion-before /tmp/stargaze-motion-after /tmp/stargaze-motion-comparison
+```
+
+The comparison uses the same independent, fixed-exposure baseline reference for
+both runs. It reports per-frame luma RMSE and the RMS change in luma error between
+consecutive frames. Subtracting the reference's frame-to-frame changes accounts
+for scene motion. Read both columns together, since persistent grain can lower
+flicker while leaving per-frame error high. Finite reference samples contribute
+some error. Capture and reference work runs outside timed submissions.
 
 ## Artifacts and validation
 
@@ -214,9 +243,9 @@ python3 scripts/benchmark.py run target/benchmarks/umbra-fast --cases eclipse-um
 python3 scripts/benchmark.py compare target/benchmarks/umbra-reference target/benchmarks/umbra-fast target/benchmarks/umbra-comparison
 ```
 
-The seven default cases are preserved for comparisons against historical runs.
-Select the new case explicitly with `--cases eclipse-umbra-edge`, or append it to
-your case list. An independent finite-disc geometry test and the ignored GPU test
+The original seven cases are available with `--profile legacy`.
+Select the umbra case alone with `--cases eclipse-umbra-edge`. An independent
+finite-disc geometry test and the ignored GPU test
 `gpu_umbra_edge_contrast` check totality, lit neighbouring air and dark ground.
 The ignored `render_umbra_edge_study` captures all seven shader variants (including
 reference) at both image settings into a new `target/benchmarks/umbra-edge-study`

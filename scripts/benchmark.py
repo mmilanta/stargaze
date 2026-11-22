@@ -24,6 +24,12 @@ CASES = ["halo-rings", "earth-daylight", "earth-twilight", "median-dense",
 EXTRA_CASES = ["moonlit-air", "eclipse-umbra-edge", "twilight-afterglow", "eclipse-totality",
                "atacama-day", "atacama-night", "ground-craters", "ground-alpine", "ground-basalt",
                "ground-dunes", "level-1", "level-2", "level-3"]
+LOW_LIGHT_CASES = ["moonlit-air", "eclipse-totality", "eclipse-umbra-edge", "atacama-night"]
+CASE_PROFILES = {
+    "current": ["level-1", "level-2", "level-3", "earth-daylight", "halo-rings", *LOW_LIGHT_CASES[:3]],
+    "low-light": LOW_LIGHT_CASES,
+    "legacy": CASES,
+}
 QUALITY_VARIANTS = ["reference", "sun6", "view12", "balanced", "fast", "planetshine-quarter", "no-planetshine"]
 OPTIMIZATION_VARIANTS = ["sky-any-hit", "dark-reflection", "raw-combined", "view6-sun4",
                          "view8-sun2", "reflect-half", "guided-ground", "guided-raw"]
@@ -47,12 +53,17 @@ def percentile(values, fraction):
 
 
 def summary(mode):
-    rows = [v for repeat in mode["repeats"] for v in repeat]
+    repeats = mode["repeats"]
+    rows = [v for repeat in repeats for v in repeat]
     times = [v["gpu_ms"] for v in rows]
-    return {"gpu_median_ms": statistics.median(times), "gpu_p95_ms": percentile(times, .95),
-            "wall_median_ms": statistics.median(v["wall_ms"] for v in rows),
-            "repeat_medians_ms": [statistics.median(v["gpu_ms"] for v in r) for r in mode["repeats"]],
-            "count": len(rows)}
+    result = {"gpu_median_ms": statistics.median(times), "gpu_p95_ms": percentile(times, .95),
+              "wall_median_ms": statistics.median(v["wall_ms"] for v in rows),
+              "repeat_medians_ms": [statistics.median(v["gpu_ms"] for v in r) for r in repeats],
+              "count": len(rows)}
+    if mode.get("mode") == "paused" and all(len(r) > 1 for r in repeats):
+        result["gpu_first_frame_median_ms"] = statistics.median(r[0]["gpu_ms"] for r in repeats)
+        result["gpu_refining_median_ms"] = statistics.median(v["gpu_ms"] for r in repeats for v in r[1:])
+    return result
 
 
 def fresh_directory(path):
@@ -76,14 +87,14 @@ img{width:100%;background:black}figure{margin:0}figcaption{padding:8px 0}code{ov
 def report_run(output):
     data = json.loads((output / "results.json").read_text())
     request = json.loads((output / "request.json").read_text())
-    lines = ["# Renderer benchmark", "", f"Variant: **{request.get('variant', 'reference')}** (benchmark-only when not reference).", "", f"GPU: **{data['adapter']['name']}** ({data['adapter']['driver_info']}).",
+    lines = ["# Renderer benchmark", "", f"Renderer variant: **{request.get('variant', 'reference')}**.", "", f"GPU: **{data['adapter']['name']}** ({data['adapter']['driver_info']}).",
              f"Display: {request['width']}×{request['height']}; trace: {data['trace_size'][0]}×{data['trace_size'][1]}; "
              f"{request['bounces']} bounces; {request['vegetation']}% vegetation; 1 spp per submission.", "",
              "GPU time includes sky-cache work when invalidated, tracing, automatic exposure, and offscreen display. "
              "Wall time includes encoding, upload/submission, timestamp resolve, and waiting. No UI, compositor, "
              "VSync, frame cap, frame construction, image readback, or PNG encoding. These are not application FPS.", "",
-             "| View | Mode | GPU median ms | GPU p95 ms | Wall median ms | Repeat medians ms |",
-             "|---|---|---:|---:|---:|---|"]
+             "| View | Mode | GPU median ms | GPU p95 ms | First paused frame ms | Refining ms | Wall median ms | Repeat medians ms |",
+             "|---|---|---:|---:|---:|---:|---:|---|"]
     rows = []
     gallery = []
     for case in data["cases"]:
@@ -91,12 +102,18 @@ def report_run(output):
             s = summary(mode)
             rows.append({"case": case["name"], "mode": mode["mode"], **s})
             lines.append(f"| {case['name']} | {mode['mode']} | {s['gpu_median_ms']:.3f} | {s['gpu_p95_ms']:.3f} | "
+                         f"{format_metric(s.get('gpu_first_frame_median_ms'))} | "
+                         f"{format_metric(s.get('gpu_refining_median_ms'))} | "
                          f"{s['wall_median_ms']:.3f} | {', '.join(f'{v:.3f}' for v in s['repeat_medians_ms'])} |")
         for im in case["images"]:
             name = im["name"]
             gallery.append(f'<figure><a href="{name}.png"><img loading="lazy" src="{name}.png"></a>'
                            f'<figcaption>{name} · exposure {im["exposure"]}</figcaption></figure>')
     write_json(output / "summary.json", rows)
+    if request.get("capture_motion") or request.get("motion_reference_samples"):
+        samples = request.get("motion_reference_samples", 0)
+        description = f"with a separate {samples}-spp reference for each frame" if samples else "at 1 spp"
+        lines += ["", f"Captured {request['frames']} consecutive display-luma frames per case {description}."]
     (output / "summary.md").write_text("\n".join(lines) + "\n")
     body = f"<p>{html.escape(data['adapter']['name'])} · {data['trace_size']} trace pixels</p>"
     body += f"<p>Variant: <strong>{html.escape(request.get('variant', 'reference'))}</strong></p>"
@@ -122,7 +139,11 @@ def record_provenance(output, invocation=None):
 def run(args):
     output = fresh_directory(args.output)
     config = {k: getattr(args, k) for k in COMPATIBLE}
-    config.update(output=str(output), adapter=args.adapter, cases=args.cases or CASES, variant=args.variant)
+    profile = getattr(args, "profile", None) or "current"
+    variant = args.variant or ("reference" if profile == "legacy" else "guided-ground")
+    config.update(output=str(output), adapter=args.adapter, cases=args.cases or CASE_PROFILES[profile],
+                  variant=variant, capture_motion=getattr(args, "capture_motion", False),
+                  motion_reference_samples=getattr(args, "motion_reference_samples", 0))
     write_json(output / "request.json", config)
     record_provenance(output)
     env = {k: v for k, v in os.environ.items() if not k.startswith("STARGAZE_")}
@@ -138,7 +159,7 @@ def run(args):
         code = proc.wait()
     if code:
         raise RuntimeError(f"Benchmark failed ({code}); partial output kept at {output}")
-    for pattern in ("*.rgba", "*.f32"):
+    for pattern in ("*.rgba", "*.f32", "*.luma"):
         for raw in output.glob(pattern):
             # mtime=0 makes the compressed artifacts deterministic too.
             raw.with_suffix(raw.suffix + ".gz").write_bytes(gzip.compress(raw.read_bytes(), mtime=0))
@@ -286,8 +307,66 @@ def number(value):
     return f"{value:.6g}" if value is not None else "unavailable"
 
 
+def format_metric(value, suffix=""):
+    return f"{value:.3f}{suffix}" if value is not None else "—"
+
+
+def markdown_table(headers, rows):
+    return ["| " + " | ".join(headers) + " |", "| " + " | ".join("---" for _ in headers) + " |",
+            *("| " + " | ".join(row) + " |" for row in rows)]
+
+
+def html_table(headers, rows):
+    head = "".join(f"<th>{html.escape(cell)}</th>" for cell in headers)
+    body = "".join("<tr>" + "".join(f"<td>{html.escape(cell)}</td>" for cell in row) + "</tr>" for row in rows)
+    return f"<table><thead><tr>{head}</tr></thead><tbody>{body}</tbody></table>"
+
+
+def motion_errors(frames):
+    """Score still-frame error and frame-to-frame error against a shared reference sequence."""
+    spatial = [0, 0]
+    temporal = [0, 0]
+    spatial_count = temporal_count = 0
+    previous = None
+    for base, candidate, reference in frames:
+        spatial_count += len(reference)
+        if previous is not None:
+            temporal_count += len(reference)
+        for i, actual in enumerate((base, candidate)):
+            spatial[i] += sum((a - r) ** 2 for a, r in zip(actual, reference))
+            if previous is not None:
+                temporal[i] += sum(((a - r) - (p - q)) ** 2
+                                   for a, r, p, q in zip(actual, reference, previous[i], previous[2]))
+        previous = (base, candidate, reference)
+    if not temporal_count:
+        raise ValueError("Motion scoring requires at least two nonempty frames")
+    return {"baseline": {"display_luma_rmse_255": math.sqrt(spatial[0] / spatial_count),
+                         "temporal_luma_rmse_255": math.sqrt(temporal[0] / temporal_count)},
+            "candidate": {"display_luma_rmse_255": math.sqrt(spatial[1] / spatial_count),
+                          "temporal_luma_rmse_255": math.sqrt(temporal[1] / temporal_count)}}
+
+
+def motion_frames(base_dir, candidate_dir, name, request):
+    count = request["width"] * request["height"]
+    for i in range(request["frames"]):
+        paths = (base_dir / f"{name}-moving-{i}.luma.gz", candidate_dir / f"{name}-moving-{i}.luma.gz",
+                 base_dir / f"{name}-motion-reference-{i}.luma.gz")
+        frames = tuple(gzip.decompress(path.read_bytes()) for path in paths)
+        if any(len(frame) != count for frame in frames):
+            raise ValueError(f"Unexpected motion image dimensions: {name}, frame {i}")
+        yield frames
+
+
 def link(path, output):
     return html.escape(urllib.parse.quote(os.path.relpath(path, output)))
+
+
+def revision(directory):
+    manifest = directory / "manifest.json"
+    if not manifest.exists():
+        return None
+    data = json.loads(manifest.read_text())
+    return {"commit": data["git_commit"], "dirty": bool(data.get("git_status"))}
 
 
 def compare(args):
@@ -295,21 +374,44 @@ def compare(args):
     base, candidate = [json.loads((d / "results.json").read_text()) for d in (base_dir, candidate_dir)]
     br, cr = [json.loads((d / "request.json").read_text()) for d in (base_dir, candidate_dir)]
     check_compatible(base, candidate, br, cr)
+    revisions = {k: revision(d) for k, d in [("baseline", base_dir), ("candidate", candidate_dir)]}
     output = fresh_directory(args.output)
-    lines = ["# Benchmark comparison", "", f"Variants: **{br.get('variant', 'reference')} → {cr.get('variant', 'reference')}**.", "", "Speedup is baseline / candidate GPU median; above 1 is faster. "
-             "P95 and repetition ranges help identify timing noise. Image differences are not automatically quality regressions.", "",
-             "| View | Mode | Baseline ms | Candidate ms | Speedup | Candidate p95 ms |",
-             "|---|---|---:|---:|---:|---:|"]
-    timings, images, gallery = [], [], []
+    variants = f"{br.get('variant', 'reference')} → {cr.get('variant', 'reference')}"
+    headings = ["# Benchmark comparison", "", f"Renderer variants **{variants}**.", ""]
+    provenance = []
+    for label, directory in [("baseline", base_dir), ("candidate", candidate_dir)]:
+        metadata = revisions[label]
+        if metadata is not None:
+            identifier = metadata["commit"][:12] + (" with local changes" if metadata["dirty"] else "")
+            provenance.append((f"{label.title()} {identifier}", link(directory / "manifest.json", output)))
+    if provenance:
+        headings += [" · ".join(f"[{label}]({url})" for label, url in provenance), ""]
+    overview_headers = ["View", "Advancing speedup", "First paused frame speedup", "Paused refinement speedup",
+                        "Worst moving RGB RMSE /255", "Refined RGB RMSE /255"]
+    timing_headers = ["View", "Mode", "Baseline ms", "Candidate ms", "Speedup", "Baseline p95 ms", "Candidate p95 ms"]
+    motion_headers = ["View", "Baseline frame RMSE", "Candidate frame RMSE", "Baseline flicker RMS", "Candidate flicker RMS"]
+    timings, images, gallery, overview, motion = [], [], [], [], []
+    overview_rows, timing_rows, motion_rows = [], [], []
+    motion_samples = br.get("motion_reference_samples", 0)
+    has_motion = cr.get("capture_motion") or cr.get("motion_reference_samples")
     candidates = {c["name"]: c for c in candidate["cases"]}
     for bc in base["cases"]:
-        cc = candidates[bc["name"]]
+        case = bc["name"]
+        cc = candidates[case]
         cm = {m["mode"]: m for m in cc["modes"]}
+        tradeoff = {"case": case}
         for bm in bc["modes"]:
             bs, cs = summary(bm), summary(cm[bm["mode"]])
             speedup = bs["gpu_median_ms"] / cs["gpu_median_ms"]
-            timings.append({"case": bc["name"], "mode": bm["mode"], "baseline": bs, "candidate": cs, "speedup": speedup})
-            lines.append(f"| {bc['name']} | {bm['mode']} | {bs['gpu_median_ms']:.3f} | {cs['gpu_median_ms']:.3f} | {speedup:.3f}× | {cs['gpu_p95_ms']:.3f} |")
+            timings.append({"case": case, "mode": bm["mode"], "baseline": bs, "candidate": cs, "speedup": speedup})
+            timing_rows.append([case, bm["mode"], format_metric(bs["gpu_median_ms"]), format_metric(cs["gpu_median_ms"]),
+                                format_metric(speedup, "×"), format_metric(bs["gpu_p95_ms"]), format_metric(cs["gpu_p95_ms"])])
+            if bm["mode"] == "advancing":
+                tradeoff["advancing_speedup"] = speedup
+            if "gpu_first_frame_median_ms" in bs and "gpu_first_frame_median_ms" in cs:
+                tradeoff["first_frame_speedup"] = bs["gpu_first_frame_median_ms"] / cs["gpu_first_frame_median_ms"]
+                tradeoff["refining_speedup"] = bs["gpu_refining_median_ms"] / cs["gpu_refining_median_ms"]
+        moving_errors = []
         for im in bc["images"]:
             name = im["name"]
             a, b = [displayed(d, name) for d in (base_dir, candidate_dir)]
@@ -319,6 +421,10 @@ def compare(args):
                 raise ValueError(f"Unexpected image dimensions: {name}")
             metrics, diff = image_metrics(a, b, ah, bh)
             images.append({"name": name, **metrics})
+            if name.startswith(f"{case}-moving-"):
+                moving_errors.append(metrics["display_rmse_255"])
+            if name == f"{case}-spp{br['image_samples']}":
+                tradeoff["refined_display_rmse_255"] = metrics["display_rmse_255"]
             png_write(output / f"{name}-diff.png", br["width"], br["height"], diff)
             figures = []
             for label, path in [("Baseline", base_dir / f"{name}.png"), ("Candidate", candidate_dir / f"{name}.png"), ("Absolute difference ×8", output / f"{name}-diff.png")]:
@@ -326,12 +432,45 @@ def compare(args):
                 figures.append(f'<figure><a href="{url}"><img loading="lazy" src="{url}"></a><figcaption>{label}</figcaption></figure>')
             gallery.append(f'<h2>{name}</h2><p>Display MAE {metrics["display_mae_255"]:.4f}/255; '
                            f'linear RGB RMSE {number(metrics["linear_rgb_rmse"])}</p><div class="gallery">' + "".join(figures) + "</div>")
-    lines += ["", "| Image | Display MAE /255 | Changed pixels >1/255 | Linear RGB RMSE | log(1+RGB) RMSE |",
+        tradeoff["worst_moving_display_rmse_255"] = max(moving_errors, default=None)
+        overview.append(tradeoff)
+        overview_rows.append([case, *(format_metric(tradeoff.get(key), "×") for key in
+                              ("advancing_speedup", "first_frame_speedup", "refining_speedup")),
+                              format_metric(tradeoff["worst_moving_display_rmse_255"]),
+                              format_metric(tradeoff.get("refined_display_rmse_255"))])
+        if motion_samples and has_motion:
+            errors = motion_errors(motion_frames(base_dir, candidate_dir, case, br))
+            motion.append({"case": case, "reference_spp": motion_samples, "frames": br["frames"], **errors})
+            motion_rows.append([case, *(format_metric(errors[side][metric])
+                               for metric in ("display_luma_rmse_255", "temporal_luma_rmse_255")
+                               for side in ("baseline", "candidate"))])
+    description = ("Speedup is baseline GPU median divided by candidate GPU median. A value above 1× is faster. "
+                   "Image RMSE here measures how much the rendered images changed. Inspect the captures to judge the change.")
+    lines = [*headings, description, "", *markdown_table(overview_headers, overview_rows)]
+    body = f'<p>Renderer variants <strong>{html.escape(variants)}</strong></p>'
+    body += '<p><a href="comparison.md">Detailed timings and image metrics</a></p>'
+    if provenance:
+        body += '<p>' + " · ".join(f'<a href="{url}">{html.escape(label)}</a>' for label, url in provenance) + '</p>'
+    body += f"<h2>Speed and image changes</h2><p>{description}</p>" + html_table(overview_headers, overview_rows)
+    if motion:
+        description = (f"Both runs use the same {motion_samples}-spp baseline reference at each frame. "
+                       "Frame RMSE measures display-luma error. Flicker RMS measures changes in that error "
+                       "between consecutive frames, after subtracting scene motion present in the reference. "
+                       "Both use 0–255 display units. A static error can yield low flicker and high frame RMSE.")
+        lines += ["", "## Motion quality", "", description, "", *markdown_table(motion_headers, motion_rows)]
+        body += f"<h2>Motion quality</h2><p>{description}</p>" + html_table(motion_headers, motion_rows)
+    elif motion_samples or has_motion or br.get("capture_motion"):
+        lines += ["", "Motion scoring requires baseline reference frames and candidate motion capture."]
+    lines += ["", "## GPU timings", "", *markdown_table(timing_headers, timing_rows),
+              "", "## Image differences", "",
+              "| Image | Display MAE /255 | Changed pixels >1/255 | Linear RGB RMSE | log(1+RGB) RMSE |",
               "|---|---:|---:|---:|---:|"]
     lines += [f"| {im['name']} | {im['display_mae_255']:.5f} | {im['pixels_changed_over_1_255_percent']:.3f}% | {number(im['linear_rgb_rmse'])} | {number(im['log1p_rgb_rmse'])} |" for im in images]
-    write_json(output / "comparison.json", {"baseline": str(base_dir), "candidate": str(candidate_dir), "baseline_variant": br.get("variant", "reference"), "candidate_variant": cr.get("variant", "reference"), "timings": timings, "images": images})
+    write_json(output / "comparison.json", {"baseline": str(base_dir), "candidate": str(candidate_dir),
+               "baseline_variant": br.get("variant", "reference"), "candidate_variant": cr.get("variant", "reference"),
+               "revisions": revisions, "overview": overview, "timings": timings, "images": images, "motion_quality": motion})
     (output / "comparison.md").write_text("\n".join(lines) + "\n")
-    (output / "index.html").write_text(page('<p><a href="comparison.md">Timing and image metrics</a></p>' + "".join(gallery)))
+    (output / "index.html").write_text(page(body + "".join(gallery)))
     print("\n".join(lines))
     print(f"\nVisual comparison: {output / 'index.html'}")
 
@@ -345,8 +484,13 @@ def main():
                          ("warmup", 8), ("frames", 16), ("repeats", 3), ("image-samples", 32)]:
         p.add_argument("--"+key, type=int, default=default)
     p.add_argument("--adapter", default="", help="case-insensitive name substring; default: first discrete GPU")
-    p.add_argument("--cases", nargs="+", choices=CASES + EXTRA_CASES)
-    p.add_argument("--variant", choices=VARIANTS, default="reference", help="benchmark-only experiment; production stays unchanged")
+    scene = p.add_mutually_exclusive_group()
+    scene.add_argument("--cases", nargs="+", choices=CASES + EXTRA_CASES)
+    scene.add_argument("--profile", choices=CASE_PROFILES, help="case set (default: current)")
+    p.add_argument("--variant", choices=VARIANTS, help="renderer variant (default: guided-ground; legacy profile: reference)")
+    p.add_argument("--capture-motion", action="store_true", help="save display luma for every advancing frame")
+    p.add_argument("--motion-reference-samples", type=int, default=0, metavar="SPP",
+                   help="capture motion plus independent high-sample frames for use as a comparison baseline")
     p.set_defaults(function=run)
     p = sub.add_parser("compare", help="compare matching runs, including HDR and displayed image differences")
     p.add_argument("baseline", type=Path)
