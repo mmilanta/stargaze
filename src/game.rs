@@ -1,5 +1,7 @@
 //! Orbital-tree puzzle. Relative diagram radii determine the scored sibling order.
+use glam::Vec2;
 use serde::{Deserialize, Serialize};
+use std::cmp::Reverse;
 use winit::keyboard::KeyCode;
 
 use crate::sim::{BodyKind, Scene};
@@ -13,6 +15,15 @@ const MUTED: [f32; 4] = crate::ui::MUTED;
 struct Traits {
     star: bool,
     rings: bool,
+    #[serde(default)]
+    tidal_lock: TidalLock,
+}
+
+/// Directions along a body's orbit link to its parent.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
+struct TidalLock {
+    object_to_parent: bool,
+    parent_to_object: bool,
 }
 
 #[derive(Clone, Serialize, Deserialize)]
@@ -46,6 +57,16 @@ pub struct Score {
     pub topology: f32,
     pub traits: f32,
     pub viewer: bool,
+    #[serde(skip)]
+    details: ScoreDetails,
+}
+
+#[derive(Clone, Copy, Debug, Default)]
+struct ScoreDetails {
+    matched: usize,
+    missing: usize,
+    extra: usize,
+    trait_mismatches: usize,
 }
 
 impl Score {
@@ -209,6 +230,9 @@ impl Game {
 
     pub fn layout(&self, w: f32, h: f32, scale: f32) -> Layout {
         let mut l = Layout::new(w, h, scale);
+        if self.nodes[self.selected].parent.is_some() {
+            l.inspector.h += 105.0 * l.scale;
+        }
         let margin = 38.0 * l.scale;
         // Keep the full diagram visible after an aspect-ratio change, without
         // stretching distances or changing the theory's coordinates/history.
@@ -401,23 +425,17 @@ impl Game {
             2 => self.delete(),
             3 => self.history(false),
             4 => {
-                if let Some(viewer) = self.viewer {
-                    let (truth, host) = Topology::from_scene_with_host(scene);
-                    self.score = Some(score(&self.topology(), viewer, &truth, host));
-                    let score = self.score.unwrap();
-                    self.best = Some(self.best.unwrap_or(0.0).max(score.total()));
-                    if self.attempts.len() == 1000 {
-                        self.attempts.remove(0);
-                    }
-                    self.attempts.push(score);
-                    self.attempt_scroll = self.attempts.len().saturating_sub(3);
-                    self.result_open = true;
-                    self.message =
-                        "Edit your theory and check again, or return to observing.".into();
-                } else {
-                    self.message =
-                        "Select an object and choose Viewer here [V] before checking.".into();
+                let (truth, host) = Topology::from_scene_with_host(scene);
+                let score = score(&self.topology(), self.viewer, &truth, host);
+                self.score = Some(score);
+                self.best = Some(self.best.unwrap_or(0.0).max(score.total()));
+                if self.attempts.len() == 1000 {
+                    self.attempts.remove(0);
                 }
+                self.attempts.push(score);
+                self.attempt_scroll = self.attempts.len().saturating_sub(3);
+                self.result_open = true;
+                self.message = "Edit your theory and check again, or return to observing.".into();
             }
             5 => self.confirm_clear = true,
             _ => unreachable!(),
@@ -435,6 +453,20 @@ impl Game {
         }
         self.trait_pop = Some((self.selected, property, std::time::Instant::now()));
         self.message = "Object updated. Gold rays mark stars; an oval marks rings.".into();
+    }
+
+    fn toggle_tidal_lock(&mut self, object_to_parent: bool) {
+        self.release();
+        self.save();
+        let lock = &mut self.nodes[self.selected].traits.tidal_lock;
+        let flag = if object_to_parent {
+            &mut lock.object_to_parent
+        } else {
+            &mut lock.parent_to_object
+        };
+        *flag = !*flag;
+        self.message =
+            "Tidal lock updated. Arrows point from the locked body to its partner.".into();
     }
 
     fn hit_node(&self, l: &Layout, cursor: (f64, f64)) -> Option<usize> {
@@ -531,6 +563,15 @@ impl Game {
             .position(|r| r.contains(cursor.0, cursor.1))
         {
             self.toggle_trait(property);
+            return true;
+        }
+        if self.nodes[self.selected].parent.is_some()
+            && let Some(direction) = l
+                .tidal_lock_buttons()
+                .iter()
+                .position(|r| r.contains(cursor.0, cursor.1))
+        {
+            self.toggle_tidal_lock(direction == 0);
             return true;
         }
         if l.inspector.contains(cursor.0, cursor.1) || l.legend.contains(cursor.0, cursor.1) {
@@ -649,6 +690,15 @@ impl Topology {
                 .map(|&i| Traits {
                     star: bodies[i].kind == BodyKind::Star,
                     rings: bodies[i].rings.is_some(),
+                    tidal_lock: bodies[i].parent.filter(|&p| !anchor(p)).map_or(
+                        TidalLock::default(),
+                        |p| TidalLock {
+                            object_to_parent: bodies[i].tidally_locked
+                                && bodies[i].lock_to.is_none(),
+                            parent_to_object: bodies[p].tidally_locked
+                                && bodies[p].lock_to.is_some_and(|moon| moon.target == i),
+                        },
+                    ),
                 })
                 .collect(),
         );
@@ -656,35 +706,78 @@ impl Topology {
     }
 }
 
-/// Match the root, then the first orbit to the first orbit at every parent, etc.
-/// Missing inner objects do not shift a viewer into a different orbital rank.
-/// The complete sequence of ranks from the root identifies the viewer's location.
-fn score(guess: &Topology, viewer: usize, truth: &Topology, host: usize) -> Score {
-    fn matched(
+#[derive(Clone, Copy, Default)]
+struct Alignment {
+    bodies: usize,
+    traits: usize,
+    rank_distance: usize,
+    viewer: bool,
+}
+
+impl Alignment {
+    fn preference(&self) -> (usize, usize, Reverse<usize>) {
+        // Viewer placement is evaluated on the chosen alignment and never guides it.
+        (self.bodies, self.traits, Reverse(self.rank_distance))
+    }
+}
+
+/// Match the roots and align each pair's children in orbital order, allowing
+/// missing or extra siblings while keeping the matched parent links intact.
+fn score(guess: &Topology, viewer: Option<usize>, truth: &Topology, host: usize) -> Score {
+    fn align(
         a: &Topology,
         i: usize,
         b: &Topology,
         j: usize,
-        viewer: usize,
+        viewer: Option<usize>,
         host: usize,
-    ) -> (usize, usize, bool) {
-        let mut count = 1;
-        let mut traits = usize::from(a.traits[i].star == b.traits[j].star)
-            + usize::from(a.traits[i].rings == b.traits[j].rings);
-        let mut viewer_matches = i == viewer && j == host;
-        for (&ai, &bi) in a.children[i].iter().zip(&b.children[j]) {
-            let (subtree, matched_traits, found_viewer) = matched(a, ai, b, bi, viewer, host);
-            count += subtree;
-            traits += matched_traits;
-            viewer_matches |= found_viewer;
+    ) -> Alignment {
+        let (guessed, expected) = (&a.children[i], &b.children[j]);
+        let mut result = Alignment::default();
+        if !guessed.is_empty() && !expected.is_empty() {
+            // Each cell aligns a prefix of each sibling list. Skip a guessed
+            // or expected sibling, or pair the two and align their subtrees.
+            let mut best = vec![vec![Alignment::default(); expected.len() + 1]; guessed.len() + 1];
+            for (x, &child) in guessed.iter().enumerate() {
+                for (y, &target) in expected.iter().enumerate() {
+                    let prior = best[x][y];
+                    let subtree = align(a, child, b, target, viewer, host);
+                    let pair = Alignment {
+                        bodies: prior.bodies + subtree.bodies,
+                        traits: prior.traits + subtree.traits,
+                        rank_distance: prior.rank_distance + subtree.rank_distance + x.abs_diff(y),
+                        viewer: prior.viewer || subtree.viewer,
+                    };
+                    best[x + 1][y + 1] = [best[x][y + 1], best[x + 1][y], pair]
+                        .into_iter()
+                        .max_by_key(Alignment::preference)
+                        .unwrap();
+                }
+            }
+            result = best[guessed.len()][expected.len()];
         }
-        (count, traits, viewer_matches)
+        result.bodies += 1;
+        result.traits += usize::from(a.traits[i].star == b.traits[j].star)
+            + usize::from(a.traits[i].rings == b.traits[j].rings)
+            + usize::from(i != a.root && a.traits[i].tidal_lock == b.traits[j].tidal_lock);
+        result.viewer |= viewer == Some(i) && j == host;
+        result
     }
-    let (count, traits, viewer) = matched(guess, guess.root, truth, truth.root, viewer, host);
+    let result = align(guess, guess.root, truth, truth.root, viewer, host);
+    let guessed = guess.children.len();
+    let expected = truth.children.len();
+    let nodes = guessed.max(expected);
     Score {
-        topology: 100.0 * count as f32 / guess.children.len().max(truth.children.len()) as f32,
-        traits: 100.0 * traits as f32 / (2 * guess.children.len().max(truth.children.len())) as f32,
-        viewer,
+        topology: 100.0 * result.bodies as f32 / nodes as f32,
+        // Two body traits per node and one lock relationship per orbit.
+        traits: 100.0 * result.traits as f32 / (3 * nodes - 1) as f32,
+        viewer: result.viewer,
+        details: ScoreDetails {
+            matched: result.bodies,
+            missing: expected - result.bodies,
+            extra: guessed - result.bodies,
+            trait_mismatches: (3 * result.bodies - 1) - result.traits,
+        },
     }
 }
 
@@ -795,7 +888,7 @@ impl Layout {
                 x: 18.0 * s,
                 y: 78.0 * s,
                 w: 241.0 * s,
-                h: 78.0 * s,
+                h: 97.0 * s,
             },
             buttons: [redo, viewer, delete, undo, check, clear],
             traits: [star, rings],
@@ -824,6 +917,15 @@ impl Layout {
             toolbar,
             dividers: [nav_end, traits_end, actions_end],
         }
+    }
+    fn tidal_lock_buttons(&self) -> [Rect; 2] {
+        let s = self.scale;
+        std::array::from_fn(|i| Rect {
+            x: self.inspector.x + 14.0 * s,
+            y: self.inspector.y + (287.0 + i as f32 * 37.0) * s,
+            w: self.inspector.w - 28.0 * s,
+            h: 30.0 * s,
+        })
     }
     fn point(&self, p: [f32; 2]) -> [f32; 2] {
         let unit = self.unit;
@@ -857,6 +959,29 @@ fn line(
     vp: [f32; 2],
 ) {
     crate::ui::line(v, a, b, thickness, color, vp);
+}
+
+fn tidal_lock_arrow(v: &mut Vec<UiVertex>, from: [f32; 2], to: [f32; 2], s: f32, vp: [f32; 2]) {
+    let from = Vec2::from_array(from);
+    let to = Vec2::from_array(to);
+    let delta = to - from;
+    let Some(direction) = delta.try_normalize() else {
+        return;
+    };
+    let size = (9.0 * s).min(delta.length() * 0.09);
+    let tip = from.lerp(to, 0.57);
+    let back = tip - direction * size;
+    let wing = direction.perp() * (0.55 * size);
+    for point in [back + wing, back - wing] {
+        line(
+            v,
+            point.to_array(),
+            tip.to_array(),
+            2.0 * s,
+            crate::ui::OK,
+            vp,
+        );
+    }
 }
 
 /// Dashed orbit paths stay inside the diagram even when the full orbit extends
@@ -1137,6 +1262,12 @@ pub fn build(
                 i == g.selected,
             );
             line(v, a, b, s, [INK[0], INK[1], INK[2], 0.35], vp);
+            if node.traits.tidal_lock.object_to_parent {
+                tidal_lock_arrow(v, b, a, s, vp);
+            }
+            if node.traits.tidal_lock.parent_to_object {
+                tidal_lock_arrow(v, a, b, s, vp);
+            }
         }
     }
     let preview = g.dragging.is_none()
@@ -1327,6 +1458,7 @@ pub fn build(
         "C centre of the system",
         "1, 2, 3… orbit order, innermost first",
         "* star · o rings · YOU viewer",
+        "Arrow points to tidal-lock partner",
     ]
     .iter()
     .enumerate()
@@ -1429,13 +1561,41 @@ pub fn build(
             INK
         },
     );
+    if n.parent.is_some() {
+        text(
+            v,
+            r.x + 14.0 * s,
+            r.y + 267.0 * s,
+            0.675,
+            "TIDAL LOCK",
+            crate::ui::ACCENT,
+        );
+        let lock = n.traits.tidal_lock;
+        for ((label, on), button) in [
+            ("Object locks to parent", lock.object_to_parent),
+            ("Parent locks to object", lock.parent_to_object),
+        ]
+        .into_iter()
+        .zip(l.tidal_lock_buttons())
+        {
+            crate::ui::button(
+                v,
+                button,
+                label,
+                s,
+                on,
+                button.contains(cursor.0, cursor.1),
+                vp,
+            );
+        }
+    }
     text(v, 18.0 * s, l.bar.y - 50.0 * s, 0.79, &g.message, INK);
     text(
         v,
         18.0 * s,
         l.bar.y - 28.0 * s,
         0.72,
-        "60% ordered structure + 20% star/ring traits + 20% viewer. Orbit 1 = innermost.",
+        "60% ordered structure + 20% traits and tidal locks + 20% viewer. Orbit 1 = innermost.",
         MUTED,
     );
     crate::ui::toolbar_panel(v, l.bar, l.toolbar.scale, &l.dividers, vp);
@@ -1633,7 +1793,11 @@ fn build_result(
             score.topology,
             score.topology * 0.6,
         ),
-        ("Star / ring traits · 20%", score.traits, score.traits * 0.2),
+        (
+            "Stars, rings and tidal locks · 20%",
+            score.traits,
+            score.traits * 0.2,
+        ),
         (
             "Viewer position · 20%",
             if score.viewer { 100.0 } else { 0.0 },
@@ -1649,7 +1813,9 @@ fn build_result(
         let detail = if i == 2 {
             format!(
                 "{} → {points:.1} pts",
-                if score.viewer {
+                if g.viewer.is_none() {
+                    "unset"
+                } else if score.viewer {
                     "matches"
                 } else {
                     "does not match"
@@ -1681,12 +1847,16 @@ fn build_result(
             vp,
         );
     }
+    let details = score.details;
     text(
         v,
         d.x + 258.0 * s,
         d.y + 246.0 * s,
         0.675,
-        "Orbits are compared innermost-first under each parent.",
+        &format!(
+            "Bodies matched: {} · Missing: {} · Extra: {}",
+            details.matched, details.missing, details.extra
+        ),
         MUTED,
     );
     text(
@@ -1694,7 +1864,10 @@ fn build_result(
         d.x + 258.0 * s,
         d.y + 262.0 * s,
         0.675,
-        "The hidden solution is never shown.",
+        &format!(
+            "Trait mismatches on matched bodies: {}",
+            details.trait_mismatches
+        ),
         MUTED,
     );
     for (x, title) in [(d.x + 28.0 * s, "ATTEMPTS"), (d.x + 385.0 * s, "HINT")] {
@@ -1755,8 +1928,13 @@ fn build_result(
         ]
     } else if score.traits < 99.9 {
         [
-            "The shape is right. Check which objects shine",
-            "on their own, and which have rings.",
+            "Check stars, rings, and which objects",
+            "keep one face turned to a partner.",
+        ]
+    } else if g.viewer.is_none() {
+        [
+            "Select the object you are standing on.",
+            "Choose Viewer here [V] to mark it.",
         ]
     } else {
         [
@@ -1809,6 +1987,12 @@ mod tests {
         for x in [0.45, 0.6, 0.75] {
             g.selected = 1;
             g.add([x, 0.7]);
+            g.nodes
+                .last_mut()
+                .unwrap()
+                .traits
+                .tidal_lock
+                .object_to_parent = true;
         }
         g.viewer = Some(4);
         g
@@ -1846,15 +2030,13 @@ mod tests {
     }
     #[test]
     fn map_menu_preserves_current_puzzle_until_another_map_loads() {
+        let scene = puzzle();
         let mut game = correct_puzzle();
         game.open = true;
-        game.score = Some(Score {
-            topology: 100.0,
-            traits: 100.0,
-            viewer: true,
-        });
+        let (truth, host) = Topology::from_scene_with_host(&scene);
+        game.score = Some(score(&game.topology(), game.viewer, &truth, host));
         let mut app = crate::App {
-            state: crate::State::with_scene(puzzle()),
+            state: crate::State::with_scene(scene),
             menu: crate::menu::Menu::default(),
             game: Some(game),
             window: None,
@@ -1928,24 +2110,76 @@ mod tests {
 
     #[test]
     fn outermost_of_three_moons_is_distinct_from_inner_and_middle() {
-        let tree = plain(&[None, Some(0), Some(1), Some(1), Some(1)]);
-        assert_eq!(score(&tree, 4, &tree, 4).total(), 100.0);
+        let mut tree = plain(&[None, Some(0), Some(1), Some(1), Some(1)]);
+        assert_eq!(score(&tree, Some(4), &tree, 4).total(), 100.0);
+        assert_eq!(score(&tree, None, &tree, 4).total(), 80.0);
         for viewer in [2, 3] {
-            let result = score(&tree, viewer, &tree, 4);
+            let result = score(&tree, Some(viewer), &tree, 4);
             assert_eq!(result.topology, 100.0);
             assert!(!result.viewer);
             assert_eq!(result.total(), 80.0);
         }
-        // Omitting the innermost moon must not shift the viewer to rank three.
+        // Indistinguishable moons keep their closest ranks, even if shifting
+        // the alignment could give the viewer credit.
         let missing = plain(&[None, Some(0), Some(1), Some(1)]);
-        assert!(!score(&missing, 3, &tree, 4).viewer);
+        assert!(!score(&missing, Some(3), &tree, 4).viewer);
+
+        // When the inner moon is distinctive, its absence identifies the gap.
+        tree.traits[2].rings = true;
+        let matched = score(&missing, Some(3), &tree, 4);
+        assert!(matched.viewer);
+        assert_eq!(matched.details.trait_mismatches, 0);
+    }
+
+    #[test]
+    fn ember_summit_omission_preserves_outer_families_and_viewer_credit() {
+        let scene = crate::config::parse(include_str!("../configs/1-halo-volcano.yaml")).unwrap();
+        let (truth, host) = Topology::from_scene_with_host(&scene);
+        // C, Igni, Calyx, Vantus, Umbra, Halo, Iri, Kesh, Mote.
+        let mut guess = plain(&[
+            None,
+            Some(0),
+            Some(0),
+            Some(0),
+            Some(2),
+            Some(2),
+            Some(3),
+            Some(3),
+            Some(7),
+        ]);
+        guess.traits[0].star = true;
+        guess.traits[1].star = true;
+        guess.traits[2].rings = true;
+        guess.traits[3].rings = true;
+        guess.traits[4].tidal_lock.object_to_parent = true;
+        guess.traits[5].tidal_lock.object_to_parent = true;
+
+        let result = score(&guess, Some(5), &truth, host);
+        assert_eq!(result.details.matched, 9);
+        assert_eq!(result.details.missing, 2);
+        assert_eq!(result.details.extra, 0);
+        assert_eq!(result.details.trait_mismatches, 4);
+        assert!(result.viewer);
+        assert!((result.total() - 82.84091).abs() < 0.001);
+
+        let misplaced_viewer = score(&guess, Some(4), &truth, host);
+        assert_eq!(misplaced_viewer.topology, result.topology);
+        assert_eq!(misplaced_viewer.traits, result.traits);
+        assert!(!misplaced_viewer.viewer);
+
+        // An extra inner family likewise leaves the outer matches intact.
+        let with_extra = score(&truth, Some(host), &guess, 5);
+        assert_eq!(with_extra.details.matched, 9);
+        assert_eq!(with_extra.details.missing, 0);
+        assert_eq!(with_extra.details.extra, 2);
+        assert!(with_extra.viewer);
     }
 
     #[test]
     fn swapping_planets_with_different_satellite_families_loses_credit() {
         let a = plain(&[None, Some(0), Some(0), Some(1)]);
         let b = plain(&[None, Some(0), Some(0), Some(2)]);
-        let result = score(&a, 3, &b, 3);
+        let result = score(&a, Some(3), &b, 3);
         assert!(result.topology < 100.0);
         assert!(!result.viewer);
     }
@@ -1955,9 +2189,9 @@ mod tests {
         let tree = plain(&[None, Some(0), Some(1)]);
         let flat = plain(&[None, Some(0), Some(0)]);
         let short = plain(&[None, Some(0)]);
-        assert!(score(&flat, 2, &tree, 2).topology < 100.0);
-        assert!(score(&short, 1, &tree, 2).topology < 100.0);
-        assert!(score(&tree, 2, &short, 1).topology < 100.0);
+        assert!(score(&flat, Some(2), &tree, 2).topology < 100.0);
+        assert!(score(&short, Some(1), &tree, 2).topology < 100.0);
+        assert!(score(&tree, Some(2), &short, 1).topology < 100.0);
     }
 
     #[test]
@@ -1985,7 +2219,7 @@ mod tests {
     fn root_need_not_be_first_and_anchor_is_part_of_topology() {
         let a = plain(&[None, Some(0), Some(0)]);
         let b = plain(&[Some(1), None, Some(1)]);
-        assert_eq!(score(&a, 1, &b, 0).total(), 100.0);
+        assert_eq!(score(&a, Some(1), &b, 0).total(), 100.0);
     }
 
     #[test]
@@ -1995,7 +2229,7 @@ mod tests {
         assert_eq!(
             score(
                 &guess.topology(),
-                4,
+                Some(4),
                 &Topology::from_scene(&scene),
                 scene.host
             )
@@ -2008,7 +2242,7 @@ mod tests {
         assert_eq!(
             score(
                 &guess.topology(),
-                4,
+                Some(4),
                 &Topology::from_scene(&scene),
                 scene.host
             )
@@ -2026,15 +2260,101 @@ mod tests {
         truth.traits[0].star = true;
         truth.traits[2].rings = true;
         let mut guess = plain(&[None, Some(0), Some(0)]);
-        let missing = score(&guess, 2, &truth, 2);
+        let missing = score(&guess, Some(2), &truth, 2);
         assert_eq!(missing.topology, 100.0);
         assert!(missing.traits < 100.0);
         guess.traits[0].star = true;
         guess.traits[2].rings = true;
-        assert_eq!(score(&guess, 2, &truth, 2).total(), 100.0);
+        assert_eq!(score(&guess, Some(2), &truth, 2).total(), 100.0);
         guess.traits[2].rings = false;
         guess.traits[1].rings = true;
-        assert!(score(&guess, 2, &truth, 2).traits < 100.0);
+        assert!(score(&guess, Some(2), &truth, 2).traits < 100.0);
+    }
+
+    #[test]
+    fn tidal_lock_scoring_checks_both_directions_on_the_configured_orbit() {
+        let mut scene = crate::config::load(concat!(
+            env!("CARGO_MANIFEST_DIR"),
+            "/configs/2-erg-dunes.yaml"
+        ))
+        .unwrap();
+        let gemmi = scene.bodies.iter().position(|b| b.name == "Gemmi").unwrap();
+        // A second satellite with the same orbit is not the configured lock target.
+        let sibling = scene.bodies.len();
+        scene.bodies.push(scene.bodies[gemmi].clone());
+        let truth = Topology::from_scene(&scene);
+        let mutual_lock = truth.traits[gemmi].tidal_lock;
+        assert!(mutual_lock.object_to_parent && mutual_lock.parent_to_object);
+        assert!(!truth.traits[sibling].tidal_lock.parent_to_object);
+
+        let mut guess = Topology::from_scene(&scene);
+        assert_eq!(
+            score(&guess, Some(scene.host), &truth, scene.host).total(),
+            100.0
+        );
+        guess.traits[gemmi].tidal_lock.parent_to_object = false;
+        let missing_direction = score(&guess, Some(scene.host), &truth, scene.host);
+        assert!(missing_direction.traits < 100.0);
+        assert_eq!(missing_direction.topology, 100.0);
+        assert!(missing_direction.viewer);
+        guess.traits[sibling].tidal_lock.parent_to_object = true;
+        assert!(
+            score(&guess, Some(scene.host), &truth, scene.host).traits < missing_direction.traits
+        );
+
+        scene.bodies[gemmi].tidally_locked = false;
+        let parent_only = Topology::from_scene(&scene);
+        assert_eq!(
+            parent_only.traits[gemmi].tidal_lock,
+            TidalLock {
+                object_to_parent: false,
+                parent_to_object: true,
+            }
+        );
+        guess.traits[sibling].tidal_lock.parent_to_object = false;
+        assert!(score(&guess, Some(scene.host), &parent_only, scene.host).traits < 100.0);
+    }
+
+    #[test]
+    fn inspector_tidal_locks_support_undo_redo_and_saved_theories() {
+        let mut g = Game {
+            open: true,
+            ..Game::default()
+        };
+        let scene = puzzle();
+        g.add([0.7, 0.5]);
+        g.selected = 1;
+        let l = g.layout(640.0, 480.0, 2.0);
+        for r in l.tidal_lock_buttons() {
+            assert!(r.y + r.h <= l.inspector.y + l.inspector.h);
+            assert!(l.inspector.y + l.inspector.h < l.bar.y);
+            g.click(
+                &l,
+                (f64::from(r.x + r.w * 0.5), f64::from(r.center_y())),
+                &scene,
+            );
+        }
+        let lock = |g: &Game| g.nodes[1].traits.tidal_lock;
+        let mutual = lock(&g);
+        assert!(mutual.object_to_parent && mutual.parent_to_object);
+        g.history(false);
+        assert!(lock(&g).object_to_parent && !lock(&g).parent_to_object);
+        g.history(true);
+        assert_eq!(lock(&g), mutual);
+        g.delete();
+        assert_eq!(g.nodes.len(), 1);
+        g.history(false);
+        assert_eq!(lock(&g), mutual);
+
+        let yaml = serde_saphyr::to_string(&g.snapshot()).unwrap();
+        let saved = serde_saphyr::from_str(&yaml).unwrap();
+        assert_eq!(lock(&Game::restore(&saved).unwrap()), mutual);
+        let mut legacy = serde_json::to_value(g.snapshot()).unwrap();
+        for node in legacy["nodes"].as_array_mut().unwrap() {
+            node["traits"].as_object_mut().unwrap().remove("tidal_lock");
+        }
+        let saved = serde_json::from_value(legacy).unwrap();
+        assert_eq!(lock(&Game::restore(&saved).unwrap()), TidalLock::default());
     }
 
     #[test]
@@ -2078,7 +2398,11 @@ mod tests {
         assert!(!g.nodes[0].traits.rings);
         assert!(g.nodes[0].traits.star);
         g.click(&l, center(l.buttons[4]), &scene);
-        assert!(g.score.is_none()); // A viewer is required before submission.
+        assert!(g.result_open);
+        assert!(g.viewer.is_none());
+        assert!(!g.score.unwrap().viewer);
+        assert_eq!(g.attempts.len(), 1);
+        g.key(KeyCode::Escape, &l, (0.0, 0.0), &scene);
         let pos = l.point([0.8, 0.7]);
         g.right_click(&l, (pos[0] as f64, pos[1] as f64));
         assert_eq!(g.nodes.len(), 2);
@@ -2087,9 +2411,10 @@ mod tests {
         g.release();
         g.click(&l, center(l.buttons[1]), &scene);
         assert_eq!(g.viewer, Some(1));
-        g.click(&l, center(l.buttons[4]), &scene);
+        g.key(KeyCode::Enter, &l, (0.0, 0.0), &scene);
         assert!(g.score.is_some());
         assert!(g.result_open);
+        assert_eq!(g.attempts.len(), 2);
         g.key(KeyCode::Escape, &l, (0.0, 0.0), &scene);
         assert!(!g.result_open);
         g.click(&l, center(l.buttons[3]), &scene);
@@ -2107,7 +2432,7 @@ mod tests {
         let layout = Layout::new(1280.0, 720.0, 1.0);
         let original = g.nodes[4].pos;
         let history = g.undo.len();
-        g.score = Some(score(&g.topology(), 4, &truth, scene.host));
+        g.score = Some(score(&g.topology(), Some(4), &truth, scene.host));
         assert_eq!(g.score.unwrap().total(), 100.0);
         g.dragging = Some(4);
         for pos in [[0.4, 0.45], [0.4, 0.4], [0.4, 0.35]] {
@@ -2119,14 +2444,17 @@ mod tests {
         assert_eq!(g.siblings(1), vec![4, 2, 3]);
         assert_eq!(g.viewer, Some(4));
         assert!(g.score.is_none());
-        assert!(!score(&g.topology(), 4, &truth, scene.host).viewer);
+        assert!(!score(&g.topology(), Some(4), &truth, scene.host).viewer);
         assert_eq!(g.undo.len(), history + 1);
         let (nodes, viewer, selected) = g.undo.pop().unwrap();
         g.nodes = nodes;
         g.viewer = viewer;
         g.selected = selected;
         assert_eq!(g.nodes[4].pos, original);
-        assert_eq!(score(&g.topology(), 4, &truth, scene.host).total(), 100.0);
+        assert_eq!(
+            score(&g.topology(), Some(4), &truth, scene.host).total(),
+            100.0
+        );
     }
 
     #[test]

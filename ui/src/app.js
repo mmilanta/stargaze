@@ -1,4 +1,4 @@
-import { LEVELS, SYSTEMS, SPEEDS, STOP, PRESETS, SETTING_ROWS, clone, clamp, createState, persistentState, systemById, freshObservation, freshTheory, progress, theory, remember, history, orbitRank, addNode, deleteBranch, clearTheory, toggleTrait, changeSpeed, togglePlayback, presetName, clock, speedLabel, previewCheck } from './model.js';
+import { LEVELS, SYSTEMS, SPEEDS, STOP, PRESETS, SETTING_ROWS, clone, clamp, createState, persistentState, systemById, freshObservation, freshTheory, progress, theory, remember, history, orbitRank, addNode, deleteBranch, clearTheory, toggleTrait, toggleTidalLock, changeSpeed, togglePlayback, presetName, clock, speedLabel, previewCheck } from './model.js';
 
 const $ = selector => document.querySelector(selector);
 const esc = text => String(text).replace(/[&<>"']/g, ch => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[ch]));
@@ -108,6 +108,11 @@ function observationScreen() {
   return `<section class="observation-screen" id="observation-view" aria-label="${o.puzzle ? 'Field study' : 'Observatory'}"><div class="native-preview" style="background-image:url('assets/${system.image}.png')"></div><div class="aim-reticle" aria-hidden="true"></div>${o.lock && o.lock.kind !== 'stars' ? '<div class="sky-lock-brackets" aria-hidden="true"></div>' : ''}${!o.puzzle && o.labels ? `<span class="sky-body-label">${esc(o.lock?.name || system.target)}</span>` : ''}<div id="hud-root">${observationHud()}</div></section>`;
 }
 const nodeLabel = (t, n) => n.parent === null ? 'C' : String(orbitRank(t, n));
+function tidalLockArrow(from, to, radius) {
+  const dx = to.x - from.x, dy = to.y - from.y;
+  const angle = Math.atan2(dy, dx) * 180 / Math.PI;
+  return `<path class="tidal-lock-arrow" d="M-9 -5L0 0L-9 5" transform="translate(${from.x + dx * .57} ${from.y + dy * .57}) rotate(${angle}) scale(${Math.min(1, radius / 100)})" fill="none" stroke="var(--ok)" stroke-width="1.5" stroke-linecap="round" vector-effect="non-scaling-stroke"/>`;
+}
 function theorySvg() {
   const t = currentTheory();
   let svg = '<defs><pattern id="diagram-grid" width="32" height="32" patternUnits="userSpaceOnUse"><circle cx="1" cy="1" r=".7" fill="#b7c7ff" opacity=".2"/></pattern></defs><rect width="1000" height="660" fill="url(#diagram-grid)"/>';
@@ -115,6 +120,8 @@ function theorySvg() {
     const p = t.nodes.find(p => p.id === n.parent);
     const radius = Math.hypot(n.x - p.x, n.y - p.y);
     svg += `<circle cx="${p.x}" cy="${p.y}" r="${radius}" fill="none" stroke="var(--line)" stroke-dasharray="3 7"/><path d="M${p.x} ${p.y}L${n.x} ${n.y}" stroke="var(--line)" stroke-width="1"/>`;
+    if (n.lockedToParent === true) svg += tidalLockArrow(n, p, radius);
+    if (n.parentLockedToObject === true) svg += tidalLockArrow(p, n, radius);
   }
   for (const n of t.nodes) {
     svg += `<g data-node="${n.id}" class="theory-node ${t.selected === n.id ? 'selected' : ''}" role="button" tabindex="0" aria-label="Object ${nodeLabel(t, n)}${n.star ? ', star' : ''}${n.rings ? ', rings' : ''}${t.viewer === n.id ? ', viewer' : ''}" transform="translate(${n.x} ${n.y})"><circle class="node-selection" r="26"/><circle class="node-disc ${n.star ? 'is-star' : ''}" r="18"/>`;
@@ -126,7 +133,11 @@ function theorySvg() {
 }
 function inspector() {
   const t = currentTheory(), n = t.nodes.find(n => n.id === t.selected), parent = t.nodes.find(p => p.id === n.parent);
-  return `<header><span>Selected object</span><b>${nodeLabel(t, n)}</b></header><dl><dt>Role</dt><dd>${n.parent === null ? 'Centre' : n.star ? 'Star' : 'Orbiting body'}</dd><dt>Orbits</dt><dd>${parent ? nodeLabel(t, parent) : '—'}</dd><dt>Orbit order</dt><dd>${n.parent === null ? '—' : `${orbitRank(t, n)} of ${t.nodes.filter(p => p.parent === n.parent).length}`}</dd><dt>Satellites</dt><dd>${t.nodes.filter(p => p.parent === n.id).length}</dd><dt>Viewer</dt><dd class="${t.viewer === n.id ? 'accent-green' : ''}">${t.viewer === n.id ? 'you are here' : 'not here'}</dd></dl><div class="inspector-traits">${button(`${icon('star')} Is star ${toggleStatic(n.star)}`, 'trait-star', `aria-pressed="${n.star}"`, n.star ? 'active' : '')}${button(`${icon('rings')} Has rings ${toggleStatic(n.rings)}`, 'trait-rings', `aria-pressed="${n.rings}"`, n.rings ? 'active' : '')}</div>`;
+  const tidalLock = parent ? `<div class="inspector-traits" role="group" aria-label="Tidal lock"><span class="eyebrow" aria-hidden="true">Tidal lock</span>${[['lockedToParent', 'Object locks to parent'], ['parentLockedToObject', 'Parent locks to object']].map(([direction, label]) => {
+    const on = n[direction] === true;
+    return button(`${label} ${toggleStatic(on)}`, 'toggle-tidal-lock', `data-value="${direction}" aria-pressed="${on}"`, on ? 'active' : '');
+  }).join('')}</div>` : '';
+  return `<header><span>Selected object</span><b>${nodeLabel(t, n)}</b></header><dl><dt>Role</dt><dd>${n.parent === null ? 'Centre' : n.star ? 'Star' : 'Orbiting body'}</dd><dt>Orbits</dt><dd>${parent ? nodeLabel(t, parent) : '—'}</dd><dt>Orbit order</dt><dd>${n.parent === null ? '—' : `${orbitRank(t, n)} of ${t.nodes.filter(p => p.parent === n.parent).length}`}</dd><dt>Satellites</dt><dd>${t.nodes.filter(p => p.parent === n.id).length}</dd><dt>Viewer</dt><dd class="${t.viewer === n.id ? 'accent-green' : ''}">${t.viewer === n.id ? 'you are here' : 'not here'}</dd></dl><div class="inspector-traits">${button(`${icon('star')} Is star ${toggleStatic(n.star)}`, 'trait-star', `aria-pressed="${n.star}"`, n.star ? 'active' : '')}${button(`${icon('rings')} Has rings ${toggleStatic(n.rings)}`, 'trait-rings', `aria-pressed="${n.rings}"`, n.rings ? 'active' : '')}</div>${tidalLock}`;
 }
 const toggleStatic = on => `<span class="toggle static ${on ? 'on' : ''}"><span></span></span>`;
 function theoryScreen() {
@@ -138,8 +149,10 @@ function textureScreen() {
   return `<section class="texture-screen"><div class="texture-preview" style="background-image:url('assets/${t.style === 'gas_giant' ? 'saturn' : 'moon'}.png')"></div><aside class="texture-controls panel"><div class="eyebrow">Surface study</div><h1>Planet textures</h1><label>Surface style<select id="texture-style">${['plain', 'gas_giant', 'cratered', 'rocky', 'icy', 'volcanic', 'terran'].map(style => `<option value="${style}" ${style === t.style ? 'selected' : ''}>${style.replace('_', ' ')}</option>`).join('')}</select></label>${[['scale', 'Feature scale', .25, 4, .05], ['roughness', 'Roughness', 0, 1, .01], ['contrast', 'Contrast', .25, 2, .05]].map(([name, label, min, max, step]) => `<label>${label}<output>${t[name].toFixed(2)}</output><input data-texture="${name}" type="range" min="${min}" max="${max}" step="${step}" value="${t[name]}"></label>`).join('')}${button(`${t.rotating ? icon('pause') : icon('play')} ${t.rotating ? 'Pause' : 'Rotate'}`, 'texture-rotate')}${button('Back', 'title')}</aside></section>`;
 }
 function render() {
+  const inspectorScroll = $('#inspector')?.scrollTop;
   document.title = `Stargaze${state.screen === 'title' ? '' : ` · ${state.screen === 'observe' ? state.observation.puzzle ? 'Field study' : 'Observatory' : state.screen[0].toUpperCase() + state.screen.slice(1)}`}`;
   root.innerHTML = ({ title: titleScreen, levels: () => levelsScreen(false), explore: () => levelsScreen(true), settings: settingsScreen, controls: controlsScreen, observe: observationScreen, theory: theoryScreen, texture: textureScreen })[state.screen]();
+  if (inspectorScroll && state.screen === 'theory') $('#inspector').scrollTop = inspectorScroll;
   renderModal(); syncPressed();
 }
 let previousFocus;
@@ -163,7 +176,7 @@ function renderModal() {
   } else if (modal.type === 'result') {
     const score = t.attempts.at(-1);
     eyebrow = `Check ${t.attempts.length} / ${activeTitle()}`; title = 'Check results';
-    content = `<div class="result-layout"><div class="score-dial" style="--score:${score.total}%"><div><strong>${score.total.toFixed(1)}</strong><span>/ 100</span></div></div><div class="score-breakdown">${[['Ordered structure', score.topology, '60%'], ['Star / ring traits', score.traits, '20%'], ['Viewer location', score.viewer ? 100 : 0, '20%']].map(([name, value, weight]) => `<div><span>${name}<small>${weight} of score</small></span><b>${value.toFixed(1)}%</b><i><em style="width:${value}%"></em></i></div>`).join('')}</div></div><p class="muted">Best so far: ${t.best.toFixed(1)} · ${t.attempts.length} check${t.attempts.length === 1 ? '' : 's'}</p><details class="attempt-history"><summary>Attempt history</summary>${t.attempts.map((a, i) => `<p><span>Check ${i + 1}</span><span>${a.total.toFixed(1)} / 100</span></p>`).reverse().join('')}</details>`;
+    content = `<div class="result-layout"><div class="score-dial" style="--score:${score.total}%"><div><strong>${score.total.toFixed(1)}</strong><span>/ 100</span></div></div><div class="score-breakdown">${[['Ordered structure', score.topology, '60%'], ['Stars, rings and tidal locks', score.traits, '20%'], ['Viewer location', score.viewer ? 100 : 0, '20%']].map(([name, value, weight]) => `<div><span>${name}<small>${weight} of score</small></span><b>${value.toFixed(1)}%</b><i><em style="width:${value}%"></em></i></div>`).join('')}</div></div><p class="muted">Best so far: ${t.best.toFixed(1)} · ${t.attempts.length} check${t.attempts.length === 1 ? '' : 's'}</p><details class="attempt-history"><summary>Attempt history</summary>${t.attempts.map((a, i) => `<p><span>Check ${i + 1}</span><span>${a.total.toFixed(1)} / 100</span></p>`).reverse().join('')}</details>`;
     actions = button('Maps', 'result-maps') + button('Observe', 'result-observe') + button(`Back to theory ${key('Esc', 'Escape')}`, 'cancel-modal', '', 'primary');
   } else if (modal.type === 'quit') {
     eyebrow = 'Stargaze'; title = 'Leave Stargaze?'; content = '<p>Your progress is saved in this browser. You can close this tab and return later.</p>';
@@ -230,6 +243,7 @@ export function dispatch(action, payload = {}) {
     case 'viewer': remember(t); t.viewer = t.selected; t.message = 'Viewer placed on the selected object.'; persist(); break;
     case 'trait-star': toggleTrait(t, 'star'); persist(); break;
     case 'trait-rings': toggleTrait(t, 'rings'); persist(); break;
+    case 'toggle-tidal-lock': toggleTidalLock(t, payload.value); persist(); break;
     case 'undo': history(t); persist(); break;
     case 'redo': history(t, true); persist(); break;
     case 'delete': deleteBranch(t); persist(); break;

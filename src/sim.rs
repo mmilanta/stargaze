@@ -168,9 +168,16 @@ pub struct Body {
     pub surface: Option<Surface>,
     /// Align spin with the orbital plane and synchronize it with mean anomaly.
     pub tidally_locked: bool,
-    /// Tidally locked to one of its own moons instead of to its parent:
-    /// that moon's orbit and period. Longitude 0 then faces the moon.
-    pub lock_to: Option<(Elements, f64)>,
+    /// Tidally locked to one of its own moons instead of to its parent.
+    /// Longitude 0 then faces the moon.
+    pub lock_to: Option<MoonLock>,
+}
+
+#[derive(Clone, Copy, Debug)]
+pub struct MoonLock {
+    pub target: usize,
+    pub elements: Elements,
+    pub period_days: f64,
 }
 
 impl Body {
@@ -203,7 +210,10 @@ impl Body {
 
     /// The orbit a tidally locked body's spin follows, and its period.
     pub fn lock_orbit(&self) -> (Elements, f64) {
-        self.lock_to.unwrap_or((self.elements, self.period_days))
+        self.lock_to
+            .map_or((self.elements, self.period_days), |moon| {
+                (moon.elements, moon.period_days)
+            })
     }
 
     /// Orientation of the body's fixed frame in world space.

@@ -1,6 +1,6 @@
 //! Versioned, human-editable scene files. All external distances have explicit units.
 use crate::sim::{
-    AU_KM, Atmosphere, Body, BodyKind, Elements, Rings, Scene, Surface, SurfaceStyle,
+    AU_KM, Atmosphere, Body, BodyKind, Elements, MoonLock, Rings, Scene, Surface, SurfaceStyle,
 };
 use anyhow::{Context, Result, bail, ensure};
 use serde::Deserialize;
@@ -383,7 +383,11 @@ impl System {
                 bodies[target].parent == Some(index),
                 "body '{id}': tidal_lock to '{moon}' requires '{moon}' to orbit '{id}'"
             );
-            bodies[index].lock_to = Some((bodies[target].elements, bodies[target].period_days));
+            bodies[index].lock_to = Some(MoonLock {
+                target,
+                elements: bodies[target].elements,
+                period_days: bodies[target].period_days,
+            });
         }
         ensure!(
             bodies.iter().any(|b| b.kind == BodyKind::Star

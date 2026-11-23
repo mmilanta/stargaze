@@ -116,6 +116,14 @@ export function toggleTrait(t, trait) {
   remember(t); const n = t.nodes.find(n => n.id === t.selected); n[trait] = !n[trait];
   t.message = `${trait === 'star' ? 'Star' : 'Rings'} ${n[trait] ? 'added' : 'removed'}.`;
 }
+export function toggleTidalLock(t, direction) {
+  if (!['lockedToParent', 'parentLockedToObject'].includes(direction)) return;
+  const node = t.nodes.find(n => n.id === t.selected);
+  if (!node || node.parent === null) return;
+  remember(t);
+  node[direction] = node[direction] !== true;
+  t.message = 'Tidal lock updated. Arrows point from the locked body to its partner.';
+}
 export function changeSpeed(o, delta) { o.speed = clamp(o.speed + delta, 0, SPEEDS.length - 1); if (o.speed !== STOP) o.resume = o.speed; }
 export function togglePlayback(o) { if (o.speed === STOP) o.speed = o.resume === STOP ? 5 : o.resume; else { o.resume = o.speed; o.speed = STOP; } }
 export function presetName(settings) { return Object.entries(PRESETS).find(([, p]) => Object.entries(p).every(([k, v]) => settings[k] === v))?.[0] || 'Custom'; }

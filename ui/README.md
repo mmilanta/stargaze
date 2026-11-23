@@ -36,6 +36,8 @@ Or open **http://localhost:5188/?explore=1**. An alternate port works with `npm 
 
 The clear, discard, keep/leave, quit and result dialogs open through their normal controls. Most native shortcuts also work: arrow keys / Enter in menus, Tab for theory, Space for playback, H for the HUD, comma/period for exposure, and S/R/V/Z/Y/X in the editor. Add diagram nodes by right-clicking empty space; select and drag to change orbit order.
 
+Select an orbiting object to mark a tidal lock in either direction. Turn on both directions for a mutual lock. The arrows point from each locked object to its partner.
+
 ## Scope of the preview
 
 The renderer is intentionally excluded. Observation backgrounds are static captures from the Rust project's documentation; speed, FOV, exposure, atmosphere and texture controls demonstrate interface state rather than change a live sky. Locking near the centre previews a body lock; locking elsewhere previews background stars.

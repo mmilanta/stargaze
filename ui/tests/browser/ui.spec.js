@@ -58,6 +58,35 @@ test('theory edits, viewer, checks, undo, and clear confirmation work', async ({
   await expect(page.getByRole('button', { name: /Resume Enter/ })).toBeVisible();
 });
 
+test('tidal locks can point either way on an orbit and survive undo and reload', async ({ page }) => {
+  await page.goto('/#theory');
+  await expect(page.getByRole('group', { name: 'Tidal lock' })).toHaveCount(0);
+  await page.locator('#diagram').click({ button: 'right', position: { x: 300, y: 200 } });
+  const toParent = page.getByRole('button', { name: 'Object locks to parent' });
+  const fromParent = page.getByRole('button', { name: 'Parent locks to object' });
+  const arrows = page.locator('.tidal-lock-arrow');
+  await expect(toParent).toHaveAttribute('aria-pressed', 'false');
+  await expect(fromParent).toHaveAttribute('aria-pressed', 'false');
+  await fromParent.click();
+  await expect(arrows).toHaveCount(1);
+  await toParent.click();
+  await expect(arrows).toHaveCount(2);
+  await page.keyboard.press('KeyZ');
+  await expect(toParent).toHaveAttribute('aria-pressed', 'false');
+  await expect(fromParent).toHaveAttribute('aria-pressed', 'true');
+  await page.keyboard.press('KeyY');
+  await page.reload();
+  await expect(toParent).toHaveAttribute('aria-pressed', 'true');
+  await expect(fromParent).toHaveAttribute('aria-pressed', 'true');
+  await expect(arrows).toHaveCount(2);
+  await page.setViewportSize({ width: 640, height: 480 });
+  const workspace = await page.locator('.theory-workspace').boundingBox();
+  const toggle = await fromParent.boundingBox();
+  expect(toggle.y + toggle.height).toBeLessThan(workspace.y + workspace.height);
+  await fromParent.click();
+  await expect(arrows).toHaveCount(1);
+});
+
 test('Explore is opt-in and search/favorites do not break empty states', async ({ page }) => {
   await page.goto('/?explore=1');
   await page.getByRole('button', { name: /^Explore/ }).click();
