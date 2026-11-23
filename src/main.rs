@@ -4043,7 +4043,6 @@ mod app_tests {
             let l = g.layout(w as f32, h as f32, scale);
             g.key(KeyCode::KeyS, &l, (w as f64 * 0.4, h as f64 * 0.4), scene);
             g.right_click(&l, (w as f64 * 0.4, h as f64 * 0.4));
-            g.key(KeyCode::KeyV, &l, (0.0, 0.0), scene);
             for (name, key) in [
                 ("theory", None),
                 ("score", Some(KeyCode::Enter)),
@@ -4053,6 +4052,9 @@ mod app_tests {
                 g.dismiss_result();
                 if let Some(key) = key {
                     g.key(key, &l, (0.0, 0.0), &app.state.scene);
+                }
+                if name == "score" {
+                    assert!(g.result_open);
                 }
                 let (_, vertices) = app.build_frame(w, h);
                 let path = out

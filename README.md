@@ -381,6 +381,7 @@ restores its saved progress; Play on the main menu opens Levels.
 In a field study, **Theory [Tab]** opens the full-page diagram. Right-click adds
 an orbiting body under the selected parent; drag changes orbit order. The bar
 includes star/ring traits, viewer placement, undo/redo, delete, clear and check.
+The inspector also lets you mark tidal locks on each orbit.
 Leaving offers **Keep & leave**, **Discard & leave**, or **Cancel**. Each level
 keeps its own theory, score history, best score, camera, exposure and observation
 time. Named targets and physical details remain hidden in puzzle mode.
@@ -692,27 +693,32 @@ directly. Named bodies and physical details stay hidden.
 - **Is star [S]** and **Has rings [R]** switch the selected object's traits.
   The bar and inspector share the switches. Hover previews the diagram change;
   stars have gold rays and rings have an oval. These are guesses.
+- Select an orbiting object and use **Tidal lock** in the inspector. **Object locks
+  to parent** marks the selected object as tidally locked to what it orbits.
+  **Parent locks to object** marks the reverse. Turn on both for a mutual lock.
+  Each arrow points from the locked body to its partner.
 - **Viewer here [V]** places the observer. **Delete [Del]** removes a branch;
   **Undo [Z]** and **Redo [Y]** restore edits, including whole drags.
 - **Clear all [X]** asks for confirmation and reports how many orbiting objects
   will be removed. Enter clears, Esc cancels; clearing is undoable.
 - **Check theory [Enter]** opens a score dial, weighted breakdown, hint and
-  attempt history. Scroll or PgUp/PgDn reads older attempts. Esc keeps editing,
-  Tab observes again, and M or Enter chooses another map.
+  attempt history. You can check before placing the viewer and earn points for
+  the rest of the theory. Scroll or PgUp/PgDn reads older attempts. Esc keeps
+  editing, Tab observes again, and M or Enter chooses another map.
 
-Ordered structure contributes 60 points, star/ring traits contribute 20, and
-viewer placement contributes 20. Starting at the root, each child is matched to
-the child at the same inner-to-outer rank; this repeats for every parent. Missing
-or extra objects and misplaced satellite families reduce structural credit.
-Trait credit counts correct star and ring flags at matched positions, with
-missing or extra nodes also losing credit. Viewer credit requires the same
-complete sequence of orbital ranks from the root: standing on the first moon
-is different from standing on the third, even if those moons have no satellites.
+Ordered structure contributes 60 points, stars, rings and tidal locks contribute
+20, and viewer placement contributes 20. Starting at the root, the scorer
+matches the most bodies it can while preserving parent links and the relative
+order of siblings. It can skip a missing or extra orbit and still match the
+rest of the family. Trait matches and then closeness in orbit rank break ties.
+Viewer credit requires the marked object to match the observation site in that
+same alignment. Results report matched bodies, missing and extra bodies, and
+trait mismatches on the matched bodies.
 
 Names, physical radii, and exact orbital distances are not scored. Diagram
 distances determine the relative ordering; absolute map scale does not matter. Orbital **order** is scored, using semi-major axes from the scene;
-equal-sized orbits retain their configuration order. Invisible barycentres
-count as nodes and should have Star and Has rings turned off.
+equal-sized orbits retain their configuration order. In binary-star systems,
+draw the primary star at the centre and its companion on the innermost orbit.
 
 The editor supports 64 diagram nodes. The observer remains on the configured
 surface; saved progress restores the theory and telescope on the next launch.
